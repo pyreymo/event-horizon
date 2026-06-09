@@ -21,8 +21,7 @@ public class ConfigWindow : Window, IDisposable
     public ConfigWindow(Plugin plugin, IDataManager dataManager)
         : base($"{Loc.Text("Config.Title")}###EventHorizonConfig")
     {
-        Flags = ImGuiWindowFlags.NoCollapse;
-        Size = new Vector2(430, 300);
+        Size = new Vector2(640, 1000);
         SizeCondition = ImGuiCond.FirstUseEver;
 
         this.plugin = plugin;
@@ -50,6 +49,8 @@ public class ConfigWindow : Window, IDisposable
             SaveAndRefresh();
         }
 
+        DrawStatusOverview();
+
         if (!configuration.HideAllOtherPlayers)
         {
             return;
@@ -61,6 +62,7 @@ public class ConfigWindow : Window, IDisposable
 
         ImGui.Indent();
         DrawLowPlayerCountRule();
+        DrawVisiblePlayerLimitRule();
         ImGui.Spacing();
         DrawFriendKeepRule();
         DrawPartyKeepRule();
@@ -77,6 +79,39 @@ public class ConfigWindow : Window, IDisposable
     #endregion
 
     #region Keep Rules
+
+    private void DrawStatusOverview()
+    {
+        var currentPlayerCount = ObjectTableStats.CurrentPlayerCount();
+
+        ImGui.Spacing();
+        if (ImGui.BeginTable("###EventHorizonStatusOverview", 2, ImGuiTableFlags.SizingStretchSame))
+        {
+            ImGui.TableNextColumn();
+            ImGui.TextDisabled(
+                string.Format(Loc.Text("Config.CurrentPlayerCount"), currentPlayerCount)
+            );
+
+            ImGui.TableNextColumn();
+            ImGui.TextDisabled(
+                string.Format(Loc.Text("Config.HiddenPlayerCount"), plugin.HiddenPlayerCount)
+            );
+
+            ImGui.EndTable();
+        }
+
+        if (IsLowPlayerCountCullingSuspended(currentPlayerCount))
+        {
+            ImGui.TextColored(warningTextColor, Loc.Text("Config.LowPlayerCountCullingSuspended"));
+        }
+    }
+
+    private bool IsLowPlayerCountCullingSuspended(int currentPlayerCount)
+    {
+        return configuration.HideAllOtherPlayers
+            && configuration.DisableCullingBelowPlayerCount
+            && currentPlayerCount < configuration.DisableCullingPlayerCountThreshold;
+    }
 
     private void DrawLowPlayerCountRule()
     {
@@ -118,15 +153,36 @@ public class ConfigWindow : Window, IDisposable
             SaveAndRefresh();
         }
 
-        ImGui.SameLine();
-        var currentPlayerCount = ObjectTableStats.CurrentPlayerCount();
-        ImGui.TextDisabled(
-            string.Format(Loc.Text("Config.CurrentPlayerCount"), currentPlayerCount)
-        );
+        ImGui.Unindent();
+    }
 
-        if (currentPlayerCount < configuration.DisableCullingPlayerCountThreshold)
+    private void DrawVisiblePlayerLimitRule()
+    {
+        var limitVisiblePlayerCount = configuration.LimitVisiblePlayerCount;
+        if (ImGui.Checkbox(Loc.Text("Config.LimitVisiblePlayerCount"), ref limitVisiblePlayerCount))
         {
-            ImGui.TextColored(warningTextColor, Loc.Text("Config.LowPlayerCountCullingSuspended"));
+            configuration.LimitVisiblePlayerCount = limitVisiblePlayerCount;
+            SaveAndRefresh();
+        }
+        DrawHelpMarker(Loc.Text("Config.LimitVisiblePlayerCount.Help"));
+
+        if (!configuration.LimitVisiblePlayerCount)
+        {
+            return;
+        }
+
+        ImGui.Indent();
+
+        ImGui.SetNextItemWidth(120f);
+        var limit = configuration.VisiblePlayerCountLimit;
+        if (ImGui.SliderInt(Loc.Text("Config.VisiblePlayerCountLimit"), ref limit, 1, 200))
+        {
+            configuration.VisiblePlayerCountLimit = Math.Clamp(limit, 1, 200);
+        }
+
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            SaveAndRefresh();
         }
 
         ImGui.Unindent();

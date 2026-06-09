@@ -17,6 +17,7 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
     private delegate void* UpdateObjectArraysDelegate(GameObjectManager* objectManager);
 
     public bool NeedsDynamicRefresh => objectCuller.NeedsDynamicRefresh;
+    public int HiddenPlayerCount => objectCuller.HiddenPlayerCount;
 
     public UpdateObjectArraysHook(
         IGameInteropProvider gameInteropProvider,

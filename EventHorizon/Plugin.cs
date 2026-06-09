@@ -55,6 +55,7 @@ public sealed class Plugin : IDalamudPlugin
     #region State
 
     public Configuration Configuration { get; init; }
+    public int HiddenPlayerCount => UpdateObjectArraysHook.HiddenPlayerCount;
 
     public readonly WindowSystem WindowSystem = new("EventHorizon");
     private ConfigWindow ConfigWindow { get; init; }

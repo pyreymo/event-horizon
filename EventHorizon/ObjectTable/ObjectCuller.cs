@@ -26,8 +26,25 @@ internal sealed unsafe class ObjectCuller(
         targetManager
     );
     private readonly Dictionary<nint, HiddenObjectRecord> hiddenObjects = [];
+    private int visibleOtherPlayersThisScan;
 
     public bool NeedsDynamicRefresh => IsCullingEnabled() && playerKeepRules.NeedsDynamicRefresh;
+    public int HiddenPlayerCount
+    {
+        get
+        {
+            var count = 0;
+            foreach (var record in hiddenObjects.Values)
+            {
+                if (record.ObjectKind == ObjectKind.Pc)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+    }
 
     #region Lifecycle
 
@@ -52,6 +69,7 @@ internal sealed unsafe class ObjectCuller(
         }
 
         playerKeepRules.BeforeUpdate();
+        visibleOtherPlayersThisScan = 0;
 
         for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
         {
@@ -206,7 +224,27 @@ internal sealed unsafe class ObjectCuller(
             && IsCullableOtherPlayerRelatedObject(gameObject, index)
             && !IsLocalPlayerReservedSlot(index)
             && !IsOwnedByLocalPlayer(gameObject)
-            && !playerKeepRules.ShouldKeep(gameObject);
+            && (
+                !playerKeepRules.ShouldKeep(gameObject)
+                || ShouldHideByVisiblePlayerLimit(gameObject, index)
+            );
+    }
+
+    private bool ShouldHideByVisiblePlayerLimit(GameObject* gameObject, int index)
+    {
+        if (!configuration.LimitVisiblePlayerCount || !IsOtherPlayerObject(gameObject, index))
+        {
+            return false;
+        }
+
+        var visiblePlayerLimit = Math.Clamp(configuration.VisiblePlayerCountLimit, 1, 200);
+        if (visibleOtherPlayersThisScan < visiblePlayerLimit)
+        {
+            visibleOtherPlayersThisScan++;
+            return false;
+        }
+
+        return true;
     }
 
     #endregion
@@ -279,13 +317,19 @@ internal sealed unsafe class ObjectCuller(
     private readonly record struct HiddenObjectRecord(
         ulong GameObjectId,
         uint EntityId,
+        ObjectKind ObjectKind,
         VisibilityFlags AddedFlags
     )
     {
         public static HiddenObjectRecord From(GameObject* gameObject, VisibilityFlags targetFlags)
         {
             var addedFlags = targetFlags & ~gameObject->RenderFlags;
-            return new((ulong)gameObject->GetGameObjectId(), gameObject->EntityId, addedFlags);
+            return new(
+                (ulong)gameObject->GetGameObjectId(),
+                gameObject->EntityId,
+                gameObject->ObjectKind,
+                addedFlags
+            );
         }
 
         public bool IsSameObject(GameObject* gameObject) =>
