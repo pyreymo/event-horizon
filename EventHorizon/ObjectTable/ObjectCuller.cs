@@ -1,8 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Numerics;
+using Dalamud.Game.Chat;
 using Dalamud.Plugin.Services;
-using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.ObjectTable;
@@ -10,7 +9,8 @@ namespace EventHorizon.ObjectTable;
 internal sealed unsafe class ObjectCuller(
     Configuration configuration,
     IPlayerState playerState,
-    IObjectTable objectTable
+    IObjectTable objectTable,
+    ITargetManager targetManager
 ) : IDisposable
 {
     private const VisibilityFlags InvisibleFlag =
@@ -18,11 +18,14 @@ internal sealed unsafe class ObjectCuller(
 
     private readonly Configuration configuration = configuration;
     private readonly IPlayerState playerState = playerState;
-    private readonly IObjectTable objectTable = objectTable;
+    private readonly PlayerKeepRules playerKeepRules = new(
+        configuration,
+        objectTable,
+        targetManager
+    );
     private readonly Dictionary<nint, HiddenObjectRecord> hiddenObjects = [];
-    private readonly HashSet<ulong> nearbyKeptPlayers = [];
 
-    public bool NeedsDynamicRefresh => IsCullingEnabled() && configuration.KeepNearbyPlayers;
+    public bool NeedsDynamicRefresh => IsCullingEnabled() && playerKeepRules.NeedsDynamicRefresh;
 
     #region Lifecycle
 
@@ -39,6 +42,8 @@ internal sealed unsafe class ObjectCuller(
             Reset(manager);
             return;
         }
+
+        playerKeepRules.BeforeUpdate();
 
         for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
         {
@@ -73,6 +78,16 @@ internal sealed unsafe class ObjectCuller(
         }
 
         Clear();
+    }
+
+    public void ClearRuleState()
+    {
+        playerKeepRules.Clear();
+    }
+
+    public void RecordChatMessage(IHandleableChatMessage message)
+    {
+        playerKeepRules.RecordChatMessage(message);
     }
 
     public void Dispose()
@@ -150,7 +165,7 @@ internal sealed unsafe class ObjectCuller(
     private void Clear()
     {
         hiddenObjects.Clear();
-        ClearKeepState();
+        playerKeepRules.Clear();
     }
 
     #endregion
@@ -170,113 +185,12 @@ internal sealed unsafe class ObjectCuller(
             && IsPlayerRelatedSlot(index)
             && !IsLocalPlayerReservedSlot(index)
             && !IsOwnedByLocalPlayer(gameObject)
-            && !ShouldKeepPlayer(gameObject);
-    }
-
-    #endregion
-
-    #region Player Keep Rules
-
-    private bool ShouldKeepPlayer(GameObject* gameObject)
-    {
-        return IsPlayerObject(gameObject)
-            && (
-                ShouldKeepFriend(gameObject)
-                || ShouldKeepPartyOrAllianceMember(gameObject)
-                || ShouldKeepNearbyPlayer(gameObject)
-                || ShouldKeepByRace(gameObject)
-            );
-    }
-
-    private bool ShouldKeepFriend(GameObject* gameObject)
-    {
-        if (!configuration.KeepFriends)
-        {
-            return false;
-        }
-
-        return ((BattleChara*)gameObject)->IsFriend;
-    }
-
-    private bool ShouldKeepPartyOrAllianceMember(GameObject* gameObject)
-    {
-        if (!configuration.KeepPartyAndAllianceMembers)
-        {
-            return false;
-        }
-
-        var player = (BattleChara*)gameObject;
-        return player->IsPartyMember || player->IsAllianceMember;
-    }
-
-    private bool ShouldKeepNearbyPlayer(GameObject* gameObject)
-    {
-        if (!configuration.KeepNearbyPlayers)
-        {
-            return false;
-        }
-
-        var localPlayer = objectTable.LocalPlayer;
-        if (localPlayer == null)
-        {
-            return false;
-        }
-
-        var player = (BattleChara*)gameObject;
-        var playerId = (ulong)((GameObject*)player)->GetGameObjectId();
-
-        var range = Math.Clamp(configuration.KeepNearbyPlayersRange, 1f, 50f);
-        var distanceSq = Vector3.DistanceSquared(localPlayer.Position, player->Position);
-
-        if (nearbyKeptPlayers.Contains(playerId))
-        {
-            if (distanceSq <= range * range)
-            {
-                return true;
-            }
-
-            nearbyKeptPlayers.Remove(playerId);
-            return false;
-        }
-
-        if (distanceSq > range * range)
-        {
-            return false;
-        }
-
-        nearbyKeptPlayers.Add(playerId);
-        return true;
-    }
-
-    private bool ShouldKeepByRace(GameObject* gameObject)
-    {
-        if (!configuration.KeepSelectedRaces)
-        {
-            return false;
-        }
-
-        var player = (BattleChara*)gameObject;
-        var customizeData = player->DrawData.CustomizeData;
-        return configuration.KeptRaceSex.Contains(
-            RaceSexFilter.Pack(customizeData.Race, customizeData.Sex)
-        );
-    }
-
-    #endregion
-
-    #region Keep State
-
-    private void ClearKeepState()
-    {
-        nearbyKeptPlayers.Clear();
+            && !playerKeepRules.ShouldKeep(gameObject);
     }
 
     #endregion
 
     #region Object Helpers
-
-    private static bool IsPlayerObject(GameObject* gameObject) =>
-        gameObject->ObjectKind == ObjectKind.Pc;
 
     private static bool IsPlayerRelatedSlot(int index) => index is >= 0 and <= 199;
 

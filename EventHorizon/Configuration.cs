@@ -12,9 +12,13 @@ public class Configuration : IPluginConfiguration
     public bool HideAllOtherPlayers { get; set; } = true;
     public bool KeepFriends { get; set; } = true;
     public bool KeepPartyAndAllianceMembers { get; set; } = true;
+    public bool KeepRecruitingPlayers { get; set; } = true;
+    public bool KeepRecentChatPlayers { get; set; } = true;
     public bool KeepNearbyPlayers { get; set; }
     public float KeepNearbyPlayersRange { get; set; } = 5f;
     public bool PreviewNearbyPlayerRange { get; set; }
+    public bool KeepTargetAndFocusPlayers { get; set; } = true;
+    public bool KeepPlayersTargetingMe { get; set; } = true;
     public bool KeepSelectedRaces { get; set; }
     public HashSet<byte> KeptRaceSex { get; set; } = [];
 

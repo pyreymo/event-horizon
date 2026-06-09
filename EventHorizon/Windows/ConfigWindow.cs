@@ -61,6 +61,10 @@ public class ConfigWindow : Window, IDisposable
         ImGui.Indent();
         DrawFriendKeepRule();
         DrawPartyKeepRule();
+        DrawRecruitingKeepRule();
+        DrawRecentChatKeepRule();
+        DrawTargetKeepRule();
+        DrawTargetingMeKeepRule();
         DrawNearbyPlayerKeepRule();
         ImGui.Spacing();
         DrawRaceFilter();
@@ -94,6 +98,54 @@ public class ConfigWindow : Window, IDisposable
             configuration.KeepPartyAndAllianceMembers = keepPartyAndAllianceMembers;
             SaveAndRefresh();
         }
+    }
+
+    private void DrawRecruitingKeepRule()
+    {
+        var keepRecruitingPlayers = configuration.KeepRecruitingPlayers;
+        if (ImGui.Checkbox(Loc.Text("Config.KeepRecruitingPlayers"), ref keepRecruitingPlayers))
+        {
+            configuration.KeepRecruitingPlayers = keepRecruitingPlayers;
+            SaveAndRefresh();
+        }
+    }
+
+    private void DrawRecentChatKeepRule()
+    {
+        var keepRecentChatPlayers = configuration.KeepRecentChatPlayers;
+        if (ImGui.Checkbox(Loc.Text("Config.KeepRecentChatPlayers"), ref keepRecentChatPlayers))
+        {
+            configuration.KeepRecentChatPlayers = keepRecentChatPlayers;
+            SaveAndRefresh();
+        }
+        DrawHelpMarker(Loc.Text("Config.KeepRecentChatPlayers.Help"));
+    }
+
+    private void DrawTargetKeepRule()
+    {
+        var keepTargetAndFocusPlayers = configuration.KeepTargetAndFocusPlayers;
+        if (
+            ImGui.Checkbox(
+                Loc.Text("Config.KeepTargetAndFocusPlayers"),
+                ref keepTargetAndFocusPlayers
+            )
+        )
+        {
+            configuration.KeepTargetAndFocusPlayers = keepTargetAndFocusPlayers;
+            SaveAndRefresh();
+        }
+        DrawHelpMarker(Loc.Text("Config.KeepTargetAndFocusPlayers.Help"));
+    }
+
+    private void DrawTargetingMeKeepRule()
+    {
+        var keepPlayersTargetingMe = configuration.KeepPlayersTargetingMe;
+        if (ImGui.Checkbox(Loc.Text("Config.KeepPlayersTargetingMe"), ref keepPlayersTargetingMe))
+        {
+            configuration.KeepPlayersTargetingMe = keepPlayersTargetingMe;
+            SaveAndRefresh();
+        }
+        DrawHelpMarker(Loc.Text("Config.KeepPlayersTargetingMe.Help"));
     }
 
     private void DrawNearbyPlayerKeepRule()
@@ -141,6 +193,23 @@ public class ConfigWindow : Window, IDisposable
         }
 
         ImGui.Unindent();
+    }
+
+    private static void DrawHelpMarker(string text)
+    {
+        ImGui.SameLine();
+        ImGui.TextDisabled("(?)");
+
+        if (!ImGui.IsItemHovered())
+        {
+            return;
+        }
+
+        ImGui.BeginTooltip();
+        ImGui.PushTextWrapPos(ImGui.GetFontSize() * 32f);
+        ImGui.TextUnformatted(text);
+        ImGui.PopTextWrapPos();
+        ImGui.EndTooltip();
     }
 
     #endregion
@@ -346,7 +415,7 @@ public class ConfigWindow : Window, IDisposable
     private void SaveAndRefresh()
     {
         configuration.Save();
-        plugin.RefreshObjectCulling();
+        plugin.RefreshObjectCulling(resetRuleState: true);
     }
 
     #endregion

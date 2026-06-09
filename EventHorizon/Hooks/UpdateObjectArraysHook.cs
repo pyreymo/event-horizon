@@ -1,4 +1,5 @@
 using System;
+using Dalamud.Game.Chat;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using EventHorizon.ObjectTable;
@@ -21,10 +22,11 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         IGameInteropProvider gameInteropProvider,
         Configuration configuration,
         IPlayerState playerState,
-        IObjectTable objectTable
+        IObjectTable objectTable,
+        ITargetManager targetManager
     )
     {
-        objectCuller = new ObjectCuller(configuration, playerState, objectTable);
+        objectCuller = new ObjectCuller(configuration, playerState, objectTable, targetManager);
         hook = gameInteropProvider.HookFromSignature<UpdateObjectArraysDelegate>(Signature, Detour);
     }
 
@@ -33,9 +35,19 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         hook.Enable();
     }
 
-    public void Refresh()
+    public void Refresh(bool resetRuleState = false)
     {
+        if (resetRuleState)
+        {
+            objectCuller.ClearRuleState();
+        }
+
         OnObjectArraysUpdated(GameObjectManager.Instance());
+    }
+
+    public void RecordChatMessage(IHandleableChatMessage message)
+    {
+        objectCuller.RecordChatMessage(message);
     }
 
     public void Dispose()

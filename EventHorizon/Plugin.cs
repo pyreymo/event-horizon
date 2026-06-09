@@ -1,4 +1,5 @@
 using System;
+using Dalamud.Game.Chat;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
@@ -13,7 +14,7 @@ namespace EventHorizon;
 
 public sealed class Plugin : IDalamudPlugin
 {
-    private const int DynamicCullingRefreshIntervalMs = 250;
+    private const int DynamicCullingRefreshIntervalMs = 200;
     private const string PrimaryCommandName = "/eventhorizon";
     private const string ShortCommandName = "/eh";
 
@@ -33,6 +34,12 @@ public sealed class Plugin : IDalamudPlugin
 
     [PluginService]
     internal static IObjectTable ObjectTable { get; private set; } = null!;
+
+    [PluginService]
+    internal static ITargetManager TargetManager { get; private set; } = null!;
+
+    [PluginService]
+    internal static IChatGui ChatGui { get; private set; } = null!;
 
     [PluginService]
     internal static IFramework Framework { get; private set; } = null!;
@@ -69,7 +76,8 @@ public sealed class Plugin : IDalamudPlugin
             GameInteropProvider,
             Configuration,
             PlayerState,
-            ObjectTable
+            ObjectTable,
+            TargetManager
         );
         WorldOverlay = new WorldOverlay(PluginInterface, Configuration, ObjectTable);
 
@@ -88,6 +96,7 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi += ToggleConfigUi;
         PluginInterface.LanguageChanged += OnLanguageChanged;
+        ChatGui.ChatMessage += OnChatMessage;
         Framework.Update += OnFrameworkUpdate;
         UpdateObjectArraysHook.Enable();
 
@@ -100,6 +109,7 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleConfigUi;
         PluginInterface.LanguageChanged -= OnLanguageChanged;
+        ChatGui.ChatMessage -= OnChatMessage;
         Framework.Update -= OnFrameworkUpdate;
 
         WindowSystem.RemoveAllWindows();
@@ -145,11 +155,11 @@ public sealed class Plugin : IDalamudPlugin
 
     #endregion
 
-    #region Object Culling
+    #region Culling
 
-    public void RefreshObjectCulling()
+    public void RefreshObjectCulling(bool resetRuleState = false)
     {
-        UpdateObjectArraysHook.Refresh();
+        UpdateObjectArraysHook.Refresh(resetRuleState);
     }
 
     private void OnFrameworkUpdate(IFramework framework)
@@ -172,6 +182,11 @@ public sealed class Plugin : IDalamudPlugin
     private bool NeedsDynamicCullingRefresh()
     {
         return UpdateObjectArraysHook.NeedsDynamicRefresh;
+    }
+
+    private void OnChatMessage(IHandleableChatMessage message)
+    {
+        UpdateObjectArraysHook.RecordChatMessage(message);
     }
 
     #endregion
