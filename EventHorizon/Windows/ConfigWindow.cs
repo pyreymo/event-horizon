@@ -15,6 +15,8 @@ public class ConfigWindow : Window, IDisposable
     private readonly Configuration configuration;
     private readonly IDataManager dataManager;
 
+    #region Lifecycle
+
     public ConfigWindow(Plugin plugin, IDataManager dataManager)
         : base($"{Loc.Text("Config.Title")}###EventHorizonConfig")
     {
@@ -28,6 +30,10 @@ public class ConfigWindow : Window, IDisposable
     }
 
     public void Dispose() { }
+
+    #endregion
+
+    #region Draw
 
     public override void PreDraw()
     {
@@ -60,6 +66,10 @@ public class ConfigWindow : Window, IDisposable
         DrawRaceFilter();
         ImGui.Unindent();
     }
+
+    #endregion
+
+    #region Keep Rules
 
     private void DrawFriendKeepRule()
     {
@@ -132,6 +142,10 @@ public class ConfigWindow : Window, IDisposable
 
         ImGui.Unindent();
     }
+
+    #endregion
+
+    #region Race Filter
 
     private void DrawRaceFilter()
     {
@@ -249,6 +263,10 @@ public class ConfigWindow : Window, IDisposable
         SaveAndRefresh();
     }
 
+    #endregion
+
+    #region Race Filter Actions
+
     private void SetAllRaceSexFilters(bool selected)
     {
         configuration.KeptRaceSex.Clear();
@@ -321,11 +339,19 @@ public class ConfigWindow : Window, IDisposable
         }
     }
 
+    #endregion
+
+    #region Persistence
+
     private void SaveAndRefresh()
     {
         configuration.Save();
         plugin.RefreshObjectCulling();
     }
+
+    #endregion
+
+    #region Data
 
     private string GetRaceName(byte race)
     {
@@ -336,4 +362,6 @@ public class ConfigWindow : Window, IDisposable
 
         return Loc.Text("Config.Race.Unknown");
     }
+
+    #endregion
 }

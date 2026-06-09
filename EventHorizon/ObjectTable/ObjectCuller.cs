@@ -22,6 +22,8 @@ internal sealed unsafe class ObjectCuller(
     private readonly Dictionary<nint, HiddenObjectRecord> hiddenObjects = [];
     private readonly HashSet<ulong> nearbyKeptPlayers = [];
 
+    public bool NeedsDynamicRefresh => IsCullingEnabled() && configuration.KeepNearbyPlayers;
+
     #region Lifecycle
 
     public void Update(GameObjectManager* manager)
@@ -32,7 +34,7 @@ internal sealed unsafe class ObjectCuller(
             return;
         }
 
-        if (!HasAnyCullRuleEnabled())
+        if (!IsCullingEnabled())
         {
             Reset(manager);
             return;
@@ -148,14 +150,14 @@ internal sealed unsafe class ObjectCuller(
     private void Clear()
     {
         hiddenObjects.Clear();
-        nearbyKeptPlayers.Clear();
+        ClearKeepState();
     }
 
     #endregion
 
-    #region Helpers
+    #region Culling Rules
 
-    private bool HasAnyCullRuleEnabled()
+    private bool IsCullingEnabled()
     {
         return configuration.HideAllOtherPlayers;
     }
@@ -163,20 +165,32 @@ internal sealed unsafe class ObjectCuller(
     private bool ShouldHideObject(GameObject* gameObject, int index)
     {
         return gameObject != null
-            && HasAnyCullRuleEnabled()
+            && IsCullingEnabled()
             && playerState.IsLoaded
             && IsPlayerRelatedSlot(index)
             && !IsLocalPlayerReservedSlot(index)
             && !IsOwnedByLocalPlayer(gameObject)
-            && !ShouldKeepFriend(gameObject)
-            && !ShouldKeepPartyOrAllianceMember(gameObject)
-            && !ShouldKeepNearbyPlayer(gameObject)
-            && !ShouldKeepByRace(gameObject);
+            && !ShouldKeepPlayer(gameObject);
+    }
+
+    #endregion
+
+    #region Player Keep Rules
+
+    private bool ShouldKeepPlayer(GameObject* gameObject)
+    {
+        return IsPlayerObject(gameObject)
+            && (
+                ShouldKeepFriend(gameObject)
+                || ShouldKeepPartyOrAllianceMember(gameObject)
+                || ShouldKeepNearbyPlayer(gameObject)
+                || ShouldKeepByRace(gameObject)
+            );
     }
 
     private bool ShouldKeepFriend(GameObject* gameObject)
     {
-        if (!configuration.KeepFriends || gameObject->ObjectKind != ObjectKind.Pc)
+        if (!configuration.KeepFriends)
         {
             return false;
         }
@@ -186,7 +200,7 @@ internal sealed unsafe class ObjectCuller(
 
     private bool ShouldKeepPartyOrAllianceMember(GameObject* gameObject)
     {
-        if (!configuration.KeepPartyAndAllianceMembers || gameObject->ObjectKind != ObjectKind.Pc)
+        if (!configuration.KeepPartyAndAllianceMembers)
         {
             return false;
         }
@@ -197,7 +211,7 @@ internal sealed unsafe class ObjectCuller(
 
     private bool ShouldKeepNearbyPlayer(GameObject* gameObject)
     {
-        if (!configuration.KeepNearbyPlayers || gameObject->ObjectKind != ObjectKind.Pc)
+        if (!configuration.KeepNearbyPlayers)
         {
             return false;
         }
@@ -236,7 +250,7 @@ internal sealed unsafe class ObjectCuller(
 
     private bool ShouldKeepByRace(GameObject* gameObject)
     {
-        if (!configuration.KeepSelectedRaces || gameObject->ObjectKind != ObjectKind.Pc)
+        if (!configuration.KeepSelectedRaces)
         {
             return false;
         }
@@ -247,6 +261,22 @@ internal sealed unsafe class ObjectCuller(
             RaceSexFilter.Pack(customizeData.Race, customizeData.Sex)
         );
     }
+
+    #endregion
+
+    #region Keep State
+
+    private void ClearKeepState()
+    {
+        nearbyKeptPlayers.Clear();
+    }
+
+    #endregion
+
+    #region Object Helpers
+
+    private static bool IsPlayerObject(GameObject* gameObject) =>
+        gameObject->ObjectKind == ObjectKind.Pc;
 
     private static bool IsPlayerRelatedSlot(int index) => index is >= 0 and <= 199;
 

@@ -14,6 +14,10 @@ namespace EventHorizon;
 public sealed class Plugin : IDalamudPlugin
 {
     private const int DynamicCullingRefreshIntervalMs = 250;
+    private const string PrimaryCommandName = "/eventhorizon";
+    private const string ShortCommandName = "/eh";
+
+    #region Services
 
     [PluginService]
     internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
@@ -39,8 +43,9 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService]
     internal static IPluginLog Log { get; private set; } = null!;
 
-    private const string PrimaryCommandName = "/eventhorizon";
-    private const string ShortCommandName = "/eh";
+    #endregion
+
+    #region State
 
     public Configuration Configuration { get; init; }
 
@@ -49,6 +54,10 @@ public sealed class Plugin : IDalamudPlugin
     private UpdateObjectArraysHook UpdateObjectArraysHook { get; init; }
     private WorldOverlay WorldOverlay { get; init; }
     private long nextDynamicCullingRefresh;
+
+    #endregion
+
+    #region Lifecycle
 
     public Plugin()
     {
@@ -85,6 +94,34 @@ public sealed class Plugin : IDalamudPlugin
         Log.Information("Loaded.", PluginInterface.Manifest.Name);
     }
 
+    public void Dispose()
+    {
+        PluginInterface.UiBuilder.Draw -= OnDraw;
+        PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
+        PluginInterface.UiBuilder.OpenMainUi -= ToggleConfigUi;
+        PluginInterface.LanguageChanged -= OnLanguageChanged;
+        Framework.Update -= OnFrameworkUpdate;
+
+        WindowSystem.RemoveAllWindows();
+        ConfigWindow.Dispose();
+        UpdateObjectArraysHook.Dispose();
+        WorldOverlay.Dispose();
+
+        CommandManager.RemoveHandler(PrimaryCommandName);
+        CommandManager.RemoveHandler(ShortCommandName);
+    }
+
+    #endregion
+
+    #region UI
+
+    private void OnCommand(string command, string args)
+    {
+        ToggleConfigUi();
+    }
+
+    public void ToggleConfigUi() => ConfigWindow.Toggle();
+
     private void OnDraw()
     {
         try
@@ -106,29 +143,9 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
-    public void Dispose()
-    {
-        PluginInterface.UiBuilder.Draw -= OnDraw;
-        PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
-        PluginInterface.UiBuilder.OpenMainUi -= ToggleConfigUi;
-        PluginInterface.LanguageChanged -= OnLanguageChanged;
-        Framework.Update -= OnFrameworkUpdate;
+    #endregion
 
-        WindowSystem.RemoveAllWindows();
-        ConfigWindow.Dispose();
-        UpdateObjectArraysHook.Dispose();
-        WorldOverlay.Dispose();
-
-        CommandManager.RemoveHandler(PrimaryCommandName);
-        CommandManager.RemoveHandler(ShortCommandName);
-    }
-
-    private void OnCommand(string command, string args)
-    {
-        ToggleConfigUi();
-    }
-
-    public void ToggleConfigUi() => ConfigWindow.Toggle();
+    #region Object Culling
 
     public void RefreshObjectCulling()
     {
@@ -154,11 +171,17 @@ public sealed class Plugin : IDalamudPlugin
 
     private bool NeedsDynamicCullingRefresh()
     {
-        return Configuration.HideAllOtherPlayers && Configuration.KeepNearbyPlayers;
+        return UpdateObjectArraysHook.NeedsDynamicRefresh;
     }
+
+    #endregion
+
+    #region Localization
 
     private void OnLanguageChanged(string langCode)
     {
         Loc.Load(PluginInterface);
     }
+
+    #endregion
 }
