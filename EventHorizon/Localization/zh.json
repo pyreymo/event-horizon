@@ -1,0 +1,6 @@
+{
+  "Command.Help.OpenSettings": "打开 Event Horizon 设置。",
+  "Config.Title": "Event Horizon",
+  "Config.Enabled": "启用",
+  "Config.CullingRulesPlaceholder": "剔除规则将在这里添加。"
+}
