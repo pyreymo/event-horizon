@@ -1,0 +1,26 @@
+[
+  {
+    "Author": "pyreymo",
+    "Name": "Event Horizon",
+    "InternalName": "EventHorizon",
+    "AssemblyVersion": "0.1.0.0",
+    "Description": "Cull distant or irrelevant world objects around your character. Use /eventhorizon or /eh to open settings.",
+    "ApplicableVersion": "any",
+    "RepoUrl": "https://github.com/pyreymo/event-horizon",
+    "Tags": [
+      "utility",
+      "performance",
+      "visibility"
+    ],
+    "DalamudApiLevel": 15,
+    "LoadRequiredState": 0,
+    "LoadSync": false,
+    "CanUnloadAsync": false,
+    "LoadPriority": 0,
+    "Punchline": "Cull what doesn't orbit you.",
+    "AcceptsFeedback": true,
+    "DownloadLinkInstall": "https://github.com/pyreymo/event-horizon/releases/download/v0.1.0/EventHorizon.zip",
+    "DownloadLinkUpdate": "https://github.com/pyreymo/event-horizon/releases/download/v0.1.0/EventHorizon.zip",
+    "LastUpdate": "1781005001"
+  }
+]
