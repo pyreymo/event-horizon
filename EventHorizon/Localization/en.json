@@ -1,9 +1,12 @@
 {
   "Command.Help.OpenSettings": "Open Event Horizon settings.",
   "Config.Title": "Event Horizon",
-  "Config.HideAllOtherPlayers": "Hide all other players",
+  "Config.HideAllOtherPlayers": "Hide other players",
+  "Config.KeepFriends": "Keep friends",
+  "Config.KeepPartyAndAllianceMembers": "Keep party/alliance members",
   "Config.KeepNearbyPlayers": "Keep nearby players",
   "Config.KeepNearbyPlayersRange": "Range",
+  "Config.PreviewNearbyPlayerRange": "Preview range",
   "Config.KeepRaceFilter": "Keep checked races",
   "Config.RaceFilter.SelectAll": "All",
   "Config.RaceFilter.Clear": "Clear",
@@ -11,6 +14,5 @@
   "Config.RaceFilter.Race": "Race",
   "Config.RaceFilter.Male": "Male",
   "Config.RaceFilter.Female": "Female",
-  "Config.Race.Unknown": "Unknown",
-  "Config.CullingRulesPlaceholder": "Culling rules will be added here."
+  "Config.Race.Unknown": "Unknown"
 }

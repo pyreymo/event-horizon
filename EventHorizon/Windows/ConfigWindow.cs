@@ -19,7 +19,7 @@ public class ConfigWindow : Window, IDisposable
         : base($"{Loc.Text("Config.Title")}###EventHorizonConfig")
     {
         Flags = ImGuiWindowFlags.NoCollapse;
-        Size = new Vector2(360, 120);
+        Size = new Vector2(430, 300);
         SizeCondition = ImGuiCond.FirstUseEver;
 
         this.plugin = plugin;
@@ -43,15 +43,47 @@ public class ConfigWindow : Window, IDisposable
             SaveAndRefresh();
         }
 
-        if (configuration.HideAllOtherPlayers)
+        if (!configuration.HideAllOtherPlayers)
         {
-            ImGui.Indent();
-            DrawNearbyPlayerKeepRule();
-            DrawRaceFilter();
-            ImGui.Unindent();
+            return;
         }
 
-        ImGui.TextUnformatted(Loc.Text("Config.CullingRulesPlaceholder"));
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Indent();
+        DrawFriendKeepRule();
+        DrawPartyKeepRule();
+        DrawNearbyPlayerKeepRule();
+        ImGui.Spacing();
+        DrawRaceFilter();
+        ImGui.Unindent();
+    }
+
+    private void DrawFriendKeepRule()
+    {
+        var keepFriends = configuration.KeepFriends;
+        if (ImGui.Checkbox(Loc.Text("Config.KeepFriends"), ref keepFriends))
+        {
+            configuration.KeepFriends = keepFriends;
+            SaveAndRefresh();
+        }
+    }
+
+    private void DrawPartyKeepRule()
+    {
+        var keepPartyAndAllianceMembers = configuration.KeepPartyAndAllianceMembers;
+        if (
+            ImGui.Checkbox(
+                Loc.Text("Config.KeepPartyAndAllianceMembers"),
+                ref keepPartyAndAllianceMembers
+            )
+        )
+        {
+            configuration.KeepPartyAndAllianceMembers = keepPartyAndAllianceMembers;
+            SaveAndRefresh();
+        }
     }
 
     private void DrawNearbyPlayerKeepRule()
@@ -68,7 +100,9 @@ public class ConfigWindow : Window, IDisposable
             return;
         }
 
-        ImGui.SetNextItemWidth(160f);
+        ImGui.Indent();
+
+        ImGui.SetNextItemWidth(180f);
         var range = configuration.KeepNearbyPlayersRange;
         if (
             ImGui.SliderFloat(Loc.Text("Config.KeepNearbyPlayersRange"), ref range, 1f, 50f, "%.1f")
@@ -81,6 +115,22 @@ public class ConfigWindow : Window, IDisposable
         {
             SaveAndRefresh();
         }
+
+        ImGui.SameLine();
+
+        var previewNearbyPlayerRange = configuration.PreviewNearbyPlayerRange;
+        if (
+            ImGui.Checkbox(
+                Loc.Text("Config.PreviewNearbyPlayerRange"),
+                ref previewNearbyPlayerRange
+            )
+        )
+        {
+            configuration.PreviewNearbyPlayerRange = previewNearbyPlayerRange;
+            configuration.Save();
+        }
+
+        ImGui.Unindent();
     }
 
     private void DrawRaceFilter()
@@ -96,6 +146,8 @@ public class ConfigWindow : Window, IDisposable
         {
             return;
         }
+
+        ImGui.Indent();
 
         if (ImGui.SmallButton(Loc.Text("Config.RaceFilter.SelectAll")))
         {
@@ -127,6 +179,7 @@ public class ConfigWindow : Window, IDisposable
             )
         )
         {
+            ImGui.Unindent();
             return;
         }
 
@@ -152,6 +205,7 @@ public class ConfigWindow : Window, IDisposable
         }
 
         ImGui.EndTable();
+        ImGui.Unindent();
     }
 
     private void DrawRaceRowHeader(byte race)

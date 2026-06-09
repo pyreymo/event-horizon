@@ -1,9 +1,12 @@
 {
   "Command.Help.OpenSettings": "打开 Event Horizon 设置。",
-  "Config.Title": "Event Horizon",
-  "Config.HideAllOtherPlayers": "屏蔽所有其他玩家",
+  "Config.Title": "事件视界",
+  "Config.HideAllOtherPlayers": "屏蔽其他玩家",
+  "Config.KeepFriends": "保留好友",
+  "Config.KeepPartyAndAllianceMembers": "保留小队、团队队友",
   "Config.KeepNearbyPlayers": "保留附近玩家",
   "Config.KeepNearbyPlayersRange": "范围",
+  "Config.PreviewNearbyPlayerRange": "实时预览范围",
   "Config.KeepRaceFilter": "保留勾选种族",
   "Config.RaceFilter.SelectAll": "全选",
   "Config.RaceFilter.Clear": "清空",
@@ -11,6 +14,5 @@
   "Config.RaceFilter.Race": "种族",
   "Config.RaceFilter.Male": "男",
   "Config.RaceFilter.Female": "女",
-  "Config.Race.Unknown": "未知",
-  "Config.CullingRulesPlaceholder": "剔除规则将在这里添加。"
+  "Config.Race.Unknown": "未知"
 }

@@ -13,7 +13,6 @@ internal sealed unsafe class ObjectCuller(
     IObjectTable objectTable
 ) : IDisposable
 {
-    private const float NearbyPlayerRangeHysteresis = 1.5f;
     private const VisibilityFlags InvisibleFlag =
         (VisibilityFlags)0x8000 | VisibilityFlags.Nameplate | VisibilityFlags.Model;
 
@@ -169,8 +168,31 @@ internal sealed unsafe class ObjectCuller(
             && IsPlayerRelatedSlot(index)
             && !IsLocalPlayerReservedSlot(index)
             && !IsOwnedByLocalPlayer(gameObject)
+            && !ShouldKeepFriend(gameObject)
+            && !ShouldKeepPartyOrAllianceMember(gameObject)
             && !ShouldKeepNearbyPlayer(gameObject)
             && !ShouldKeepByRace(gameObject);
+    }
+
+    private bool ShouldKeepFriend(GameObject* gameObject)
+    {
+        if (!configuration.KeepFriends || gameObject->ObjectKind != ObjectKind.Pc)
+        {
+            return false;
+        }
+
+        return ((BattleChara*)gameObject)->IsFriend;
+    }
+
+    private bool ShouldKeepPartyOrAllianceMember(GameObject* gameObject)
+    {
+        if (!configuration.KeepPartyAndAllianceMembers || gameObject->ObjectKind != ObjectKind.Pc)
+        {
+            return false;
+        }
+
+        var player = (BattleChara*)gameObject;
+        return player->IsPartyMember || player->IsAllianceMember;
     }
 
     private bool ShouldKeepNearbyPlayer(GameObject* gameObject)
@@ -194,8 +216,7 @@ internal sealed unsafe class ObjectCuller(
 
         if (nearbyKeptPlayers.Contains(playerId))
         {
-            var exitRange = range + NearbyPlayerRangeHysteresis;
-            if (distanceSq <= exitRange * exitRange)
+            if (distanceSq <= range * range)
             {
                 return true;
             }

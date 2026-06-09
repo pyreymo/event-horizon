@@ -1,3 +1,4 @@
+using System;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
@@ -5,12 +6,15 @@ using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using EventHorizon.Hooks;
 using EventHorizon.Localization;
+using EventHorizon.Rendering;
 using EventHorizon.Windows;
 
 namespace EventHorizon;
 
 public sealed class Plugin : IDalamudPlugin
 {
+    private const int DynamicCullingRefreshIntervalMs = 250;
+
     [PluginService]
     internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
 
@@ -27,6 +31,9 @@ public sealed class Plugin : IDalamudPlugin
     internal static IObjectTable ObjectTable { get; private set; } = null!;
 
     [PluginService]
+    internal static IFramework Framework { get; private set; } = null!;
+
+    [PluginService]
     internal static IDataManager DataManager { get; private set; } = null!;
 
     [PluginService]
@@ -40,6 +47,8 @@ public sealed class Plugin : IDalamudPlugin
     public readonly WindowSystem WindowSystem = new("EventHorizon");
     private ConfigWindow ConfigWindow { get; init; }
     private UpdateObjectArraysHook UpdateObjectArraysHook { get; init; }
+    private WorldOverlay WorldOverlay { get; init; }
+    private long nextDynamicCullingRefresh;
 
     public Plugin()
     {
@@ -53,6 +62,7 @@ public sealed class Plugin : IDalamudPlugin
             PlayerState,
             ObjectTable
         );
+        WorldOverlay = new WorldOverlay(PluginInterface, Configuration, ObjectTable);
 
         WindowSystem.AddWindow(ConfigWindow);
 
@@ -65,25 +75,49 @@ public sealed class Plugin : IDalamudPlugin
             new CommandInfo(OnCommand) { HelpMessage = Loc.Text("Command.Help.OpenSettings") }
         );
 
-        PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
+        PluginInterface.UiBuilder.Draw += OnDraw;
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi += ToggleConfigUi;
         PluginInterface.LanguageChanged += OnLanguageChanged;
+        Framework.Update += OnFrameworkUpdate;
         UpdateObjectArraysHook.Enable();
 
-        Log.Information("{Name} loaded.", PluginInterface.Manifest.Name);
+        Log.Information("Loaded.", PluginInterface.Manifest.Name);
+    }
+
+    private void OnDraw()
+    {
+        try
+        {
+            WindowSystem.Draw();
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "WindowSystem.Draw threw.");
+        }
+
+        try
+        {
+            WorldOverlay.Draw();
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "WorldOverlay.Draw threw.");
+        }
     }
 
     public void Dispose()
     {
-        PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
+        PluginInterface.UiBuilder.Draw -= OnDraw;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleConfigUi;
         PluginInterface.LanguageChanged -= OnLanguageChanged;
+        Framework.Update -= OnFrameworkUpdate;
 
         WindowSystem.RemoveAllWindows();
         ConfigWindow.Dispose();
         UpdateObjectArraysHook.Dispose();
+        WorldOverlay.Dispose();
 
         CommandManager.RemoveHandler(PrimaryCommandName);
         CommandManager.RemoveHandler(ShortCommandName);
@@ -99,6 +133,28 @@ public sealed class Plugin : IDalamudPlugin
     public void RefreshObjectCulling()
     {
         UpdateObjectArraysHook.Refresh();
+    }
+
+    private void OnFrameworkUpdate(IFramework framework)
+    {
+        if (!NeedsDynamicCullingRefresh())
+        {
+            return;
+        }
+
+        var now = Environment.TickCount64;
+        if (now < nextDynamicCullingRefresh)
+        {
+            return;
+        }
+
+        nextDynamicCullingRefresh = now + DynamicCullingRefreshIntervalMs;
+        RefreshObjectCulling();
+    }
+
+    private bool NeedsDynamicCullingRefresh()
+    {
+        return Configuration.HideAllOtherPlayers && Configuration.KeepNearbyPlayers;
     }
 
     private void OnLanguageChanged(string langCode)
