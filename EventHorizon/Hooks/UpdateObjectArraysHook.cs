@@ -1,6 +1,7 @@
 using System;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
+using EventHorizon.ObjectTable;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.Hooks;
@@ -10,16 +11,20 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
     private const string Signature = "40 57 48 83 EC ?? 48 89 5C 24 ?? 33 DB";
 
     private readonly Configuration configuration;
+    private readonly ObjectCuller objectCuller;
     private readonly Hook<UpdateObjectArraysDelegate> hook;
 
     private delegate void* UpdateObjectArraysDelegate(GameObjectManager* objectManager);
 
-    public UpdateObjectArraysHook(IGameInteropProvider gameInteropProvider, Configuration configuration)
+    public UpdateObjectArraysHook(
+        IGameInteropProvider gameInteropProvider,
+        Configuration configuration,
+        IPlayerState playerState
+    )
     {
         this.configuration = configuration;
-        hook = gameInteropProvider.HookFromSignature<UpdateObjectArraysDelegate>(
-            Signature,
-            Detour);
+        objectCuller = new ObjectCuller(configuration, playerState);
+        hook = gameInteropProvider.HookFromSignature<UpdateObjectArraysDelegate>(Signature, Detour);
     }
 
     public void Enable()
@@ -27,8 +32,14 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         hook.Enable();
     }
 
+    public void Refresh()
+    {
+        OnObjectArraysUpdated(GameObjectManager.Instance());
+    }
+
     public void Dispose()
     {
+        objectCuller.Dispose();
         hook.Dispose();
     }
 
@@ -44,9 +55,10 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
     {
         if (!configuration.Enabled)
         {
+            objectCuller.Reset(objectManager);
             return;
         }
 
-        // Custom object-culling work belongs here. The original update has already completed.
+        objectCuller.Update(objectManager);
     }
 }

@@ -2,5 +2,6 @@
   "Command.Help.OpenSettings": "Open Event Horizon settings.",
   "Config.Title": "Event Horizon",
   "Config.Enabled": "Enabled",
+  "Config.HideAllOtherPlayers": "Hide all other players",
   "Config.CullingRulesPlaceholder": "Culling rules will be added here."
 }

@@ -8,6 +8,7 @@ namespace EventHorizon.Windows;
 
 public class ConfigWindow : Window, IDisposable
 {
+    private readonly Plugin plugin;
     private readonly Configuration configuration;
 
     public ConfigWindow(Plugin plugin)
@@ -17,12 +18,11 @@ public class ConfigWindow : Window, IDisposable
         Size = new Vector2(360, 120);
         SizeCondition = ImGuiCond.FirstUseEver;
 
+        this.plugin = plugin;
         configuration = plugin.Configuration;
     }
 
-    public void Dispose()
-    {
-    }
+    public void Dispose() { }
 
     public override void PreDraw()
     {
@@ -36,6 +36,15 @@ public class ConfigWindow : Window, IDisposable
         {
             configuration.Enabled = enabled;
             configuration.Save();
+            plugin.RefreshObjectCulling();
+        }
+
+        var hideAllOtherPlayers = configuration.HideAllOtherPlayers;
+        if (ImGui.Checkbox(Loc.Text("Config.HideAllOtherPlayers"), ref hideAllOtherPlayers))
+        {
+            configuration.HideAllOtherPlayers = hideAllOtherPlayers;
+            configuration.Save();
+            plugin.RefreshObjectCulling();
         }
 
         ImGui.TextUnformatted(Loc.Text("Config.CullingRulesPlaceholder"));

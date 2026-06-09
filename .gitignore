@@ -2,3 +2,4 @@
 obj/
 bin/
 *.user
+dotnet-tools.json

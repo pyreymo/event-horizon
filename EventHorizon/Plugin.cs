@@ -11,10 +11,20 @@ namespace EventHorizon;
 
 public sealed class Plugin : IDalamudPlugin
 {
-    [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
-    [PluginService] internal static ICommandManager CommandManager { get; private set; } = null!;
-    [PluginService] internal static IGameInteropProvider GameInteropProvider { get; private set; } = null!;
-    [PluginService] internal static IPluginLog Log { get; private set; } = null!;
+    [PluginService]
+    internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
+
+    [PluginService]
+    internal static ICommandManager CommandManager { get; private set; } = null!;
+
+    [PluginService]
+    internal static IGameInteropProvider GameInteropProvider { get; private set; } = null!;
+
+    [PluginService]
+    internal static IPlayerState PlayerState { get; private set; } = null!;
+
+    [PluginService]
+    internal static IPluginLog Log { get; private set; } = null!;
 
     private const string PrimaryCommandName = "/eventhorizon";
     private const string ShortCommandName = "/eh";
@@ -31,18 +41,22 @@ public sealed class Plugin : IDalamudPlugin
 
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         ConfigWindow = new ConfigWindow(this);
-        UpdateObjectArraysHook = new UpdateObjectArraysHook(GameInteropProvider, Configuration);
+        UpdateObjectArraysHook = new UpdateObjectArraysHook(
+            GameInteropProvider,
+            Configuration,
+            PlayerState
+        );
 
         WindowSystem.AddWindow(ConfigWindow);
 
-        CommandManager.AddHandler(PrimaryCommandName, new CommandInfo(OnCommand)
-        {
-            HelpMessage = Loc.Text("Command.Help.OpenSettings"),
-        });
-        CommandManager.AddHandler(ShortCommandName, new CommandInfo(OnCommand)
-        {
-            HelpMessage = Loc.Text("Command.Help.OpenSettings"),
-        });
+        CommandManager.AddHandler(
+            PrimaryCommandName,
+            new CommandInfo(OnCommand) { HelpMessage = Loc.Text("Command.Help.OpenSettings") }
+        );
+        CommandManager.AddHandler(
+            ShortCommandName,
+            new CommandInfo(OnCommand) { HelpMessage = Loc.Text("Command.Help.OpenSettings") }
+        );
 
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
@@ -74,6 +88,11 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     public void ToggleConfigUi() => ConfigWindow.Toggle();
+
+    public void RefreshObjectCulling()
+    {
+        UpdateObjectArraysHook.Refresh();
+    }
 
     private void OnLanguageChanged(string langCode)
     {

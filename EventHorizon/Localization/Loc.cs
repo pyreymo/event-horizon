@@ -39,7 +39,8 @@ internal static class Loc
     private static void LoadLanguage(
         IDalamudPluginInterface pluginInterface,
         string language,
-        Dictionary<string, string> destination)
+        Dictionary<string, string> destination
+    )
     {
         var directory = pluginInterface.AssemblyLocation.Directory?.FullName;
         if (directory is null)

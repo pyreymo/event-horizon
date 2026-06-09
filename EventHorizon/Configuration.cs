@@ -1,5 +1,5 @@
-﻿using Dalamud.Configuration;
-using System;
+﻿using System;
+using Dalamud.Configuration;
 
 namespace EventHorizon;
 
@@ -9,6 +9,7 @@ public class Configuration : IPluginConfiguration
     public int Version { get; set; } = 0;
 
     public bool Enabled { get; set; } = true;
+    public bool HideAllOtherPlayers { get; set; } = true;
 
     public void Save()
     {
