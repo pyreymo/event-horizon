@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using Dalamud.Game.Chat;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
+using BattleNpcSubKind = Dalamud.Game.ClientState.Objects.Enums.BattleNpcSubKind;
+using ObjectKind = FFXIVClientStructs.FFXIV.Client.Game.Object.ObjectKind;
 
 namespace EventHorizon.ObjectTable;
 
@@ -182,7 +184,7 @@ internal sealed unsafe class ObjectCuller(
         return gameObject != null
             && IsCullingEnabled()
             && playerState.IsLoaded
-            && IsPlayerRelatedSlot(index)
+            && IsCullableOtherPlayerRelatedObject(gameObject, index)
             && !IsLocalPlayerReservedSlot(index)
             && !IsOwnedByLocalPlayer(gameObject)
             && !playerKeepRules.ShouldKeep(gameObject);
@@ -192,7 +194,30 @@ internal sealed unsafe class ObjectCuller(
 
     #region Object Helpers
 
-    private static bool IsPlayerRelatedSlot(int index) => index is >= 0 and <= 199;
+    private static bool IsCullableOtherPlayerRelatedObject(GameObject* gameObject, int index)
+    {
+        return IsOtherPlayerObject(gameObject, index)
+            || IsOtherPlayerCompanionOrOrnament(gameObject, index)
+            || IsOtherPlayerBattlePet(gameObject, index);
+    }
+
+    private static bool IsOtherPlayerObject(GameObject* gameObject, int index) =>
+        IsPlayerRelatedEvenSlot(index) && gameObject->ObjectKind == ObjectKind.Pc;
+
+    private static bool IsOtherPlayerCompanionOrOrnament(GameObject* gameObject, int index) =>
+        IsPlayerRelatedOddSlot(index)
+        && gameObject->ObjectKind is ObjectKind.Companion or ObjectKind.Ornament;
+
+    private static bool IsOtherPlayerBattlePet(GameObject* gameObject, int index) =>
+        IsPlayerRelatedEvenSlot(index)
+        && gameObject->ObjectKind == ObjectKind.BattleNpc
+        && (BattleNpcSubKind)gameObject->SubKind == BattleNpcSubKind.Pet;
+
+    private static bool IsPlayerRelatedEvenSlot(int index) =>
+        index is >= 0 and <= 199 && index % 2 == 0;
+
+    private static bool IsPlayerRelatedOddSlot(int index) =>
+        index is >= 0 and <= 199 && index % 2 == 1;
 
     private static bool IsLocalPlayerReservedSlot(int index) => index is 0 or 1;
 
