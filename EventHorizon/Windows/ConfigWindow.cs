@@ -14,6 +14,7 @@ public class ConfigWindow : Window, IDisposable
     private readonly Plugin plugin;
     private readonly Configuration configuration;
     private readonly IDataManager dataManager;
+    private readonly Vector4 warningTextColor = new(1f, 0.72f, 0.24f, 1f);
 
     #region Lifecycle
 
@@ -59,6 +60,8 @@ public class ConfigWindow : Window, IDisposable
         ImGui.Spacing();
 
         ImGui.Indent();
+        DrawLowPlayerCountRule();
+        ImGui.Spacing();
         DrawFriendKeepRule();
         DrawPartyKeepRule();
         DrawRecruitingKeepRule();
@@ -74,6 +77,60 @@ public class ConfigWindow : Window, IDisposable
     #endregion
 
     #region Keep Rules
+
+    private void DrawLowPlayerCountRule()
+    {
+        var disableCullingBelowPlayerCount = configuration.DisableCullingBelowPlayerCount;
+        if (
+            ImGui.Checkbox(
+                Loc.Text("Config.DisableCullingBelowPlayerCount"),
+                ref disableCullingBelowPlayerCount
+            )
+        )
+        {
+            configuration.DisableCullingBelowPlayerCount = disableCullingBelowPlayerCount;
+            SaveAndRefresh();
+        }
+
+        if (!configuration.DisableCullingBelowPlayerCount)
+        {
+            return;
+        }
+
+        ImGui.Indent();
+
+        ImGui.SetNextItemWidth(120f);
+        var threshold = configuration.DisableCullingPlayerCountThreshold;
+        if (
+            ImGui.SliderInt(
+                Loc.Text("Config.DisableCullingPlayerCountThreshold"),
+                ref threshold,
+                1,
+                200
+            )
+        )
+        {
+            configuration.DisableCullingPlayerCountThreshold = Math.Clamp(threshold, 1, 200);
+        }
+
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            SaveAndRefresh();
+        }
+
+        ImGui.SameLine();
+        var currentPlayerCount = ObjectTableStats.CurrentPlayerCount();
+        ImGui.TextDisabled(
+            string.Format(Loc.Text("Config.CurrentPlayerCount"), currentPlayerCount)
+        );
+
+        if (currentPlayerCount < configuration.DisableCullingPlayerCountThreshold)
+        {
+            ImGui.TextColored(warningTextColor, Loc.Text("Config.LowPlayerCountCullingSuspended"));
+        }
+
+        ImGui.Unindent();
+    }
 
     private void DrawFriendKeepRule()
     {

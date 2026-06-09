@@ -45,6 +45,12 @@ internal sealed unsafe class ObjectCuller(
             return;
         }
 
+        if (ShouldSuspendCulling(manager))
+        {
+            RestoreHiddenObjects(manager);
+            return;
+        }
+
         playerKeepRules.BeforeUpdate();
 
         for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
@@ -71,6 +77,12 @@ internal sealed unsafe class ObjectCuller(
             return;
         }
 
+        RestoreHiddenObjects(manager);
+        Clear();
+    }
+
+    private void RestoreHiddenObjects(GameObjectManager* manager)
+    {
         foreach (var (address, record) in hiddenObjects)
         {
             if (TryFindObject(manager, address, record, out var gameObject, out _))
@@ -79,7 +91,7 @@ internal sealed unsafe class ObjectCuller(
             }
         }
 
-        Clear();
+        hiddenObjects.Clear();
     }
 
     public void ClearRuleState()
@@ -177,6 +189,13 @@ internal sealed unsafe class ObjectCuller(
     private bool IsCullingEnabled()
     {
         return configuration.HideAllOtherPlayers;
+    }
+
+    private bool ShouldSuspendCulling(GameObjectManager* manager)
+    {
+        return configuration.DisableCullingBelowPlayerCount
+            && ObjectTableStats.CountPlayerObjects(manager)
+                < configuration.DisableCullingPlayerCountThreshold;
     }
 
     private bool ShouldHideObject(GameObject* gameObject, int index)

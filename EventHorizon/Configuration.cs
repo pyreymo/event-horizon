@@ -10,6 +10,8 @@ public class Configuration : IPluginConfiguration
     public int Version { get; set; } = 0;
 
     public bool HideAllOtherPlayers { get; set; } = true;
+    public bool DisableCullingBelowPlayerCount { get; set; }
+    public int DisableCullingPlayerCountThreshold { get; set; } = 10;
     public bool KeepFriends { get; set; } = true;
     public bool KeepPartyAndAllianceMembers { get; set; } = true;
     public bool KeepRecruitingPlayers { get; set; } = true;
