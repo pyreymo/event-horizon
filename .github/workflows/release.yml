@@ -1,0 +1,46 @@
+name: Release
+
+on:
+    push:
+        tags:
+            - "v*"
+
+permissions:
+    contents: write
+
+jobs:
+    build:
+        runs-on: windows-2022
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v5
+              with:
+                  submodules: recursive
+
+            - name: Install .NET
+              uses: actions/setup-dotnet@v5
+              with:
+                  dotnet-version: 10.0.x
+
+            - name: Download Dalamud
+              shell: pwsh
+              run: |
+                  Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
+                  Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
+
+            - name: Build
+              run: dotnet build EventHorizon.sln --configuration Release
+
+            - name: Prepare release files
+              shell: pwsh
+              run: |
+                  Copy-Item ".\EventHorizon\bin\x64\Release\EventHorizon\latest.zip" ".\EventHorizon.zip"
+                  Copy-Item ".\EventHorizon\bin\x64\Release\EventHorizon\EventHorizon.json" ".\EventHorizon.generated.json"
+
+            - name: Create GitHub Release
+              uses: softprops/action-gh-release@v2
+              with:
+                  files: |
+                      EventHorizon.zip
+                      EventHorizon.generated.json

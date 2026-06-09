@@ -3,10 +3,7 @@
   "Name": "Event Horizon",
   "Punchline": "Cull what doesn't orbit you.",
   "Description": "Cull distant or irrelevant world objects around your character. Use /eventhorizon or /eh to open settings.",
+  "RepoUrl": "https://github.com/pyreymo/event-horizon",
   "ApplicableVersion": "any",
-  "Tags": [
-    "utility",
-    "performance",
-    "visibility"
-  ]
+  "Tags": ["utility", "performance", "visibility"]
 }
