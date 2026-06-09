@@ -10,7 +10,6 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
 {
     private const string Signature = "40 57 48 83 EC ?? 48 89 5C 24 ?? 33 DB";
 
-    private readonly Configuration configuration;
     private readonly ObjectCuller objectCuller;
     private readonly Hook<UpdateObjectArraysDelegate> hook;
 
@@ -19,11 +18,11 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
     public UpdateObjectArraysHook(
         IGameInteropProvider gameInteropProvider,
         Configuration configuration,
-        IPlayerState playerState
+        IPlayerState playerState,
+        IObjectTable objectTable
     )
     {
-        this.configuration = configuration;
-        objectCuller = new ObjectCuller(configuration, playerState);
+        objectCuller = new ObjectCuller(configuration, playerState, objectTable);
         hook = gameInteropProvider.HookFromSignature<UpdateObjectArraysDelegate>(Signature, Detour);
     }
 
@@ -53,12 +52,6 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
 
     private void OnObjectArraysUpdated(GameObjectManager* objectManager)
     {
-        if (!configuration.Enabled)
-        {
-            objectCuller.Reset(objectManager);
-            return;
-        }
-
         objectCuller.Update(objectManager);
     }
 }

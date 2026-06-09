@@ -1,19 +1,27 @@
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.ObjectTable;
 
-internal sealed unsafe class ObjectCuller(Configuration configuration, IPlayerState playerState)
-    : IDisposable
+internal sealed unsafe class ObjectCuller(
+    Configuration configuration,
+    IPlayerState playerState,
+    IObjectTable objectTable
+) : IDisposable
 {
+    private const float NearbyPlayerRangeHysteresis = 1.5f;
     private const VisibilityFlags InvisibleFlag =
         (VisibilityFlags)0x8000 | VisibilityFlags.Nameplate | VisibilityFlags.Model;
 
     private readonly Configuration configuration = configuration;
     private readonly IPlayerState playerState = playerState;
+    private readonly IObjectTable objectTable = objectTable;
     private readonly Dictionary<nint, HiddenObjectRecord> hiddenObjects = [];
+    private readonly HashSet<ulong> nearbyKeptPlayers = [];
 
     #region Lifecycle
 
@@ -25,7 +33,7 @@ internal sealed unsafe class ObjectCuller(Configuration configuration, IPlayerSt
             return;
         }
 
-        if (!configuration.Enabled || !configuration.HideAllOtherPlayers)
+        if (!HasAnyCullRuleEnabled())
         {
             Reset(manager);
             return;
@@ -34,7 +42,7 @@ internal sealed unsafe class ObjectCuller(Configuration configuration, IPlayerSt
         for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
         {
             var gameObject = manager->Objects.IndexSorted[index].Value;
-            if (ShouldHideForAllOtherPlayersRule(gameObject, index))
+            if (ShouldHideObject(gameObject, index))
             {
                 Hide(gameObject);
             }
@@ -123,7 +131,7 @@ internal sealed unsafe class ObjectCuller(Configuration configuration, IPlayerSt
             var record = hiddenObjects[address];
             if (
                 TryFindObject(manager, address, record, out var gameObject, out var index)
-                && ShouldHideForAllOtherPlayersRule(gameObject, index)
+                && ShouldHideObject(gameObject, index)
             )
             {
                 continue;
@@ -141,35 +149,90 @@ internal sealed unsafe class ObjectCuller(Configuration configuration, IPlayerSt
     private void Clear()
     {
         hiddenObjects.Clear();
+        nearbyKeptPlayers.Clear();
     }
 
     #endregion
 
     #region Helpers
 
-    private bool ShouldHideForAllOtherPlayersRule(GameObject* gameObject, int index)
+    private bool HasAnyCullRuleEnabled()
+    {
+        return configuration.HideAllOtherPlayers;
+    }
+
+    private bool ShouldHideObject(GameObject* gameObject, int index)
     {
         return gameObject != null
+            && HasAnyCullRuleEnabled()
             && playerState.IsLoaded
             && IsPlayerRelatedSlot(index)
             && !IsLocalPlayerReservedSlot(index)
-            && !IsOwnedByLocalPlayer(gameObject);
+            && !IsOwnedByLocalPlayer(gameObject)
+            && !ShouldKeepNearbyPlayer(gameObject)
+            && !ShouldKeepByRace(gameObject);
     }
 
-    private static bool IsPlayerRelatedSlot(int index)
+    private bool ShouldKeepNearbyPlayer(GameObject* gameObject)
     {
-        return index is >= 0 and <= 199;
+        if (!configuration.KeepNearbyPlayers || gameObject->ObjectKind != ObjectKind.Pc)
+        {
+            return false;
+        }
+
+        var localPlayer = objectTable.LocalPlayer;
+        if (localPlayer == null)
+        {
+            return false;
+        }
+
+        var player = (BattleChara*)gameObject;
+        var playerId = (ulong)((GameObject*)player)->GetGameObjectId();
+
+        var range = Math.Clamp(configuration.KeepNearbyPlayersRange, 1f, 50f);
+        var distanceSq = Vector3.DistanceSquared(localPlayer.Position, player->Position);
+
+        if (nearbyKeptPlayers.Contains(playerId))
+        {
+            var exitRange = range + NearbyPlayerRangeHysteresis;
+            if (distanceSq <= exitRange * exitRange)
+            {
+                return true;
+            }
+
+            nearbyKeptPlayers.Remove(playerId);
+            return false;
+        }
+
+        if (distanceSq > range * range)
+        {
+            return false;
+        }
+
+        nearbyKeptPlayers.Add(playerId);
+        return true;
     }
 
-    private static bool IsLocalPlayerReservedSlot(int index)
+    private bool ShouldKeepByRace(GameObject* gameObject)
     {
-        return index is 0 or 1;
+        if (!configuration.KeepSelectedRaces || gameObject->ObjectKind != ObjectKind.Pc)
+        {
+            return false;
+        }
+
+        var player = (BattleChara*)gameObject;
+        var customizeData = player->DrawData.CustomizeData;
+        return configuration.KeptRaceSex.Contains(
+            RaceSexFilter.Pack(customizeData.Race, customizeData.Sex)
+        );
     }
 
-    private bool IsOwnedByLocalPlayer(GameObject* gameObject)
-    {
-        return gameObject->OwnerId == playerState.EntityId;
-    }
+    private static bool IsPlayerRelatedSlot(int index) => index is >= 0 and <= 199;
+
+    private static bool IsLocalPlayerReservedSlot(int index) => index is 0 or 1;
+
+    private bool IsOwnedByLocalPlayer(GameObject* gameObject) =>
+        gameObject->OwnerId == playerState.EntityId;
 
     private static bool TryFindObject(
         GameObjectManager* manager,

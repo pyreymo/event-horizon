@@ -24,6 +24,12 @@ public sealed class Plugin : IDalamudPlugin
     internal static IPlayerState PlayerState { get; private set; } = null!;
 
     [PluginService]
+    internal static IObjectTable ObjectTable { get; private set; } = null!;
+
+    [PluginService]
+    internal static IDataManager DataManager { get; private set; } = null!;
+
+    [PluginService]
     internal static IPluginLog Log { get; private set; } = null!;
 
     private const string PrimaryCommandName = "/eventhorizon";
@@ -40,11 +46,12 @@ public sealed class Plugin : IDalamudPlugin
         Loc.Load(PluginInterface);
 
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
-        ConfigWindow = new ConfigWindow(this);
+        ConfigWindow = new ConfigWindow(this, DataManager);
         UpdateObjectArraysHook = new UpdateObjectArraysHook(
             GameInteropProvider,
             Configuration,
-            PlayerState
+            PlayerState,
+            ObjectTable
         );
 
         WindowSystem.AddWindow(ConfigWindow);

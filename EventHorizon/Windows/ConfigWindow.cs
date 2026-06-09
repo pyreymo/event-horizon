@@ -2,7 +2,10 @@ using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
+using Dalamud.Plugin.Services;
 using EventHorizon.Localization;
+using EventHorizon.ObjectTable;
+using Lumina.Excel.Sheets;
 
 namespace EventHorizon.Windows;
 
@@ -10,8 +13,9 @@ public class ConfigWindow : Window, IDisposable
 {
     private readonly Plugin plugin;
     private readonly Configuration configuration;
+    private readonly IDataManager dataManager;
 
-    public ConfigWindow(Plugin plugin)
+    public ConfigWindow(Plugin plugin, IDataManager dataManager)
         : base($"{Loc.Text("Config.Title")}###EventHorizonConfig")
     {
         Flags = ImGuiWindowFlags.NoCollapse;
@@ -19,6 +23,7 @@ public class ConfigWindow : Window, IDisposable
         SizeCondition = ImGuiCond.FirstUseEver;
 
         this.plugin = plugin;
+        this.dataManager = dataManager;
         configuration = plugin.Configuration;
     }
 
@@ -31,22 +36,250 @@ public class ConfigWindow : Window, IDisposable
 
     public override void Draw()
     {
-        var enabled = configuration.Enabled;
-        if (ImGui.Checkbox(Loc.Text("Config.Enabled"), ref enabled))
-        {
-            configuration.Enabled = enabled;
-            configuration.Save();
-            plugin.RefreshObjectCulling();
-        }
-
         var hideAllOtherPlayers = configuration.HideAllOtherPlayers;
         if (ImGui.Checkbox(Loc.Text("Config.HideAllOtherPlayers"), ref hideAllOtherPlayers))
         {
             configuration.HideAllOtherPlayers = hideAllOtherPlayers;
-            configuration.Save();
-            plugin.RefreshObjectCulling();
+            SaveAndRefresh();
+        }
+
+        if (configuration.HideAllOtherPlayers)
+        {
+            ImGui.Indent();
+            DrawNearbyPlayerKeepRule();
+            DrawRaceFilter();
+            ImGui.Unindent();
         }
 
         ImGui.TextUnformatted(Loc.Text("Config.CullingRulesPlaceholder"));
+    }
+
+    private void DrawNearbyPlayerKeepRule()
+    {
+        var keepNearbyPlayers = configuration.KeepNearbyPlayers;
+        if (ImGui.Checkbox(Loc.Text("Config.KeepNearbyPlayers"), ref keepNearbyPlayers))
+        {
+            configuration.KeepNearbyPlayers = keepNearbyPlayers;
+            SaveAndRefresh();
+        }
+
+        if (!configuration.KeepNearbyPlayers)
+        {
+            return;
+        }
+
+        ImGui.SetNextItemWidth(160f);
+        var range = configuration.KeepNearbyPlayersRange;
+        if (
+            ImGui.SliderFloat(Loc.Text("Config.KeepNearbyPlayersRange"), ref range, 1f, 50f, "%.1f")
+        )
+        {
+            configuration.KeepNearbyPlayersRange = Math.Clamp(range, 1f, 50f);
+        }
+
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            SaveAndRefresh();
+        }
+    }
+
+    private void DrawRaceFilter()
+    {
+        var keepSelectedRaces = configuration.KeepSelectedRaces;
+        if (ImGui.Checkbox(Loc.Text("Config.KeepRaceFilter"), ref keepSelectedRaces))
+        {
+            configuration.KeepSelectedRaces = keepSelectedRaces;
+            SaveAndRefresh();
+        }
+
+        if (!configuration.KeepSelectedRaces)
+        {
+            return;
+        }
+
+        if (ImGui.SmallButton(Loc.Text("Config.RaceFilter.SelectAll")))
+        {
+            SetAllRaceSexFilters(true);
+            SaveAndRefresh();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton(Loc.Text("Config.RaceFilter.Clear")))
+        {
+            configuration.KeptRaceSex.Clear();
+            SaveAndRefresh();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton(Loc.Text("Config.RaceFilter.Invert")))
+        {
+            InvertRaceSexFilters();
+            SaveAndRefresh();
+        }
+
+        if (
+            !ImGui.BeginTable(
+                "###RaceSexFilterTable",
+                3,
+                ImGuiTableFlags.SizingFixedFit
+                    | ImGuiTableFlags.RowBg
+                    | ImGuiTableFlags.BordersInnerV
+            )
+        )
+        {
+            return;
+        }
+
+        ImGui.TableSetupColumn(Loc.Text("Config.RaceFilter.Race"));
+        ImGui.TableSetupColumn(Loc.Text("Config.RaceFilter.Male"));
+        ImGui.TableSetupColumn(Loc.Text("Config.RaceFilter.Female"));
+        ImGui.TableNextRow(ImGuiTableRowFlags.Headers);
+        ImGui.TableNextColumn();
+        ImGui.TextUnformatted(Loc.Text("Config.RaceFilter.Race"));
+        ImGui.TableNextColumn();
+        DrawSexColumnHeader(RaceSexFilter.MaleSex, Loc.Text("Config.RaceFilter.Male"));
+        ImGui.TableNextColumn();
+        DrawSexColumnHeader(RaceSexFilter.FemaleSex, Loc.Text("Config.RaceFilter.Female"));
+
+        for (var race = RaceSexFilter.MinRace; race <= RaceSexFilter.MaxRace; race++)
+        {
+            ImGui.TableNextRow();
+            ImGui.TableNextColumn();
+            DrawRaceRowHeader(race);
+
+            DrawRaceSexFilterCell(race, RaceSexFilter.MaleSex);
+            DrawRaceSexFilterCell(race, RaceSexFilter.FemaleSex);
+        }
+
+        ImGui.EndTable();
+    }
+
+    private void DrawRaceRowHeader(byte race)
+    {
+        if (ImGui.Selectable($"{GetRaceName(race)}###RaceFilterRace{race}"))
+        {
+            ToggleRace(race);
+            SaveAndRefresh();
+        }
+    }
+
+    private void DrawSexColumnHeader(byte sex, string label)
+    {
+        if (ImGui.Selectable($"{label}###RaceFilterSex{sex}"))
+        {
+            ToggleSex(sex);
+            SaveAndRefresh();
+        }
+    }
+
+    private void DrawRaceSexFilterCell(byte race, byte sex)
+    {
+        ImGui.TableNextColumn();
+
+        var value = RaceSexFilter.Pack(race, sex);
+        var selected = configuration.KeptRaceSex.Contains(value);
+        if (!ImGui.Checkbox($"###RaceSexFilter{race}_{sex}", ref selected))
+        {
+            return;
+        }
+
+        if (selected)
+        {
+            configuration.KeptRaceSex.Add(value);
+        }
+        else
+        {
+            configuration.KeptRaceSex.Remove(value);
+        }
+
+        SaveAndRefresh();
+    }
+
+    private void SetAllRaceSexFilters(bool selected)
+    {
+        configuration.KeptRaceSex.Clear();
+        if (!selected)
+        {
+            return;
+        }
+
+        for (var race = RaceSexFilter.MinRace; race <= RaceSexFilter.MaxRace; race++)
+        {
+            configuration.KeptRaceSex.Add(RaceSexFilter.Pack(race, RaceSexFilter.MaleSex));
+            configuration.KeptRaceSex.Add(RaceSexFilter.Pack(race, RaceSexFilter.FemaleSex));
+        }
+    }
+
+    private void InvertRaceSexFilters()
+    {
+        for (var race = RaceSexFilter.MinRace; race <= RaceSexFilter.MaxRace; race++)
+        {
+            ToggleRaceSexFilter(race, RaceSexFilter.MaleSex);
+            ToggleRaceSexFilter(race, RaceSexFilter.FemaleSex);
+        }
+    }
+
+    private void ToggleRaceSexFilter(byte race, byte sex)
+    {
+        var value = RaceSexFilter.Pack(race, sex);
+        if (!configuration.KeptRaceSex.Remove(value))
+        {
+            configuration.KeptRaceSex.Add(value);
+        }
+    }
+
+    private void ToggleRace(byte race)
+    {
+        var allSelected =
+            configuration.KeptRaceSex.Contains(RaceSexFilter.Pack(race, RaceSexFilter.MaleSex))
+            && configuration.KeptRaceSex.Contains(
+                RaceSexFilter.Pack(race, RaceSexFilter.FemaleSex)
+            );
+
+        SetRaceSexFilter(race, RaceSexFilter.MaleSex, !allSelected);
+        SetRaceSexFilter(race, RaceSexFilter.FemaleSex, !allSelected);
+    }
+
+    private void ToggleSex(byte sex)
+    {
+        var allSelected = true;
+        for (var race = RaceSexFilter.MinRace; race <= RaceSexFilter.MaxRace; race++)
+        {
+            allSelected &= configuration.KeptRaceSex.Contains(RaceSexFilter.Pack(race, sex));
+        }
+
+        for (var race = RaceSexFilter.MinRace; race <= RaceSexFilter.MaxRace; race++)
+        {
+            SetRaceSexFilter(race, sex, !allSelected);
+        }
+    }
+
+    private void SetRaceSexFilter(byte race, byte sex, bool selected)
+    {
+        var value = RaceSexFilter.Pack(race, sex);
+        if (selected)
+        {
+            configuration.KeptRaceSex.Add(value);
+        }
+        else
+        {
+            configuration.KeptRaceSex.Remove(value);
+        }
+    }
+
+    private void SaveAndRefresh()
+    {
+        configuration.Save();
+        plugin.RefreshObjectCulling();
+    }
+
+    private string GetRaceName(byte race)
+    {
+        if (dataManager.GetExcelSheet<Race>().TryGetRow(race, out var row))
+        {
+            return row.Masculine.ToString();
+        }
+
+        return Loc.Text("Config.Race.Unknown");
     }
 }

@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
 using Dalamud.Configuration;
 
 namespace EventHorizon;
@@ -8,8 +9,11 @@ public class Configuration : IPluginConfiguration
 {
     public int Version { get; set; } = 0;
 
-    public bool Enabled { get; set; } = true;
     public bool HideAllOtherPlayers { get; set; } = true;
+    public bool KeepNearbyPlayers { get; set; }
+    public float KeepNearbyPlayersRange { get; set; } = 5f;
+    public bool KeepSelectedRaces { get; set; }
+    public HashSet<byte> KeptRaceSex { get; set; } = [];
 
     public void Save()
     {
