@@ -30,13 +30,32 @@ jobs:
                   Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
 
             - name: Build
-              run: dotnet build EventHorizon.sln --configuration Release
+              run: dotnet build .\EventHorizon\EventHorizon.csproj --configuration Release -p:Platform=x64
 
             - name: Prepare release files
               shell: pwsh
               run: |
-                  Copy-Item ".\EventHorizon\bin\x64\Release\EventHorizon\latest.zip" ".\EventHorizon.zip"
-                  Copy-Item ".\EventHorizon\bin\x64\Release\EventHorizon\EventHorizon.json" ".\EventHorizon.generated.json"
+                  $zip = Get-ChildItem ".\EventHorizon\bin" -Recurse -Filter "latest.zip" | Select-Object -First 1
+
+                  if (-not $zip) {
+                      Write-Host "Could not find latest.zip. Dumping bin tree:"
+                      Get-ChildItem ".\EventHorizon\bin" -Recurse | Select-Object FullName
+                      exit 1
+                  }
+
+                  $packageDir = $zip.Directory.FullName
+                  Write-Host "Package directory: $packageDir"
+
+                  Copy-Item $zip.FullName ".\EventHorizon.zip"
+
+                  $manifest = Join-Path $packageDir "EventHorizon.json"
+                  if (-not (Test-Path $manifest)) {
+                      Write-Host "Could not find EventHorizon.json next to latest.zip. Dumping package dir:"
+                      Get-ChildItem $packageDir | Select-Object FullName
+                      exit 1
+                  }
+
+                  Copy-Item $manifest ".\EventHorizon.generated.json"
 
             - name: Create GitHub Release
               uses: softprops/action-gh-release@v2
