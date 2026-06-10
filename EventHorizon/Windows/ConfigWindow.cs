@@ -61,6 +61,7 @@ public class ConfigWindow : Window, IDisposable
         ImGui.Spacing();
 
         ImGui.Indent();
+        DrawDutyRule();
         DrawLowPlayerCountRule();
         DrawVisiblePlayerLimitRule();
         ImGui.Spacing();
@@ -82,6 +83,16 @@ public class ConfigWindow : Window, IDisposable
     #endregion
 
     #region Keep Rules
+
+    private void DrawDutyRule()
+    {
+        var disableInDuty = configuration.DisableInDuty;
+        if (ImGui.Checkbox(Loc.Text("Config.DisableInDuty"), ref disableInDuty))
+        {
+            configuration.DisableInDuty = disableInDuty;
+            SaveAndRefresh();
+        }
+    }
 
     private void DrawStatusOverview()
     {
@@ -106,6 +117,11 @@ public class ConfigWindow : Window, IDisposable
         if (IsLowPlayerCountCullingSuspended(currentPlayerCount))
         {
             ImGui.TextColored(warningTextColor, Loc.Text("Config.LowPlayerCountCullingSuspended"));
+        }
+
+        if (plugin.IsDutyCullingSuspended)
+        {
+            ImGui.TextColored(warningTextColor, Loc.Text("Config.DutyCullingSuspended"));
         }
     }
 

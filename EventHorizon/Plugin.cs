@@ -1,6 +1,7 @@
 using System;
 using Dalamud.Game.Chat;
 using Dalamud.Game.Command;
+using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
@@ -45,6 +46,9 @@ public sealed class Plugin : IDalamudPlugin
     internal static IFramework Framework { get; private set; } = null!;
 
     [PluginService]
+    internal static ICondition Condition { get; private set; } = null!;
+
+    [PluginService]
     internal static IDataManager DataManager { get; private set; } = null!;
 
     [PluginService]
@@ -63,6 +67,10 @@ public sealed class Plugin : IDalamudPlugin
 
     private long nextDynamicCullingRefresh;
     public int HiddenPlayerCount => UpdateObjectArraysHook.HiddenPlayerCount;
+    public bool IsDutyCullingSuspended =>
+        Configuration.HideAllOtherPlayers
+        && Configuration.DisableInDuty
+        && (Condition[ConditionFlag.BoundByDuty] || Condition[ConditionFlag.BoundByDuty56]);
 
     #endregion
 
@@ -78,6 +86,7 @@ public sealed class Plugin : IDalamudPlugin
             GameInteropProvider,
             Configuration,
             PlayerState,
+            Condition,
             ObjectTable,
             TargetManager
         );

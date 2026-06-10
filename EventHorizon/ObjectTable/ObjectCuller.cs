@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Dalamud.Game.Chat;
+using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
@@ -9,6 +10,7 @@ namespace EventHorizon.ObjectTable;
 internal sealed unsafe class ObjectCuller(
     Configuration configuration,
     IPlayerState playerState,
+    ICondition condition,
     IObjectTable objectTable,
     ITargetManager targetManager
 ) : IDisposable
@@ -19,6 +21,7 @@ internal sealed unsafe class ObjectCuller(
 
     private readonly Configuration configuration = configuration;
     private readonly IPlayerState playerState = playerState;
+    private readonly ICondition condition = condition;
     private readonly PlayerKeepRules playerKeepRules = new(
         configuration,
         objectTable,
@@ -39,6 +42,12 @@ internal sealed unsafe class ObjectCuller(
         if (!IsCullingEnabled())
         {
             Reset(manager);
+            return;
+        }
+
+        if (ShouldSuspendCullingInDuty())
+        {
+            RestoreHiddenObjects(manager);
             return;
         }
 
@@ -227,6 +236,12 @@ internal sealed unsafe class ObjectCuller(
                 < configuration.DisableCullingPlayerCountThreshold;
     }
 
+    private bool ShouldSuspendCullingInDuty()
+    {
+        return configuration.DisableInDuty
+            && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]);
+    }
+
     private bool ShouldHidePlayerSlotObject(
         GameObject* gameObject,
         int index,
@@ -379,7 +394,9 @@ internal sealed unsafe class ObjectCuller(
 
     public bool NeedsDynamicRefresh()
     {
-        return IsCullingEnabled() && playerKeepRules.NeedsDynamicRefresh;
+        return IsCullingEnabled()
+            && !ShouldSuspendCullingInDuty()
+            && playerKeepRules.NeedsDynamicRefresh;
     }
 
     private static GameObject* FindObject(

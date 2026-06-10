@@ -69,7 +69,7 @@ internal static class Loc
 
     private static string NormalizeLanguage(string language)
     {
-        return language switch
+        return language.ToLowerInvariant() switch
         {
             "zh" or "zh-cn" or "zh-hans" => "zh",
             _ => DefaultLanguage,

@@ -10,6 +10,7 @@ public class Configuration : IPluginConfiguration
     public int Version { get; set; } = 0;
 
     public bool HideAllOtherPlayers { get; set; } = true;
+    public bool DisableInDuty { get; set; }
     public bool DisableCullingBelowPlayerCount { get; set; }
     public int DisableCullingPlayerCountThreshold { get; set; } = 25;
     public bool LimitVisiblePlayerCount { get; set; }
