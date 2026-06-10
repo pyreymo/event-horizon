@@ -10,6 +10,8 @@
   "Config.LimitVisiblePlayerCount": "限制最多显示玩家",
   "Config.LimitVisiblePlayerCount.Help": "作为兜底限制；下面的保留规则放行的其他玩家超过上限后，超出的玩家仍会被隐藏。此限制按对象表扫描顺序生效，不保证不同保留规则之间的优先级。",
   "Config.VisiblePlayerCountLimit": "最多显示",
+  "Config.HideOtherPlayerCompanions": "隐藏其他玩家的宠物",
+  "Config.HideOtherPlayerOrnaments": "隐藏其他玩家的时尚配饰",
   "Config.KeepFriends": "保留好友",
   "Config.KeepPartyAndAllianceMembers": "保留小队、团队队友",
   "Config.KeepRecruitingPlayers": "保留招募中的玩家",

@@ -64,6 +64,9 @@ public class ConfigWindow : Window, IDisposable
         DrawLowPlayerCountRule();
         DrawVisiblePlayerLimitRule();
         ImGui.Spacing();
+        DrawOtherPlayerCompanionRule();
+        DrawOtherPlayerOrnamentRule();
+        ImGui.Spacing();
         DrawFriendKeepRule();
         DrawPartyKeepRule();
         DrawRecruitingKeepRule();
@@ -186,6 +189,36 @@ public class ConfigWindow : Window, IDisposable
         }
 
         ImGui.Unindent();
+    }
+
+    private void DrawOtherPlayerCompanionRule()
+    {
+        var hideOtherPlayerCompanions = configuration.HideOtherPlayerCompanions;
+        if (
+            ImGui.Checkbox(
+                Loc.Text("Config.HideOtherPlayerCompanions"),
+                ref hideOtherPlayerCompanions
+            )
+        )
+        {
+            configuration.HideOtherPlayerCompanions = hideOtherPlayerCompanions;
+            SaveAndRefresh();
+        }
+    }
+
+    private void DrawOtherPlayerOrnamentRule()
+    {
+        var hideOtherPlayerOrnaments = configuration.HideOtherPlayerOrnaments;
+        if (
+            ImGui.Checkbox(
+                Loc.Text("Config.HideOtherPlayerOrnaments"),
+                ref hideOtherPlayerOrnaments
+            )
+        )
+        {
+            configuration.HideOtherPlayerOrnaments = hideOtherPlayerOrnaments;
+            SaveAndRefresh();
+        }
     }
 
     private void DrawFriendKeepRule()
@@ -327,7 +360,7 @@ public class ConfigWindow : Window, IDisposable
 
     #endregion
 
-    #region Race Filter
+    #region Race/Sex Filter
 
     private void DrawRaceFilter()
     {
@@ -444,10 +477,6 @@ public class ConfigWindow : Window, IDisposable
 
         SaveAndRefresh();
     }
-
-    #endregion
-
-    #region Race Filter Actions
 
     private void SetAllRaceSexFilters(bool selected)
     {

@@ -10,6 +10,8 @@
   "Config.LimitVisiblePlayerCount": "Limit visible players",
   "Config.LimitVisiblePlayerCount.Help": "Fallback limit. If the keep rules below allow more other players than this, the extra players are still hidden. This limit follows object table scan order and does not guarantee priority between keep rules.",
   "Config.VisiblePlayerCountLimit": "Show at most",
+  "Config.HideOtherPlayerCompanions": "Hide other players' pets",
+  "Config.HideOtherPlayerOrnaments": "Hide other players' ornaments",
   "Config.KeepFriends": "Keep friends",
   "Config.KeepPartyAndAllianceMembers": "Keep party/alliance members",
   "Config.KeepRecruitingPlayers": "Keep recruiting players",

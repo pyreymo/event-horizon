@@ -16,8 +16,8 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
 
     private delegate void* UpdateObjectArraysDelegate(GameObjectManager* objectManager);
 
-    public bool NeedsDynamicRefresh => objectCuller.NeedsDynamicRefresh;
-    public int HiddenPlayerCount => objectCuller.HiddenPlayerCount;
+    public bool NeedsDynamicRefresh => objectCuller.NeedsDynamicRefresh();
+    public int HiddenPlayerCount => objectCuller.GetHiddenPlayerCount();
 
     public UpdateObjectArraysHook(
         IGameInteropProvider gameInteropProvider,
@@ -46,7 +46,7 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         OnObjectArraysUpdated(GameObjectManager.Instance());
     }
 
-    public void RecordChatMessage(IHandleableChatMessage message)
+    public void RecordChatMessage(IChatMessage message)
     {
         objectCuller.RecordChatMessage(message);
     }
