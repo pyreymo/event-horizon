@@ -1,6 +1,7 @@
 using System;
 using Dalamud.Game.Chat;
 using Dalamud.Game.Command;
+using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
@@ -14,9 +15,9 @@ namespace EventHorizon;
 
 public sealed class Plugin : IDalamudPlugin
 {
-    private const int DynamicCullingRefreshIntervalMs = 200;
     private const string PrimaryCommandName = "/eventhorizon";
     private const string ShortCommandName = "/eh";
+    private const int DynamicCullingRefreshIntervalMs = 200;
 
     #region Services
 
@@ -45,6 +46,9 @@ public sealed class Plugin : IDalamudPlugin
     internal static IFramework Framework { get; private set; } = null!;
 
     [PluginService]
+    internal static ICondition Condition { get; private set; } = null!;
+
+    [PluginService]
     internal static IDataManager DataManager { get; private set; } = null!;
 
     [PluginService]
@@ -55,13 +59,18 @@ public sealed class Plugin : IDalamudPlugin
     #region State
 
     public Configuration Configuration { get; init; }
-    public int HiddenPlayerCount => UpdateObjectArraysHook.HiddenPlayerCount;
 
     public readonly WindowSystem WindowSystem = new("EventHorizon");
     private ConfigWindow ConfigWindow { get; init; }
     private UpdateObjectArraysHook UpdateObjectArraysHook { get; init; }
     private WorldOverlay WorldOverlay { get; init; }
+
     private long nextDynamicCullingRefresh;
+    public int HiddenPlayerCount => UpdateObjectArraysHook.HiddenPlayerCount;
+    public bool IsDutyCullingSuspended =>
+        Configuration.HideAllOtherPlayers
+        && Configuration.DisableInDuty
+        && (Condition[ConditionFlag.BoundByDuty] || Condition[ConditionFlag.BoundByDuty56]);
 
     #endregion
 
@@ -77,6 +86,7 @@ public sealed class Plugin : IDalamudPlugin
             GameInteropProvider,
             Configuration,
             PlayerState,
+            Condition,
             ObjectTable,
             TargetManager
         );
@@ -158,11 +168,6 @@ public sealed class Plugin : IDalamudPlugin
 
     #region Culling
 
-    public void RefreshObjectCulling(bool resetRuleState = false)
-    {
-        UpdateObjectArraysHook.Refresh(resetRuleState);
-    }
-
     private void OnFrameworkUpdate(IFramework framework)
     {
         if (!NeedsDynamicCullingRefresh())
@@ -185,7 +190,12 @@ public sealed class Plugin : IDalamudPlugin
         return UpdateObjectArraysHook.NeedsDynamicRefresh;
     }
 
-    private void OnChatMessage(IHandleableChatMessage message)
+    public void RefreshObjectCulling(bool resetRuleState = false)
+    {
+        UpdateObjectArraysHook.Refresh(resetRuleState);
+    }
+
+    private void OnChatMessage(IChatMessage message)
     {
         UpdateObjectArraysHook.RecordChatMessage(message);
     }

@@ -1,50 +1,33 @@
 using System;
 using System.Collections.Generic;
 using Dalamud.Game.Chat;
+using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
-using BattleNpcSubKind = Dalamud.Game.ClientState.Objects.Enums.BattleNpcSubKind;
-using ObjectKind = FFXIVClientStructs.FFXIV.Client.Game.Object.ObjectKind;
 
 namespace EventHorizon.ObjectTable;
 
 internal sealed unsafe class ObjectCuller(
     Configuration configuration,
     IPlayerState playerState,
+    ICondition condition,
     IObjectTable objectTable,
     ITargetManager targetManager
 ) : IDisposable
 {
+    private const VisibilityFlags PluginCustomProbe = (VisibilityFlags)0x1000;
     private const VisibilityFlags InvisibleFlag =
-        (VisibilityFlags)0x8000 | VisibilityFlags.Nameplate | VisibilityFlags.Model;
+        PluginCustomProbe | VisibilityFlags.Nameplate | VisibilityFlags.Model;
 
     private readonly Configuration configuration = configuration;
     private readonly IPlayerState playerState = playerState;
+    private readonly ICondition condition = condition;
     private readonly PlayerKeepRules playerKeepRules = new(
         configuration,
         objectTable,
         targetManager
     );
     private readonly Dictionary<nint, HiddenObjectRecord> hiddenObjects = [];
-    private int visibleOtherPlayersThisScan;
-
-    public bool NeedsDynamicRefresh => IsCullingEnabled() && playerKeepRules.NeedsDynamicRefresh;
-    public int HiddenPlayerCount
-    {
-        get
-        {
-            var count = 0;
-            foreach (var record in hiddenObjects.Values)
-            {
-                if (record.ObjectKind == ObjectKind.Pc)
-                {
-                    count++;
-                }
-            }
-
-            return count;
-        }
-    }
 
     #region Lifecycle
 
@@ -62,6 +45,12 @@ internal sealed unsafe class ObjectCuller(
             return;
         }
 
+        if (ShouldSuspendCullingInDuty())
+        {
+            RestoreHiddenObjects(manager);
+            return;
+        }
+
         if (ShouldSuspendCulling(manager))
         {
             RestoreHiddenObjects(manager);
@@ -69,12 +58,28 @@ internal sealed unsafe class ObjectCuller(
         }
 
         playerKeepRules.BeforeUpdate();
-        visibleOtherPlayersThisScan = 0;
+        if (!playerState.IsLoaded)
+        {
+            RestoreHiddenObjects(manager);
+            return;
+        }
+
+        var visibleOtherPlayers = 0;
 
         for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
         {
             var gameObject = manager->Objects.IndexSorted[index].Value;
-            if (ShouldHideObject(gameObject, index))
+            if (gameObject == null)
+            {
+                continue;
+            }
+
+            if (gameObject->ObjectKind != ObjectKind.Pc)
+            {
+                continue;
+            }
+
+            if (ShouldHidePlayerSlotObject(gameObject, index, ref visibleOtherPlayers))
             {
                 Hide(gameObject);
             }
@@ -84,7 +89,25 @@ internal sealed unsafe class ObjectCuller(
             }
         }
 
-        RestoreNoLongerCulled(manager);
+        for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
+        {
+            var gameObject = manager->Objects.IndexSorted[index].Value;
+            if (gameObject == null || gameObject->ObjectKind == ObjectKind.Pc)
+            {
+                continue;
+            }
+
+            if (ShouldHideNonPlayerSlotObject(manager, gameObject, index))
+            {
+                Hide(gameObject);
+            }
+            else
+            {
+                RestoreIfHidden(gameObject);
+            }
+        }
+
+        PruneMissingHiddenObjects(manager);
     }
 
     public void Reset(GameObjectManager* manager)
@@ -103,7 +126,8 @@ internal sealed unsafe class ObjectCuller(
     {
         foreach (var (address, record) in hiddenObjects)
         {
-            if (TryFindObject(manager, address, record, out var gameObject, out _))
+            var gameObject = FindObject(manager, address, record);
+            if (gameObject != null)
             {
                 gameObject->RenderFlags &= ~record.AddedFlags;
             }
@@ -117,7 +141,7 @@ internal sealed unsafe class ObjectCuller(
         playerKeepRules.Clear();
     }
 
-    public void RecordChatMessage(IHandleableChatMessage message)
+    public void RecordChatMessage(IChatMessage message)
     {
         playerKeepRules.RecordChatMessage(message);
     }
@@ -172,24 +196,20 @@ internal sealed unsafe class ObjectCuller(
         }
     }
 
-    private void RestoreNoLongerCulled(GameObjectManager* manager)
+    private void PruneMissingHiddenObjects(GameObjectManager* manager)
     {
-        foreach (var address in new List<nint>(hiddenObjects.Keys))
+        var staleAddresses = new List<nint>();
+
+        foreach (var (address, record) in hiddenObjects)
         {
-            var record = hiddenObjects[address];
-            if (
-                TryFindObject(manager, address, record, out var gameObject, out var index)
-                && ShouldHideObject(gameObject, index)
-            )
+            if (FindObject(manager, address, record) == null)
             {
-                continue;
+                staleAddresses.Add(address);
             }
+        }
 
-            if (gameObject != null)
-            {
-                gameObject->RenderFlags &= ~record.AddedFlags;
-            }
-
+        foreach (var address in staleAddresses)
+        {
             hiddenObjects.Remove(address);
         }
     }
@@ -216,31 +236,93 @@ internal sealed unsafe class ObjectCuller(
                 < configuration.DisableCullingPlayerCountThreshold;
     }
 
-    private bool ShouldHideObject(GameObject* gameObject, int index)
+    private bool ShouldSuspendCullingInDuty()
     {
-        return gameObject != null
-            && IsCullingEnabled()
-            && playerState.IsLoaded
-            && IsCullableOtherPlayerRelatedObject(gameObject, index)
-            && !IsLocalPlayerReservedSlot(index)
-            && !IsOwnedByLocalPlayer(gameObject)
-            && (
-                !playerKeepRules.ShouldKeep(gameObject)
-                || ShouldHideByVisiblePlayerLimit(gameObject, index)
-            );
+        return configuration.DisableInDuty
+            && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]);
     }
 
-    private bool ShouldHideByVisiblePlayerLimit(GameObject* gameObject, int index)
+    private bool ShouldHidePlayerSlotObject(
+        GameObject* gameObject,
+        int index,
+        ref int visibleOtherPlayers
+    )
     {
-        if (!configuration.LimitVisiblePlayerCount || !IsOtherPlayerObject(gameObject, index))
+        if (!IsPlayerRelatedEvenSlot(index) || IsLocalPlayerReservedSlot(index))
+        {
+            return false;
+        }
+
+        return !playerKeepRules.ShouldKeep(gameObject)
+            || ShouldHideByVisiblePlayerLimit(ref visibleOtherPlayers);
+    }
+
+    private bool ShouldHideNonPlayerSlotObject(
+        GameObjectManager* manager,
+        GameObject* gameObject,
+        int index
+    )
+    {
+        if (IsLocalPlayerReservedSlot(index))
+        {
+            return false;
+        }
+
+        if (IsPlayerRelatedEvenSlot(index))
+        {
+            if (gameObject->ObjectKind != ObjectKind.BattleNpc)
+            {
+                return false;
+            }
+
+            var owner = FindPlayerOwner(manager, gameObject);
+            return owner != null && IsHiddenByThisPlugin(owner);
+        }
+
+        if (IsPlayerRelatedOddSlot(index))
+        {
+            return ShouldHideOddSlotObject(manager, gameObject, index);
+        }
+
+        return false;
+    }
+
+    private bool ShouldHideOddSlotObject(
+        GameObjectManager* manager,
+        GameObject* gameObject,
+        int index
+    )
+    {
+        var owner = manager->Objects.IndexSorted[index - 1].Value;
+        if (owner == null || gameObject->OwnerId != owner->EntityId)
+        {
+            return false;
+        }
+
+        if (IsHiddenByThisPlugin(owner))
+        {
+            return true;
+        }
+
+        return gameObject->ObjectKind switch
+        {
+            ObjectKind.Companion => configuration.HideOtherPlayerCompanions,
+            ObjectKind.Ornament => configuration.HideOtherPlayerOrnaments,
+            _ => false,
+        };
+    }
+
+    private bool ShouldHideByVisiblePlayerLimit(ref int visibleOtherPlayers)
+    {
+        if (!configuration.LimitVisiblePlayerCount)
         {
             return false;
         }
 
         var visiblePlayerLimit = Math.Clamp(configuration.VisiblePlayerCountLimit, 1, 200);
-        if (visibleOtherPlayersThisScan < visiblePlayerLimit)
+        if (visibleOtherPlayers < visiblePlayerLimit)
         {
-            visibleOtherPlayersThisScan++;
+            visibleOtherPlayers++;
             return false;
         }
 
@@ -251,49 +333,81 @@ internal sealed unsafe class ObjectCuller(
 
     #region Object Helpers
 
-    private static bool IsCullableOtherPlayerRelatedObject(GameObject* gameObject, int index)
-    {
-        return IsOtherPlayerObject(gameObject, index)
-            || IsOtherPlayerCompanionOrOrnament(gameObject, index)
-            || IsOtherPlayerBattlePet(gameObject, index);
-    }
-
-    private static bool IsOtherPlayerObject(GameObject* gameObject, int index) =>
-        IsPlayerRelatedEvenSlot(index) && gameObject->ObjectKind == ObjectKind.Pc;
-
-    private static bool IsOtherPlayerCompanionOrOrnament(GameObject* gameObject, int index) =>
-        IsPlayerRelatedOddSlot(index)
-        && gameObject->ObjectKind is ObjectKind.Companion or ObjectKind.Ornament;
-
-    private static bool IsOtherPlayerBattlePet(GameObject* gameObject, int index) =>
-        IsPlayerRelatedEvenSlot(index)
-        && gameObject->ObjectKind == ObjectKind.BattleNpc
-        && (BattleNpcSubKind)gameObject->SubKind == BattleNpcSubKind.Pet;
+    private static bool IsPlayerRelatedSlot(int index) => index is >= 0 and <= 199;
 
     private static bool IsPlayerRelatedEvenSlot(int index) =>
-        index is >= 0 and <= 199 && index % 2 == 0;
+        IsPlayerRelatedSlot(index) && index % 2 == 0;
 
     private static bool IsPlayerRelatedOddSlot(int index) =>
-        index is >= 0 and <= 199 && index % 2 == 1;
+        IsPlayerRelatedSlot(index) && index % 2 == 1;
 
     private static bool IsLocalPlayerReservedSlot(int index) => index is 0 or 1;
 
-    private bool IsOwnedByLocalPlayer(GameObject* gameObject) =>
-        gameObject->OwnerId == playerState.EntityId;
+    private static GameObject* FindPlayerOwner(GameObjectManager* manager, GameObject* gameObject)
+    {
+        if (manager == null || gameObject == null || gameObject->OwnerId == 0)
+        {
+            return null;
+        }
 
-    private static bool TryFindObject(
+        for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
+        {
+            if (!IsPlayerRelatedEvenSlot(index))
+            {
+                continue;
+            }
+
+            var owner = manager->Objects.IndexSorted[index].Value;
+            if (
+                owner != null
+                && owner->ObjectKind == ObjectKind.Pc
+                && owner->EntityId == gameObject->OwnerId
+            )
+            {
+                return owner;
+            }
+        }
+
+        return null;
+    }
+
+    private bool IsHiddenByThisPlugin(GameObject* gameObject)
+    {
+        return gameObject != null
+            && hiddenObjects.TryGetValue((nint)gameObject, out var record)
+            && record.IsSameObject(gameObject);
+    }
+
+    public int GetHiddenPlayerCount()
+    {
+        var count = 0;
+        foreach (var record in hiddenObjects.Values)
+        {
+            if (record.ObjectKind == ObjectKind.Pc)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    public bool NeedsDynamicRefresh()
+    {
+        return IsCullingEnabled()
+            && !ShouldSuspendCullingInDuty()
+            && playerKeepRules.NeedsDynamicRefresh;
+    }
+
+    private static GameObject* FindObject(
         GameObjectManager* manager,
         nint address,
-        HiddenObjectRecord record,
-        out GameObject* gameObject,
-        out int index
+        HiddenObjectRecord record
     )
     {
-        gameObject = null;
-        index = -1;
         if (manager == null || address == nint.Zero)
         {
-            return false;
+            return null;
         }
 
         for (var i = 0; i < manager->Objects.IndexSorted.Length; i++)
@@ -301,13 +415,11 @@ internal sealed unsafe class ObjectCuller(
             ref var entry = ref manager->Objects.IndexSorted[i];
             if ((nint)entry.Value == address && record.IsSameObject(entry.Value))
             {
-                gameObject = entry.Value;
-                index = i;
-                return true;
+                return entry.Value;
             }
         }
 
-        return false;
+        return null;
     }
 
     #endregion

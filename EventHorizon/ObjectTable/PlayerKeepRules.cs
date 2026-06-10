@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Threading;
 using Dalamud.Game.Chat;
 using Dalamud.Game.Text;
 using Dalamud.Game.Text.SeStringHandling;
@@ -26,13 +27,13 @@ internal sealed unsafe class PlayerKeepRules(
     private readonly Configuration configuration = configuration;
     private readonly IObjectTable objectTable = objectTable;
     private readonly ITargetManager targetManager = targetManager;
-    private readonly object recentChatPlayersLock = new();
     private readonly HashSet<ulong> nearbyKeptPlayers = [];
     private readonly Dictionary<ulong, long> recentTargetPlayers = [];
     private readonly Dictionary<ulong, long> targetingMePlayers = [];
     private readonly Dictionary<string, long> recentChatPlayers = new(
         StringComparer.OrdinalIgnoreCase
     );
+    private readonly Lock recentChatPlayersLock = new();
 
     public bool NeedsDynamicRefresh =>
         configuration.KeepRecruitingPlayers
@@ -56,7 +57,7 @@ internal sealed unsafe class PlayerKeepRules(
         ClearRecentChatPlayers();
     }
 
-    public void RecordChatMessage(IHandleableChatMessage message)
+    public void RecordChatMessage(IChatMessage message)
     {
         if (!configuration.KeepRecentChatPlayers || !IsPlayerChatOrEmote(message.LogKind))
         {
@@ -314,7 +315,7 @@ internal sealed unsafe class PlayerKeepRules(
 
     #region Object Helpers
 
-    private static HashSet<string> GetPlayerNamesFromChatMessage(IHandleableChatMessage message)
+    private static HashSet<string> GetPlayerNamesFromChatMessage(IChatMessage message)
     {
         var playerNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
