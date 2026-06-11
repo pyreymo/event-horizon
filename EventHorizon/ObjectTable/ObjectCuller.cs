@@ -281,35 +281,15 @@ internal sealed unsafe class ObjectCuller(
 
         if (IsPlayerRelatedOddSlot(index))
         {
-            return ShouldHideOddSlotObject(manager, gameObject, index);
+            return gameObject->ObjectKind switch
+            {
+                ObjectKind.Companion => configuration.HideOtherPlayerCompanions,
+                ObjectKind.Ornament => configuration.HideOtherPlayerOrnaments,
+                _ => false,
+            };
         }
 
         return false;
-    }
-
-    private bool ShouldHideOddSlotObject(
-        GameObjectManager* manager,
-        GameObject* gameObject,
-        int index
-    )
-    {
-        var owner = manager->Objects.IndexSorted[index - 1].Value;
-        if (owner == null || gameObject->OwnerId != owner->EntityId)
-        {
-            return false;
-        }
-
-        if (IsHiddenByThisPlugin(owner))
-        {
-            return true;
-        }
-
-        return gameObject->ObjectKind switch
-        {
-            ObjectKind.Companion => configuration.HideOtherPlayerCompanions,
-            ObjectKind.Ornament => configuration.HideOtherPlayerOrnaments,
-            _ => false,
-        };
     }
 
     private bool ShouldHideByVisiblePlayerLimit(ref int visibleOtherPlayers)
@@ -319,7 +299,7 @@ internal sealed unsafe class ObjectCuller(
             return false;
         }
 
-        var visiblePlayerLimit = Math.Clamp(configuration.VisiblePlayerCountLimit, 1, 200);
+        var visiblePlayerLimit = Math.Clamp(configuration.VisiblePlayerCountLimit, 1, 100);
         if (visibleOtherPlayers < visiblePlayerLimit)
         {
             visibleOtherPlayers++;

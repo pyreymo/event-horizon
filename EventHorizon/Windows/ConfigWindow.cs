@@ -56,18 +56,12 @@ public class ConfigWindow : Window, IDisposable
             return;
         }
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        ImGui.Indent();
+        DrawSectionHeader(Loc.Text("Config.Section.HideTriggers"));
         DrawDutyRule();
         DrawLowPlayerCountRule();
         DrawVisiblePlayerLimitRule();
-        ImGui.Spacing();
-        DrawOtherPlayerCompanionRule();
-        DrawOtherPlayerOrnamentRule();
-        ImGui.Spacing();
+
+        DrawSectionHeader(Loc.Text("Config.Section.KeepPlayers"));
         DrawFriendKeepRule();
         DrawPartyKeepRule();
         DrawRecruitingKeepRule();
@@ -75,9 +69,14 @@ public class ConfigWindow : Window, IDisposable
         DrawTargetKeepRule();
         DrawTargetingMeKeepRule();
         DrawNearbyPlayerKeepRule();
-        ImGui.Spacing();
+
+        DrawSectionHeader(Loc.Text("Config.Section.AttachedObjects"));
+        ImGui.TextDisabled(Loc.Text("Config.AttachedObjects.Help"));
+        DrawOtherPlayerCompanionRule();
+        DrawOtherPlayerOrnamentRule();
+
+        DrawSectionHeader(Loc.Text("Config.Section.RaceWhitelist"));
         DrawRaceFilter();
-        ImGui.Unindent();
     }
 
     #endregion
@@ -97,9 +96,11 @@ public class ConfigWindow : Window, IDisposable
     private void DrawStatusOverview()
     {
         var currentPlayerCount = ObjectTableStats.CurrentPlayerCount();
+        var hiddenPlayerCount = plugin.HiddenPlayerCount;
+        var keptOtherPlayerCount = Math.Max(0, currentPlayerCount - hiddenPlayerCount - 1);
 
         ImGui.Spacing();
-        if (ImGui.BeginTable("###EventHorizonStatusOverview", 2, ImGuiTableFlags.SizingStretchSame))
+        if (ImGui.BeginTable("###EventHorizonStatusOverview", 3, ImGuiTableFlags.SizingStretchSame))
         {
             ImGui.TableNextColumn();
             ImGui.TextDisabled(
@@ -108,7 +109,12 @@ public class ConfigWindow : Window, IDisposable
 
             ImGui.TableNextColumn();
             ImGui.TextDisabled(
-                string.Format(Loc.Text("Config.HiddenPlayerCount"), plugin.HiddenPlayerCount)
+                string.Format(Loc.Text("Config.HiddenPlayerCount"), hiddenPlayerCount)
+            );
+
+            ImGui.TableNextColumn();
+            ImGui.TextDisabled(
+                string.Format(Loc.Text("Config.DisplayedPlayerCount"), keptOtherPlayerCount)
             );
 
             ImGui.EndTable();
@@ -146,33 +152,24 @@ public class ConfigWindow : Window, IDisposable
             SaveAndRefresh();
         }
 
-        if (!configuration.DisableCullingBelowPlayerCount)
+        if (configuration.DisableCullingBelowPlayerCount)
         {
-            return;
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(120f);
+            var threshold = configuration.DisableCullingPlayerCountThreshold;
+            if (ImGui.SliderInt("###DisableCullingPlayerCountThreshold", ref threshold, 1, 100))
+            {
+                configuration.DisableCullingPlayerCountThreshold = Math.Clamp(threshold, 1, 100);
+            }
+
+            if (ImGui.IsItemDeactivatedAfterEdit())
+            {
+                SaveAndRefresh();
+            }
+
+            ImGui.SameLine();
+            ImGui.TextUnformatted(Loc.Text("Config.DisableCullingPlayerCountThresholdSuffix"));
         }
-
-        ImGui.Indent();
-
-        ImGui.SetNextItemWidth(120f);
-        var threshold = configuration.DisableCullingPlayerCountThreshold;
-        if (
-            ImGui.SliderInt(
-                Loc.Text("Config.DisableCullingPlayerCountThreshold"),
-                ref threshold,
-                1,
-                200
-            )
-        )
-        {
-            configuration.DisableCullingPlayerCountThreshold = Math.Clamp(threshold, 1, 200);
-        }
-
-        if (ImGui.IsItemDeactivatedAfterEdit())
-        {
-            SaveAndRefresh();
-        }
-
-        ImGui.Unindent();
     }
 
     private void DrawVisiblePlayerLimitRule()
@@ -183,28 +180,27 @@ public class ConfigWindow : Window, IDisposable
             configuration.LimitVisiblePlayerCount = limitVisiblePlayerCount;
             SaveAndRefresh();
         }
+
+        if (configuration.LimitVisiblePlayerCount)
+        {
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(120f);
+            var limit = configuration.VisiblePlayerCountLimit;
+            if (ImGui.SliderInt("###VisiblePlayerCountLimit", ref limit, 1, 100))
+            {
+                configuration.VisiblePlayerCountLimit = Math.Clamp(limit, 1, 100);
+            }
+
+            if (ImGui.IsItemDeactivatedAfterEdit())
+            {
+                SaveAndRefresh();
+            }
+
+            ImGui.SameLine();
+            ImGui.TextUnformatted(Loc.Text("Config.VisiblePlayerCountLimitSuffix"));
+        }
+
         DrawHelpMarker(Loc.Text("Config.LimitVisiblePlayerCount.Help"));
-
-        if (!configuration.LimitVisiblePlayerCount)
-        {
-            return;
-        }
-
-        ImGui.Indent();
-
-        ImGui.SetNextItemWidth(120f);
-        var limit = configuration.VisiblePlayerCountLimit;
-        if (ImGui.SliderInt(Loc.Text("Config.VisiblePlayerCountLimit"), ref limit, 1, 200))
-        {
-            configuration.VisiblePlayerCountLimit = Math.Clamp(limit, 1, 200);
-        }
-
-        if (ImGui.IsItemDeactivatedAfterEdit())
-        {
-            SaveAndRefresh();
-        }
-
-        ImGui.Unindent();
     }
 
     private void DrawOtherPlayerCompanionRule()
@@ -319,48 +315,49 @@ public class ConfigWindow : Window, IDisposable
             SaveAndRefresh();
         }
 
-        if (!configuration.KeepNearbyPlayers)
+        if (configuration.KeepNearbyPlayers)
         {
-            return;
-        }
-
-        ImGui.Indent();
-
-        ImGui.SetNextItemWidth(180f);
-        var range = configuration.KeepNearbyPlayersRange;
-        if (
-            ImGui.SliderFloat(Loc.Text("Config.KeepNearbyPlayersRange"), ref range, 1f, 50f, "%.1f")
-        )
-        {
-            configuration.KeepNearbyPlayersRange = Math.Clamp(range, 1f, 50f);
-        }
-
-        if (ImGui.IsItemDeactivatedAfterEdit())
-        {
-            SaveAndRefresh();
-        }
-
-        ImGui.SameLine();
-
-        var previewNearbyPlayerRange = configuration.PreviewNearbyPlayerRange;
-        if (
-            ImGui.Checkbox(
-                Loc.Text("Config.PreviewNearbyPlayerRange"),
-                ref previewNearbyPlayerRange
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(180f);
+            var range = configuration.KeepNearbyPlayersRange;
+            if (
+                ImGui.SliderFloat(
+                    "###KeepNearbyPlayersRange",
+                    ref range,
+                    1f,
+                    50f,
+                    Loc.Text("Config.DistanceSliderFormat")
+                )
             )
-        )
-        {
-            configuration.PreviewNearbyPlayerRange = previewNearbyPlayerRange;
-            configuration.Save();
-        }
+            {
+                configuration.KeepNearbyPlayersRange = Math.Clamp(range, 1f, 50f);
+            }
 
-        ImGui.Unindent();
+            if (ImGui.IsItemDeactivatedAfterEdit())
+            {
+                SaveAndRefresh();
+            }
+
+            ImGui.SameLine();
+
+            var previewNearbyPlayerRange = configuration.PreviewNearbyPlayerRange;
+            if (
+                ImGui.Checkbox(
+                    Loc.Text("Config.PreviewNearbyPlayerRange"),
+                    ref previewNearbyPlayerRange
+                )
+            )
+            {
+                configuration.PreviewNearbyPlayerRange = previewNearbyPlayerRange;
+                configuration.Save();
+            }
+        }
     }
 
     private static void DrawHelpMarker(string text)
     {
         ImGui.SameLine();
-        ImGui.TextDisabled("(?)");
+        ImGui.TextDisabled("?");
 
         if (!ImGui.IsItemHovered())
         {
@@ -372,6 +369,15 @@ public class ConfigWindow : Window, IDisposable
         ImGui.TextUnformatted(text);
         ImGui.PopTextWrapPos();
         ImGui.EndTooltip();
+    }
+
+    private static void DrawSectionHeader(string label)
+    {
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.TextUnformatted(label);
+        ImGui.Spacing();
     }
 
     #endregion
@@ -387,13 +393,15 @@ public class ConfigWindow : Window, IDisposable
             SaveAndRefresh();
         }
 
-        if (!configuration.KeepSelectedRaces)
+        if (ImGui.TreeNode(Loc.Text("Config.RaceFilter.Edit")))
         {
-            return;
+            DrawRaceFilterEditor();
+            ImGui.TreePop();
         }
+    }
 
-        ImGui.Indent();
-
+    private void DrawRaceFilterEditor()
+    {
         if (ImGui.SmallButton(Loc.Text("Config.RaceFilter.SelectAll")))
         {
             SetAllRaceSexFilters(true);
@@ -424,7 +432,6 @@ public class ConfigWindow : Window, IDisposable
             )
         )
         {
-            ImGui.Unindent();
             return;
         }
 
@@ -450,7 +457,6 @@ public class ConfigWindow : Window, IDisposable
         }
 
         ImGui.EndTable();
-        ImGui.Unindent();
     }
 
     private void DrawRaceRowHeader(byte race)
