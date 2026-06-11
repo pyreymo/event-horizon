@@ -4,7 +4,7 @@ Cull what doesn't orbit you.
 
 Event Horizon is a Dalamud plugin that hides other player-related world objects to reduce visual clutter and rendering load in crowded areas.
 
-Current release: `v0.1.0`
+[![Current release](https://img.shields.io/github/v/release/pyreymo/event-horizon?label=current%20release)](https://github.com/pyreymo/event-horizon/releases/latest)
 
 ## Install
 
