@@ -27,11 +27,36 @@ Both commands open the settings window.
 
 ## Features
 
-- Hide other players and their related objects.
-- Keep friends, party/alliance members, recruiting players, recent chat players, targets, players targeting you, nearby players, and selected races.
-- Pause culling when the current object table has fewer than a configured number of player characters.
-- Apply a fallback cap for the number of visible kept players.
-- Preview nearby-player keep range in the world.
+### Player hiding
+
+- Hide other players in crowded areas while keeping your own character visible.
+- Limit how many other players remain visible after keep rules are applied.
+
+### Keep rules
+
+Keep specific players visible when they match any enabled rule:
+
+- Friends
+- Party and alliance members
+- Recruiting players
+- Recent chat participants
+- Current target and focus target
+- Players targeting you
+- Nearby players
+- Selected race/sex combinations
+
+### Attached objects
+
+For players who remain visible, optionally hide:
+
+- Minions
+- Fashion accessories
+
+### Safety controls
+
+- Suspend hiding in duties.
+- Suspend hiding when the current player count is below your configured threshold.
+- Preview the nearby-player keep range in the world.
 
 ## Building
 
