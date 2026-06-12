@@ -109,7 +109,7 @@ jobs:
                   Set-JsonProp $entry "DownloadLinkUpdate" "$releaseBase/EventHorizon.zip"
                   Set-JsonProp $entry "LastUpdate" ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())
 
-                  $repo | ConvertTo-Json -Depth 20 | Set-Content ".\repo.json" -Encoding UTF8
+                  ConvertTo-Json -InputObject @($repo) -Depth 20 -AsArray | Set-Content ".\repo.json" -Encoding UTF8
 
             - name: Commit repo.json
               shell: pwsh
