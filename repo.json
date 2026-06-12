@@ -22,7 +22,7 @@
     "IconUrl": "https://raw.githubusercontent.com/pyreymo/event-horizon/master/images/icon.png",
     "DownloadLinkInstall": "https://github.com/pyreymo/event-horizon/releases/download/v0.1.3/EventHorizon.zip",
     "DownloadLinkUpdate": "https://github.com/pyreymo/event-horizon/releases/download/v0.1.3/EventHorizon.zip",
-    "LastUpdate": 1781235330,
+    "LastUpdate": 1781235744,
     "Changelog": "- Added a server info bar entry for quick status checks and toggling.\n- Added /eh on, /eh off, and /eh toggle commands.\n- Added a very cool icon."
   }
 ]
