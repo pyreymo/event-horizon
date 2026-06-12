@@ -7,6 +7,6 @@
   "RepoUrl": "https://github.com/pyreymo/event-horizon",
   "ApplicableVersion": "any",
   "Tags": ["utility", "performance", "visibility"],
-  "IconUrl": "https://raw.githubusercontent.com/pyreymo/event-horizon/master/Images/icon.png",
+  "IconUrl": "https://raw.githubusercontent.com/pyreymo/event-horizon/master/EventHorizon/Images/icon.png",
   "AcceptsFeedback": true
 }
