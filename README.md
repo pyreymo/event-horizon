@@ -21,9 +21,12 @@ Then install **Event Horizon** from the plugin installer.
 ```text
 /eventhorizon
 /eh
+/eh on
+/eh off
+/eh toggle
 ```
 
-Both commands open the settings window.
+The full `/eventhorizon` command and the short `/eh` command can be used interchangeably.
 
 ## Features
 
