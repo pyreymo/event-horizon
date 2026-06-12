@@ -104,8 +104,8 @@ public sealed class Plugin : IDalamudPlugin
             DtrBar,
             Configuration,
             GetDtrBarState,
-            ToggleConfigUi,
-            () => RefreshObjectCulling(resetRuleState: true)
+            SetPlayerHidingEnabled,
+            ToggleConfigUi
         );
 
         WindowSystem.AddWindow(ConfigWindow);
@@ -116,7 +116,7 @@ public sealed class Plugin : IDalamudPlugin
         );
         CommandManager.AddHandler(
             ShortCommandName,
-            new CommandInfo(OnCommand) { HelpMessage = Loc.Text("Command.Help.OpenSettings") }
+            new CommandInfo(OnCommand) { HelpMessage = BuildCommandHelp(ShortCommandName) }
         );
 
         PluginInterface.UiBuilder.Draw += OnDraw;
@@ -155,7 +155,33 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnCommand(string command, string args)
     {
-        ToggleConfigUi();
+        switch (args.Trim().ToLowerInvariant())
+        {
+            case "on":
+                SetPlayerHidingEnabled(true);
+                break;
+            case "off":
+                SetPlayerHidingEnabled(false);
+                break;
+            case "toggle":
+                SetPlayerHidingEnabled(!Configuration.HideAllOtherPlayers);
+                break;
+            default:
+                ToggleConfigUi();
+                break;
+        }
+    }
+
+    private static string BuildCommandHelp(string commandName)
+    {
+        return string.Format(
+            Loc.Text("Command.Help"),
+            Loc.Text("Command.Help.OpenSettings"),
+            commandName,
+            Loc.Text("Command.Help.Enable"),
+            Loc.Text("Command.Help.Disable"),
+            Loc.Text("Command.Help.Toggle")
+        );
     }
 
     public void ToggleConfigUi() => ConfigWindow.Toggle();
@@ -226,6 +252,20 @@ public sealed class Plugin : IDalamudPlugin
     public void RefreshObjectCulling(bool resetRuleState = false)
     {
         UpdateObjectArraysHook.Refresh(resetRuleState);
+    }
+
+    private void SetPlayerHidingEnabled(bool enabled)
+    {
+        if (Configuration.HideAllOtherPlayers == enabled)
+        {
+            RefreshDtrBar();
+            return;
+        }
+
+        Configuration.HideAllOtherPlayers = enabled;
+        Configuration.Save();
+        RefreshDtrBar();
+        RefreshObjectCulling(resetRuleState: true);
     }
 
     private void OnChatMessage(IChatMessage message)

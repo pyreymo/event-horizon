@@ -1,5 +1,9 @@
 {
+  "Command.Help": "{0}\n{1} on -> {2}\n{1} off -> {3}\n{1} toggle -> {4}",
   "Command.Help.OpenSettings": "Open Event Horizon settings.",
+  "Command.Help.Enable": "enable player hiding",
+  "Command.Help.Disable": "disable player hiding",
+  "Command.Help.Toggle": "toggle player hiding",
   "Dtr.Text.Enabled": "EH: ON",
   "Dtr.Text.Disabled": "EH: OFF",
   "Dtr.Text.Paused": "EH: PAUSED",

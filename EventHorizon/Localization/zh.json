@@ -1,5 +1,9 @@
 {
+  "Command.Help": "{0}\n{1} on -> {2}\n{1} off -> {3}\n{1} toggle -> {4}",
   "Command.Help.OpenSettings": "打开 Event Horizon 设置。",
+  "Command.Help.Enable": "启用玩家隐藏",
+  "Command.Help.Disable": "停用玩家隐藏",
+  "Command.Help.Toggle": "切换玩家隐藏",
   "Dtr.Text.Enabled": "EH: 开",
   "Dtr.Text.Disabled": "EH: 关",
   "Dtr.Text.Paused": "EH: 暂停",

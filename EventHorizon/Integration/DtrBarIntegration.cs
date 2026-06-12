@@ -11,22 +11,22 @@ internal sealed class DtrBarIntegration : IDisposable
 {
     private readonly Configuration configuration;
     private readonly Func<DtrBarState> getState;
+    private readonly Action<bool> setPlayerHidingEnabled;
     private readonly Action openSettings;
-    private readonly Action refreshObjectCulling;
     private readonly IDtrBarEntry entry;
 
     public DtrBarIntegration(
         IDtrBar dtrBar,
         Configuration configuration,
         Func<DtrBarState> getState,
-        Action openSettings,
-        Action refreshObjectCulling
+        Action<bool> setPlayerHidingEnabled,
+        Action openSettings
     )
     {
         this.configuration = configuration;
         this.getState = getState;
+        this.setPlayerHidingEnabled = setPlayerHidingEnabled;
         this.openSettings = openSettings;
-        this.refreshObjectCulling = refreshObjectCulling;
 
         entry = dtrBar.Get(Loc.Text("Config.Title"));
         entry.MinimumWidth = 70;
@@ -62,10 +62,7 @@ internal sealed class DtrBarIntegration : IDisposable
             return;
         }
 
-        configuration.HideAllOtherPlayers = !configuration.HideAllOtherPlayers;
-        configuration.Save();
-        Refresh();
-        refreshObjectCulling();
+        setPlayerHidingEnabled(!configuration.HideAllOtherPlayers);
     }
 
     private static string GetTextKey(DtrBarState state)
