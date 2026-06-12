@@ -580,6 +580,7 @@ public class ConfigWindow : Window, IDisposable
     {
         configuration.Save();
         plugin.RefreshObjectCulling(resetRuleState: true);
+        plugin.RefreshDtrBar();
     }
 
     #endregion

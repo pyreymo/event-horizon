@@ -1,13 +1,16 @@
 using System;
+using System.Collections.Generic;
 using Dalamud.Game.Chat;
-using Dalamud.Game.Command;
 using Dalamud.Game.ClientState.Conditions;
+using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using EventHorizon.Hooks;
+using EventHorizon.Integration;
 using EventHorizon.Localization;
+using EventHorizon.ObjectTable;
 using EventHorizon.Rendering;
 using EventHorizon.Windows;
 
@@ -18,6 +21,7 @@ public sealed class Plugin : IDalamudPlugin
     private const string PrimaryCommandName = "/eventhorizon";
     private const string ShortCommandName = "/eh";
     private const int DynamicCullingRefreshIntervalMs = 200;
+    private const int DtrBarRefreshIntervalMs = 1_000;
 
     #region Services
 
@@ -52,6 +56,9 @@ public sealed class Plugin : IDalamudPlugin
     internal static IDataManager DataManager { get; private set; } = null!;
 
     [PluginService]
+    internal static IDtrBar DtrBar { get; private set; } = null!;
+
+    [PluginService]
     internal static IPluginLog Log { get; private set; } = null!;
 
     #endregion
@@ -64,8 +71,10 @@ public sealed class Plugin : IDalamudPlugin
     private ConfigWindow ConfigWindow { get; init; }
     private UpdateObjectArraysHook UpdateObjectArraysHook { get; init; }
     private WorldOverlay WorldOverlay { get; init; }
+    private DtrBarIntegration DtrBarIntegration { get; init; }
 
     private long nextDynamicCullingRefresh;
+    private long nextDtrBarRefresh;
     public int HiddenPlayerCount => UpdateObjectArraysHook.HiddenPlayerCount;
     public bool IsDutyCullingSuspended =>
         Configuration.HideAllOtherPlayers
@@ -91,6 +100,13 @@ public sealed class Plugin : IDalamudPlugin
             TargetManager
         );
         WorldOverlay = new WorldOverlay(PluginInterface, Configuration, ObjectTable);
+        DtrBarIntegration = new DtrBarIntegration(
+            DtrBar,
+            Configuration,
+            GetDtrBarState,
+            ToggleConfigUi,
+            () => RefreshObjectCulling(resetRuleState: true)
+        );
 
         WindowSystem.AddWindow(ConfigWindow);
 
@@ -125,6 +141,7 @@ public sealed class Plugin : IDalamudPlugin
 
         WindowSystem.RemoveAllWindows();
         ConfigWindow.Dispose();
+        DtrBarIntegration.Dispose();
         UpdateObjectArraysHook.Dispose();
         WorldOverlay.Dispose();
 
@@ -142,6 +159,8 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     public void ToggleConfigUi() => ConfigWindow.Toggle();
+
+    public void RefreshDtrBar() => DtrBarIntegration.Refresh();
 
     private void OnDraw()
     {
@@ -170,6 +189,8 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnFrameworkUpdate(IFramework framework)
     {
+        RefreshDtrBarIfNeeded();
+
         if (!NeedsDynamicCullingRefresh())
         {
             return;
@@ -183,6 +204,18 @@ public sealed class Plugin : IDalamudPlugin
 
         nextDynamicCullingRefresh = now + DynamicCullingRefreshIntervalMs;
         RefreshObjectCulling();
+    }
+
+    private void RefreshDtrBarIfNeeded()
+    {
+        var now = Environment.TickCount64;
+        if (now < nextDtrBarRefresh)
+        {
+            return;
+        }
+
+        nextDtrBarRefresh = now + DtrBarRefreshIntervalMs;
+        RefreshDtrBar();
     }
 
     private bool NeedsDynamicCullingRefresh()
@@ -200,6 +233,32 @@ public sealed class Plugin : IDalamudPlugin
         UpdateObjectArraysHook.RecordChatMessage(message);
     }
 
+    private DtrBarState GetDtrBarState()
+    {
+        if (!Configuration.HideAllOtherPlayers)
+        {
+            return new DtrBarState(false, []);
+        }
+
+        var pauseReasonKeys = new List<string>();
+
+        if (IsDutyCullingSuspended)
+        {
+            pauseReasonKeys.Add("Dtr.PauseReason.InDuty");
+        }
+
+        if (
+            Configuration.DisableCullingBelowPlayerCount
+            && ObjectTableStats.CurrentPlayerCount()
+                < Configuration.DisableCullingPlayerCountThreshold
+        )
+        {
+            pauseReasonKeys.Add("Dtr.PauseReason.LowPlayerCount");
+        }
+
+        return new DtrBarState(true, pauseReasonKeys);
+    }
+
     #endregion
 
     #region Localization
@@ -207,6 +266,7 @@ public sealed class Plugin : IDalamudPlugin
     private void OnLanguageChanged(string langCode)
     {
         Loc.Load(PluginInterface);
+        RefreshDtrBar();
     }
 
     #endregion
