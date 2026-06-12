@@ -17,6 +17,7 @@ jobs:
               uses: actions/checkout@v5
               with:
                   submodules: recursive
+                  fetch-depth: 0
 
             - name: Install .NET
               uses: actions/setup-dotnet@v5
@@ -56,6 +57,7 @@ jobs:
                   }
 
                   Copy-Item $manifest ".\EventHorizon.generated.json"
+                  Copy-Item $manifest "$env:RUNNER_TEMP\EventHorizon.generated.json"
 
             - name: Create GitHub Release
               uses: softprops/action-gh-release@v2
@@ -63,3 +65,64 @@ jobs:
                   files: |
                       EventHorizon.zip
                       EventHorizon.generated.json
+
+            - name: Update repo.json
+              shell: pwsh
+              run: |
+                  git checkout master
+
+                  function Set-JsonProp($obj, $name, $value) {
+                      if ($obj.PSObject.Properties[$name]) {
+                          $obj.$name = $value
+                      } else {
+                          $obj | Add-Member -NotePropertyName $name -NotePropertyValue $value
+                      }
+                  }
+
+                  function Copy-JsonProps($source, $target) {
+                      foreach ($prop in $source.PSObject.Properties) {
+                          Set-JsonProp $target $prop.Name $prop.Value
+                      }
+                  }
+
+                  $generated = Get-Content "$env:RUNNER_TEMP\EventHorizon.generated.json" -Raw | ConvertFrom-Json
+
+                  if (Test-Path ".\repo.json") {
+                      $repo = @(Get-Content ".\repo.json" -Raw | ConvertFrom-Json)
+                      $entry = $repo | Where-Object { $_.InternalName -eq $generated.InternalName } | Select-Object -First 1
+
+                      if (-not $entry) {
+                          $entry = [pscustomobject]@{}
+                          $repo += $entry
+                      }
+                  } else {
+                      $entry = [pscustomobject]@{}
+                      $repo = @($entry)
+                  }
+
+                  # Preserve handwritten fields already present in repo.json, then overwrite with generated manifest fields.
+                  Copy-JsonProps $generated $entry
+
+                  $releaseBase = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+
+                  Set-JsonProp $entry "DownloadLinkInstall" "$releaseBase/EventHorizon.zip"
+                  Set-JsonProp $entry "DownloadLinkUpdate" "$releaseBase/EventHorizon.zip"
+                  Set-JsonProp $entry "LastUpdate" ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())
+
+                  $repo | ConvertTo-Json -Depth 20 | Set-Content ".\repo.json" -Encoding UTF8
+
+            - name: Commit repo.json
+              shell: pwsh
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+                  git add repo.json
+
+                  if (git diff --cached --quiet) {
+                      Write-Host "repo.json unchanged."
+                  } else {
+                      git commit -m "Update repo.json for ${{ github.ref_name }}"
+                      git push origin master
+                  }
+
