@@ -9,6 +9,9 @@ namespace EventHorizon.Hooks;
 
 internal sealed unsafe class UpdateObjectArraysHook : IDisposable
 {
+    // I experimented with rejecting spawn creation at network side.
+    //   Signature: 40 53 48 83 EC 20 ?? ?? ?? 49 8B D8 44 8B C1
+    // It works, but rejected actors are truly absent and cannot be restored.
     private const string Signature = "40 57 48 83 EC ?? 48 89 5C 24 ?? 33 DB";
 
     private readonly ObjectCuller objectCuller;
