@@ -9,9 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/pyreymo/event-horizon/releases/latest">
-    <img src="https://img.shields.io/github/v/release/pyreymo/event-horizon?label=release" alt="Latest release">
-  </a>
+  <a href="https://github.com/pyreymo/event-horizon/releases/latest"><img src="https://img.shields.io/github/v/release/pyreymo/event-horizon?label=release" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/Dalamud%20API-15-blue" alt="Dalamud API 15">
 </p>
 
