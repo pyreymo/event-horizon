@@ -17,6 +17,8 @@ public class Configuration : IPluginConfiguration
     public int VisiblePlayerCountLimit { get; set; } = 30;
     public bool HideOtherPlayerCompanions { get; set; } = true;
     public bool HideOtherPlayerOrnaments { get; set; } = true;
+    public bool ShowDtrBar { get; set; } = true;
+    public bool EnableFadeTransitions { get; set; } = true;
     public bool KeepFriends { get; set; } = true;
     public bool KeepPartyAndAllianceMembers { get; set; } = true;
     public bool KeepRecruitingPlayers { get; set; } = true;

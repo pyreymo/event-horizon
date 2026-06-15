@@ -13,7 +13,8 @@ internal sealed class DtrBarIntegration : IDisposable
     private readonly Func<DtrBarState> getState;
     private readonly Action<bool> setPlayerHidingEnabled;
     private readonly Action openSettings;
-    private readonly IDtrBarEntry entry;
+    private readonly IDtrBar dtrBar;
+    private IDtrBarEntry? entry;
 
     public DtrBarIntegration(
         IDtrBar dtrBar,
@@ -27,16 +28,20 @@ internal sealed class DtrBarIntegration : IDisposable
         this.getState = getState;
         this.setPlayerHidingEnabled = setPlayerHidingEnabled;
         this.openSettings = openSettings;
-
-        entry = dtrBar.Get(Loc.Text("Config.Title"));
-        entry.MinimumWidth = 70;
-        entry.OnClick = OnClick;
+        this.dtrBar = dtrBar;
 
         Refresh();
     }
 
     public void Refresh()
     {
+        if (!configuration.ShowDtrBar)
+        {
+            RemoveEntry();
+            return;
+        }
+
+        var entry = EnsureEntry();
         var state = getState();
         entry.Text = Loc.Text(GetTextKey(state));
         entry.Tooltip = BuildTooltip(state);
@@ -45,8 +50,7 @@ internal sealed class DtrBarIntegration : IDisposable
 
     public void Dispose()
     {
-        entry.OnClick = null;
-        entry.Remove();
+        RemoveEntry();
     }
 
     private void OnClick(DtrInteractionEvent interaction)
@@ -63,6 +67,32 @@ internal sealed class DtrBarIntegration : IDisposable
         }
 
         setPlayerHidingEnabled(!configuration.HideAllOtherPlayers);
+    }
+
+    private IDtrBarEntry EnsureEntry()
+    {
+        if (entry != null)
+        {
+            return entry;
+        }
+
+        entry = dtrBar.Get(Loc.Text("Config.Title"));
+        entry.MinimumWidth = 70;
+        entry.OnClick = OnClick;
+
+        return entry;
+    }
+
+    private void RemoveEntry()
+    {
+        if (entry == null)
+        {
+            return;
+        }
+
+        entry.OnClick = null;
+        entry.Remove();
+        entry = null;
     }
 
     private static string GetTextKey(DtrBarState state)

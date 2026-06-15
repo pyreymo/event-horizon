@@ -73,6 +73,11 @@ internal sealed unsafe class ObjectCuller : IDisposable
             return;
         }
 
+        if (!configuration.EnableFadeTransitions && HasActiveFades)
+        {
+            ResetFades(manager);
+        }
+
         var visibleOtherPlayers = 0;
 
         for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
@@ -176,6 +181,11 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
     private bool UpdateFade(GameObject* gameObject, bool shouldHide)
     {
+        if (!configuration.EnableFadeTransitions)
+        {
+            return false;
+        }
+
         return fadeController.Update(gameObject, shouldHide);
     }
 

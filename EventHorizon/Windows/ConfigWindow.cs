@@ -42,6 +42,28 @@ public class ConfigWindow : Window, IDisposable
 
     public override void Draw()
     {
+        if (!ImGui.BeginTabBar("###EventHorizonConfigTabs"))
+        {
+            return;
+        }
+
+        if (ImGui.BeginTabItem(Loc.Text("Config.Tab.Culling")))
+        {
+            DrawCullingTab();
+            ImGui.EndTabItem();
+        }
+
+        if (ImGui.BeginTabItem(Loc.Text("Config.Tab.Behavior")))
+        {
+            DrawBehaviorTab();
+            ImGui.EndTabItem();
+        }
+
+        ImGui.EndTabBar();
+    }
+
+    private void DrawCullingTab()
+    {
         var hideAllOtherPlayers = configuration.HideAllOtherPlayers;
         if (ImGui.Checkbox(Loc.Text("Config.HideAllOtherPlayers"), ref hideAllOtherPlayers))
         {
@@ -77,6 +99,23 @@ public class ConfigWindow : Window, IDisposable
 
         DrawSectionHeader(Loc.Text("Config.Section.RaceWhitelist"));
         DrawRaceFilter();
+    }
+
+    private void DrawBehaviorTab()
+    {
+        var showDtrBar = configuration.ShowDtrBar;
+        if (ImGui.Checkbox(Loc.Text("Config.ShowDtrBar"), ref showDtrBar))
+        {
+            configuration.ShowDtrBar = showDtrBar;
+            SaveAndRefreshDtrBar();
+        }
+
+        var enableFadeTransitions = configuration.EnableFadeTransitions;
+        if (ImGui.Checkbox(Loc.Text("Config.EnableFadeTransitions"), ref enableFadeTransitions))
+        {
+            configuration.EnableFadeTransitions = enableFadeTransitions;
+            SaveAndRefresh();
+        }
     }
 
     #endregion
@@ -580,6 +619,12 @@ public class ConfigWindow : Window, IDisposable
     {
         configuration.Save();
         plugin.RefreshObjectCulling(resetRuleState: true);
+        plugin.RefreshDtrBar();
+    }
+
+    private void SaveAndRefreshDtrBar()
+    {
+        configuration.Save();
         plugin.RefreshDtrBar();
     }
 
