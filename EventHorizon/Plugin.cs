@@ -72,6 +72,7 @@ public sealed class Plugin : IDalamudPlugin
     private UpdateObjectArraysHook UpdateObjectArraysHook { get; init; }
     private WorldOverlay WorldOverlay { get; init; }
     private DtrBarIntegration DtrBarIntegration { get; init; }
+    private CharacterAlphaController CharacterAlphaController { get; init; }
 
     private long nextDynamicCullingRefresh;
     private long nextDtrBarRefresh;
@@ -100,6 +101,7 @@ public sealed class Plugin : IDalamudPlugin
             TargetManager
         );
         WorldOverlay = new WorldOverlay(PluginInterface, Configuration, ObjectTable);
+        CharacterAlphaController = new CharacterAlphaController(ObjectTable);
         DtrBarIntegration = new DtrBarIntegration(
             DtrBar,
             Configuration,
@@ -142,6 +144,7 @@ public sealed class Plugin : IDalamudPlugin
         WindowSystem.RemoveAllWindows();
         ConfigWindow.Dispose();
         DtrBarIntegration.Dispose();
+        CharacterAlphaController.Dispose();
         UpdateObjectArraysHook.Dispose();
         WorldOverlay.Dispose();
 
@@ -187,6 +190,11 @@ public sealed class Plugin : IDalamudPlugin
     public void ToggleConfigUi() => ConfigWindow.Toggle();
 
     public void RefreshDtrBar() => DtrBarIntegration.Refresh();
+
+    public bool TrySetLocalPlayerAlpha(float alpha) =>
+        CharacterAlphaController.TrySetLocalPlayerAlpha(alpha);
+
+    public void ResetLocalPlayerAlpha() => CharacterAlphaController.ResetLocalPlayerAlpha();
 
     private void OnDraw()
     {
