@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using Dalamud.Game.Chat;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin.Services;
@@ -7,27 +6,34 @@ using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.ObjectTable;
 
-internal sealed unsafe class ObjectCuller(
-    Configuration configuration,
-    IPlayerState playerState,
-    ICondition condition,
-    IObjectTable objectTable,
-    ITargetManager targetManager
-) : IDisposable
+internal sealed unsafe class ObjectCuller : IDisposable
 {
     private const VisibilityFlags PluginCustomProbe = (VisibilityFlags)0x1000;
     private const VisibilityFlags InvisibleFlag =
         PluginCustomProbe | VisibilityFlags.Nameplate | VisibilityFlags.Model;
 
-    private readonly Configuration configuration = configuration;
-    private readonly IPlayerState playerState = playerState;
-    private readonly ICondition condition = condition;
-    private readonly PlayerKeepRules playerKeepRules = new(
-        configuration,
-        objectTable,
-        targetManager
-    );
-    private readonly Dictionary<nint, HiddenObjectRecord> hiddenObjects = [];
+    private readonly Configuration configuration;
+    private readonly IPlayerState playerState;
+    private readonly ICondition condition;
+    private readonly PlayerKeepRules playerKeepRules;
+    private readonly HiddenObjectTracker hiddenObjectTracker;
+    private readonly ObjectFadeController fadeController;
+
+    public ObjectCuller(
+        Configuration configuration,
+        IPlayerState playerState,
+        ICondition condition,
+        IObjectTable objectTable,
+        ITargetManager targetManager
+    )
+    {
+        this.configuration = configuration;
+        this.playerState = playerState;
+        this.condition = condition;
+        playerKeepRules = new(configuration, objectTable, targetManager);
+        hiddenObjectTracker = new();
+        fadeController = new(hiddenObjectTracker, InvisibleFlag);
+    }
 
     #region Lifecycle
 
@@ -48,12 +54,14 @@ internal sealed unsafe class ObjectCuller(
         if (ShouldSuspendCullingInDuty())
         {
             RestoreHiddenObjects(manager);
+            ResetFades(manager);
             return;
         }
 
         if (ShouldSuspendCulling(manager))
         {
             RestoreHiddenObjects(manager);
+            ResetFades(manager);
             return;
         }
 
@@ -61,6 +69,7 @@ internal sealed unsafe class ObjectCuller(
         if (!playerState.IsLoaded)
         {
             RestoreHiddenObjects(manager);
+            ResetFades(manager);
             return;
         }
 
@@ -79,7 +88,14 @@ internal sealed unsafe class ObjectCuller(
                 continue;
             }
 
-            if (ShouldHidePlayerSlotObject(gameObject, index, ref visibleOtherPlayers))
+            var shouldHide = ShouldHidePlayerSlotObject(gameObject, index, ref visibleOtherPlayers);
+
+            if (UpdateFade(gameObject, shouldHide))
+            {
+                continue;
+            }
+
+            if (shouldHide)
             {
                 Hide(gameObject);
             }
@@ -108,6 +124,7 @@ internal sealed unsafe class ObjectCuller(
         }
 
         PruneMissingHiddenObjects(manager);
+        PruneMissingFades(manager);
     }
 
     public void Reset(GameObjectManager* manager)
@@ -119,21 +136,13 @@ internal sealed unsafe class ObjectCuller(
         }
 
         RestoreHiddenObjects(manager);
+        ResetFades(manager);
         Clear();
     }
 
     private void RestoreHiddenObjects(GameObjectManager* manager)
     {
-        foreach (var (address, record) in hiddenObjects)
-        {
-            var gameObject = FindObject(manager, address, record);
-            if (gameObject != null)
-            {
-                gameObject->RenderFlags &= ~record.AddedFlags;
-            }
-        }
-
-        hiddenObjects.Clear();
+        hiddenObjectTracker.RestoreAll(manager);
     }
 
     public void ClearRuleState()
@@ -157,66 +166,38 @@ internal sealed unsafe class ObjectCuller(
 
     private void Hide(GameObject* gameObject)
     {
-        if (gameObject == null)
-        {
-            return;
-        }
-
-        var address = (nint)gameObject;
-        if (address == nint.Zero)
-        {
-            return;
-        }
-
-        if (!hiddenObjects.TryGetValue(address, out var record) || !record.IsSameObject(gameObject))
-        {
-            hiddenObjects[address] = HiddenObjectRecord.From(gameObject, InvisibleFlag);
-        }
-
-        gameObject->RenderFlags |= InvisibleFlag;
+        hiddenObjectTracker.Hide(gameObject, InvisibleFlag);
     }
 
     private void RestoreIfHidden(GameObject* gameObject)
     {
-        if (gameObject == null)
-        {
-            return;
-        }
+        hiddenObjectTracker.RestoreIfHidden(gameObject);
+    }
 
-        var address = (nint)gameObject;
-        if (!hiddenObjects.TryGetValue(address, out var record))
-        {
-            return;
-        }
-
-        hiddenObjects.Remove(address);
-        if (record.IsSameObject(gameObject))
-        {
-            gameObject->RenderFlags &= ~record.AddedFlags;
-        }
+    private bool UpdateFade(GameObject* gameObject, bool shouldHide)
+    {
+        return fadeController.Update(gameObject, shouldHide);
     }
 
     private void PruneMissingHiddenObjects(GameObjectManager* manager)
     {
-        var staleAddresses = new List<nint>();
+        hiddenObjectTracker.PruneMissing(manager);
+    }
 
-        foreach (var (address, record) in hiddenObjects)
-        {
-            if (FindObject(manager, address, record) == null)
-            {
-                staleAddresses.Add(address);
-            }
-        }
+    private void PruneMissingFades(GameObjectManager* manager)
+    {
+        fadeController.PruneMissing(manager);
+    }
 
-        foreach (var address in staleAddresses)
-        {
-            hiddenObjects.Remove(address);
-        }
+    private void ResetFades(GameObjectManager* manager)
+    {
+        fadeController.Reset(manager);
     }
 
     private void Clear()
     {
-        hiddenObjects.Clear();
+        hiddenObjectTracker.Clear();
+        fadeController.Clear();
         playerKeepRules.Clear();
     }
 
@@ -353,82 +334,17 @@ internal sealed unsafe class ObjectCuller(
 
     private bool IsHiddenByThisPlugin(GameObject* gameObject)
     {
-        return gameObject != null
-            && hiddenObjects.TryGetValue((nint)gameObject, out var record)
-            && record.IsSameObject(gameObject);
+        return hiddenObjectTracker.IsHidden(gameObject);
     }
 
-    public int GetHiddenPlayerCount()
-    {
-        var count = 0;
-        foreach (var record in hiddenObjects.Values)
-        {
-            if (record.ObjectKind == ObjectKind.Pc)
-            {
-                count++;
-            }
-        }
-
-        return count;
-    }
+    public int GetHiddenPlayerCount() => hiddenObjectTracker.HiddenPlayerCount;
 
     public bool NeedsDynamicRefresh()
     {
-        return IsCullingEnabled()
-            && !ShouldSuspendCullingInDuty()
-            && playerKeepRules.NeedsDynamicRefresh;
+        return IsCullingEnabled() && !ShouldSuspendCullingInDuty() && playerState.IsLoaded;
     }
 
-    private static GameObject* FindObject(
-        GameObjectManager* manager,
-        nint address,
-        HiddenObjectRecord record
-    )
-    {
-        if (manager == null || address == nint.Zero)
-        {
-            return null;
-        }
-
-        for (var i = 0; i < manager->Objects.IndexSorted.Length; i++)
-        {
-            ref var entry = ref manager->Objects.IndexSorted[i];
-            if ((nint)entry.Value == address && record.IsSameObject(entry.Value))
-            {
-                return entry.Value;
-            }
-        }
-
-        return null;
-    }
-
-    #endregion
-
-    #region Records
-
-    private readonly record struct HiddenObjectRecord(
-        ulong GameObjectId,
-        uint EntityId,
-        ObjectKind ObjectKind,
-        VisibilityFlags AddedFlags
-    )
-    {
-        public static HiddenObjectRecord From(GameObject* gameObject, VisibilityFlags targetFlags)
-        {
-            var addedFlags = targetFlags & ~gameObject->RenderFlags;
-            return new(
-                (ulong)gameObject->GetGameObjectId(),
-                gameObject->EntityId,
-                gameObject->ObjectKind,
-                addedFlags
-            );
-        }
-
-        public bool IsSameObject(GameObject* gameObject) =>
-            gameObject != null
-            && (ulong)gameObject->GetGameObjectId() == GameObjectId
-            && gameObject->EntityId == EntityId;
-    }
+    public bool HasActiveFades => fadeController.HasActiveFades;
 
     #endregion
 }

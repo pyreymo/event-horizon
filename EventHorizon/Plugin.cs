@@ -21,6 +21,7 @@ public sealed class Plugin : IDalamudPlugin
     private const string PrimaryCommandName = "/eventhorizon";
     private const string ShortCommandName = "/eh";
     private const int DynamicCullingRefreshIntervalMs = 200;
+    private const int FadeCullingRefreshIntervalMs = 16;
     private const int DtrBarRefreshIntervalMs = 1_000;
 
     #region Services
@@ -228,8 +229,15 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        nextDynamicCullingRefresh = now + DynamicCullingRefreshIntervalMs;
         RefreshObjectCulling();
+        nextDynamicCullingRefresh = Environment.TickCount64 + GetDynamicCullingRefreshIntervalMs();
+    }
+
+    private int GetDynamicCullingRefreshIntervalMs()
+    {
+        return UpdateObjectArraysHook.HasActiveFades
+            ? FadeCullingRefreshIntervalMs
+            : DynamicCullingRefreshIntervalMs;
     }
 
     private void RefreshDtrBarIfNeeded()
@@ -240,8 +248,8 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        nextDtrBarRefresh = now + DtrBarRefreshIntervalMs;
         RefreshDtrBar();
+        nextDtrBarRefresh = Environment.TickCount64 + DtrBarRefreshIntervalMs;
     }
 
     private bool NeedsDynamicCullingRefresh()
