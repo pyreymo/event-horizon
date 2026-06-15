@@ -134,16 +134,16 @@ public class ConfigWindow : Window, IDisposable
 
     private void DrawStatusOverview()
     {
-        var currentPlayerCount = ObjectTableStats.CurrentPlayerCount();
+        var currentOtherPlayerCount = ObjectTableStats.CurrentOtherPlayerCount();
         var hiddenPlayerCount = plugin.HiddenPlayerCount;
-        var keptOtherPlayerCount = Math.Max(0, currentPlayerCount - hiddenPlayerCount - 1);
+        var keptOtherPlayerCount = Math.Max(0, currentOtherPlayerCount - hiddenPlayerCount);
 
         ImGui.Spacing();
         if (ImGui.BeginTable("###EventHorizonStatusOverview", 3, ImGuiTableFlags.SizingStretchSame))
         {
             ImGui.TableNextColumn();
             ImGui.TextDisabled(
-                string.Format(Loc.Text("Config.CurrentPlayerCount"), currentPlayerCount)
+                string.Format(Loc.Text("Config.CurrentPlayerCount"), currentOtherPlayerCount)
             );
 
             ImGui.TableNextColumn();
@@ -159,7 +159,7 @@ public class ConfigWindow : Window, IDisposable
             ImGui.EndTable();
         }
 
-        if (IsLowPlayerCountCullingSuspended(currentPlayerCount))
+        if (IsLowPlayerCountCullingSuspended(currentOtherPlayerCount))
         {
             ImGui.TextColored(warningTextColor, Loc.Text("Config.LowPlayerCountCullingSuspended"));
         }
@@ -170,11 +170,11 @@ public class ConfigWindow : Window, IDisposable
         }
     }
 
-    private bool IsLowPlayerCountCullingSuspended(int currentPlayerCount)
+    private bool IsLowPlayerCountCullingSuspended(int currentOtherPlayerCount)
     {
         return configuration.HideAllOtherPlayers
             && configuration.DisableCullingBelowPlayerCount
-            && currentPlayerCount < configuration.DisableCullingPlayerCountThreshold;
+            && currentOtherPlayerCount < configuration.DisableCullingPlayerCountThreshold;
     }
 
     private void DrawLowPlayerCountRule()

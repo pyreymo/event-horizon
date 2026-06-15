@@ -1,3 +1,4 @@
+using System;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 using ObjectKind = FFXIVClientStructs.FFXIV.Client.Game.Object.ObjectKind;
 
@@ -8,6 +9,11 @@ internal static unsafe class ObjectTableStats
     public static int CurrentPlayerCount()
     {
         return CountPlayerObjects(GameObjectManager.Instance());
+    }
+
+    public static int CurrentOtherPlayerCount()
+    {
+        return CountOtherPlayerObjects(GameObjectManager.Instance());
     }
 
     public static int CountPlayerObjects(GameObjectManager* manager)
@@ -28,5 +34,10 @@ internal static unsafe class ObjectTableStats
         }
 
         return count;
+    }
+
+    public static int CountOtherPlayerObjects(GameObjectManager* manager)
+    {
+        return Math.Max(0, CountPlayerObjects(manager) - 1);
     }
 }

@@ -305,7 +305,7 @@ public sealed class Plugin : IDalamudPlugin
 
         if (
             Configuration.DisableCullingBelowPlayerCount
-            && ObjectTableStats.CurrentPlayerCount()
+            && ObjectTableStats.CurrentOtherPlayerCount()
                 < Configuration.DisableCullingPlayerCountThreshold
         )
         {

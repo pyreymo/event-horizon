@@ -223,7 +223,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private bool ShouldSuspendCulling(GameObjectManager* manager)
     {
         return configuration.DisableCullingBelowPlayerCount
-            && ObjectTableStats.CountPlayerObjects(manager)
+            && ObjectTableStats.CountOtherPlayerObjects(manager)
                 < configuration.DisableCullingPlayerCountThreshold;
     }
 
