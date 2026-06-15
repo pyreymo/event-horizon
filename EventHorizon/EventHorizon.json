@@ -1,7 +1,7 @@
 {
   "Author": "pyreymo",
   "Name": "Event Horizon",
-  "Changelog": "- Added a server info bar entry for quick status checks and toggling.\n- Added /eh on, /eh off, and /eh toggle commands.\n- Added a very cool icon.",
+  "Changelog": "- Added smooth fade-in and fade-out transitions when players are hidden or restored.\n- Added plugin behavior settings for the DTR status entry and global fade transitions.\n- Clarified player count status wording: current, hidden, and kept counts now consistently refer to other players.",
   "Punchline": "Cull what doesn't orbit you.",
   "Description": "Cull distant or irrelevant world objects around your character. Use /eventhorizon or /eh to open settings.",
   "RepoUrl": "https://github.com/pyreymo/event-horizon",
