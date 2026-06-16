@@ -123,8 +123,8 @@ public sealed class Plugin : IDalamudPlugin
         );
 
         PluginInterface.UiBuilder.Draw += OnDraw;
-        PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
-        PluginInterface.UiBuilder.OpenMainUi += ToggleConfigUi;
+        PluginInterface.UiBuilder.OpenConfigUi += OpenConfigUi;
+        PluginInterface.UiBuilder.OpenMainUi += OpenMainUi;
         PluginInterface.LanguageChanged += OnLanguageChanged;
         ChatGui.ChatMessage += OnChatMessage;
         Framework.Update += OnFrameworkUpdate;
@@ -136,8 +136,8 @@ public sealed class Plugin : IDalamudPlugin
     public void Dispose()
     {
         PluginInterface.UiBuilder.Draw -= OnDraw;
-        PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
-        PluginInterface.UiBuilder.OpenMainUi -= ToggleConfigUi;
+        PluginInterface.UiBuilder.OpenConfigUi -= OpenConfigUi;
+        PluginInterface.UiBuilder.OpenMainUi -= OpenMainUi;
         PluginInterface.LanguageChanged -= OnLanguageChanged;
         ChatGui.ChatMessage -= OnChatMessage;
         Framework.Update -= OnFrameworkUpdate;
@@ -189,6 +189,16 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     public void ToggleConfigUi() => ConfigWindow.Toggle();
+
+    private void OpenMainUi()
+    {
+        ConfigWindow.Open(ConfigWindow.Tab.Culling);
+    }
+
+    private void OpenConfigUi()
+    {
+        ConfigWindow.Open(ConfigWindow.Tab.Behavior);
+    }
 
     public void RefreshDtrBar() => DtrBarIntegration.Refresh();
 

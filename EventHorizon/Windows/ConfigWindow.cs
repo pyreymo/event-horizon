@@ -11,10 +11,18 @@ namespace EventHorizon.Windows;
 
 public class ConfigWindow : Window, IDisposable
 {
+    public enum Tab
+    {
+        Culling,
+        Behavior,
+    }
+
     private readonly Plugin plugin;
     private readonly Configuration configuration;
     private readonly IDataManager dataManager;
     private readonly Vector4 warningTextColor = new(1f, 0.72f, 0.24f, 1f);
+
+    private Tab? pendingSelectedTab;
 
     #region Lifecycle
 
@@ -30,6 +38,12 @@ public class ConfigWindow : Window, IDisposable
     }
 
     public void Dispose() { }
+
+    public void Open(Tab tab)
+    {
+        pendingSelectedTab = tab;
+        IsOpen = true;
+    }
 
     #endregion
 
@@ -47,19 +61,33 @@ public class ConfigWindow : Window, IDisposable
             return;
         }
 
-        if (ImGui.BeginTabItem(Loc.Text("Config.Tab.Culling")))
+        var tabToSelect = pendingSelectedTab;
+
+        if (
+            ImGui.BeginTabItem(
+                $"{Loc.Text("Config.Tab.Culling")}###CullingTab",
+                tabToSelect == Tab.Culling ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None
+            )
+        )
         {
             DrawCullingTab();
             ImGui.EndTabItem();
         }
 
-        if (ImGui.BeginTabItem(Loc.Text("Config.Tab.Behavior")))
+        if (
+            ImGui.BeginTabItem(
+                $"{Loc.Text("Config.Tab.Behavior")}###BehaviorTab",
+                tabToSelect == Tab.Behavior ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None
+            )
+        )
         {
             DrawBehaviorTab();
             ImGui.EndTabItem();
         }
 
         ImGui.EndTabBar();
+
+        pendingSelectedTab = null;
     }
 
     private void DrawCullingTab()
