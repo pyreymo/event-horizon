@@ -23,6 +23,11 @@ public class ConfigWindow : Window, IDisposable
     private readonly Vector4 warningTextColor = new(1f, 0.72f, 0.24f, 1f);
 
     private Tab? pendingSelectedTab;
+    private CompetitiveKeepRule? draggedCompetitiveKeepRule;
+    private bool competitiveKeepRuleOrderChanged;
+    private bool showRaceSexPriorityEditor;
+
+    private readonly record struct ImGuiItemState(bool Hovered, bool Active = false);
 
     #region Lifecycle
 
@@ -106,27 +111,32 @@ public class ConfigWindow : Window, IDisposable
             return;
         }
 
-        DrawSectionHeader(Loc.Text("Config.Section.HideTriggers"));
-        DrawDutyRule();
-        DrawLowPlayerCountRule();
+        if (DrawCollapsibleSectionHeader(Loc.Text("Config.Section.HideTriggers")))
+        {
+            DrawDutyRule();
+            DrawLowPlayerCountRule();
+            ImGui.TreePop();
+        }
+
+        DrawSectionHeader(
+            Loc.Text("Config.Section.VisiblePlayerBudget"),
+            Loc.Text("Config.LimitVisiblePlayerCount.Help")
+        );
         DrawVisiblePlayerLimitRule();
 
-        DrawSectionHeader(Loc.Text("Config.Section.KeepPlayers"));
-        DrawFriendKeepRule();
-        DrawPartyKeepRule();
-        DrawRecruitingKeepRule();
-        DrawRecentChatKeepRule();
-        DrawTargetKeepRule();
-        DrawTargetingMeKeepRule();
-        DrawNearbyPlayerKeepRule();
+        DrawKeepRules();
 
-        DrawSectionHeader(Loc.Text("Config.Section.AttachedObjects"));
-        ImGui.TextDisabled(Loc.Text("Config.AttachedObjects.Help"));
-        DrawOtherPlayerCompanionRule();
-        DrawOtherPlayerOrnamentRule();
-
-        DrawSectionHeader(Loc.Text("Config.Section.RaceWhitelist"));
-        DrawRaceFilter();
+        if (
+            DrawCollapsibleSectionHeader(
+                Loc.Text("Config.Section.AttachedObjects"),
+                Loc.Text("Config.AttachedObjects.Help")
+            )
+        )
+        {
+            DrawOtherPlayerCompanionRule();
+            DrawOtherPlayerOrnamentRule();
+            ImGui.TreePop();
+        }
     }
 
     private void DrawBehaviorTab()
@@ -165,37 +175,40 @@ public class ConfigWindow : Window, IDisposable
         var currentOtherPlayerCount = ObjectTableStats.CurrentOtherPlayerCount();
         var hiddenPlayerCount = plugin.HiddenPlayerCount;
         var keptOtherPlayerCount = Math.Max(0, currentOtherPlayerCount - hiddenPlayerCount);
+        var suspensionReason = GetCullingSuspensionReason(currentOtherPlayerCount);
 
         ImGui.Spacing();
-        if (ImGui.BeginTable("###EventHorizonStatusOverview", 3, ImGuiTableFlags.SizingStretchSame))
+        if (!string.IsNullOrEmpty(suspensionReason))
         {
-            ImGui.TableNextColumn();
-            ImGui.TextDisabled(
-                string.Format(Loc.Text("Config.CurrentPlayerCount"), currentOtherPlayerCount)
+            ImGui.TextColored(
+                warningTextColor,
+                string.Format(Loc.Text("Config.StatusPaused"), suspensionReason)
             );
+            return;
+        }
 
-            ImGui.TableNextColumn();
-            ImGui.TextDisabled(
-                string.Format(Loc.Text("Config.HiddenPlayerCount"), hiddenPlayerCount)
-            );
+        ImGui.TextDisabled(
+            string.Format(Loc.Text("Config.StatusRunning"), keptOtherPlayerCount, hiddenPlayerCount)
+        );
+    }
 
-            ImGui.TableNextColumn();
-            ImGui.TextDisabled(
-                string.Format(Loc.Text("Config.DisplayedPlayerCount"), keptOtherPlayerCount)
-            );
-
-            ImGui.EndTable();
+    private string GetCullingSuspensionReason(int currentOtherPlayerCount)
+    {
+        if (plugin.IsDutyCullingSuspended)
+        {
+            return Loc.Text("Config.DutyPauseReason");
         }
 
         if (IsLowPlayerCountCullingSuspended(currentOtherPlayerCount))
         {
-            ImGui.TextColored(warningTextColor, Loc.Text("Config.LowPlayerCountCullingSuspended"));
+            return string.Format(
+                Loc.Text("Config.LowPlayerCountPauseReason"),
+                currentOtherPlayerCount,
+                configuration.DisableCullingPlayerCountThreshold
+            );
         }
 
-        if (plugin.IsDutyCullingSuspended)
-        {
-            ImGui.TextColored(warningTextColor, Loc.Text("Config.DutyCullingSuspended"));
-        }
+        return string.Empty;
     }
 
     private bool IsLowPlayerCountCullingSuspended(int currentOtherPlayerCount)
@@ -248,26 +261,33 @@ public class ConfigWindow : Window, IDisposable
             SaveAndRefresh();
         }
 
-        if (configuration.LimitVisiblePlayerCount)
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(120f);
+        var limit = configuration.VisiblePlayerCountLimit;
+        if (!configuration.LimitVisiblePlayerCount)
         {
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(120f);
-            var limit = configuration.VisiblePlayerCountLimit;
-            if (ImGui.SliderInt("###VisiblePlayerCountLimit", ref limit, 1, 100))
-            {
-                configuration.VisiblePlayerCountLimit = Math.Clamp(limit, 1, 100);
-            }
-
-            if (ImGui.IsItemDeactivatedAfterEdit())
-            {
-                SaveAndRefresh();
-            }
-
-            ImGui.SameLine();
-            ImGui.TextUnformatted(Loc.Text("Config.VisiblePlayerCountLimitSuffix"));
+            ImGui.BeginDisabled();
         }
 
-        DrawHelpMarker(Loc.Text("Config.LimitVisiblePlayerCount.Help"));
+        if (ImGui.SliderInt("###VisiblePlayerCountLimit", ref limit, 1, 100))
+        {
+            configuration.VisiblePlayerCountLimit = Math.Clamp(limit, 1, 100);
+        }
+
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            SaveAndRefresh();
+        }
+
+        if (!configuration.LimitVisiblePlayerCount)
+        {
+            ImGui.EndDisabled();
+        }
+
+        ImGui.SameLine();
+        ImGui.TextUnformatted(Loc.Text("Config.VisiblePlayerCountLimitSuffix"));
+        ImGui.SameLine();
+        ImGui.TextDisabled(Loc.Text("Config.ProtectedPlayersIgnoreLimit"));
     }
 
     private void DrawOtherPlayerCompanionRule()
@@ -300,126 +320,298 @@ public class ConfigWindow : Window, IDisposable
         }
     }
 
-    private void DrawFriendKeepRule()
+    private void DrawKeepRules()
     {
-        var keepFriends = configuration.KeepFriends;
-        if (ImGui.Checkbox(Loc.Text("Config.KeepFriends"), ref keepFriends))
+        DrawSectionHeader(Loc.Text("Config.Section.KeepRules"), Loc.Text("Config.KeepRules.Help"));
+
+        if (!ImGui.BeginTable("###CompetitiveKeepOrderTable", 2, ImGuiTableFlags.SizingStretchProp))
         {
-            configuration.KeepFriends = keepFriends;
-            SaveAndRefresh();
+            return;
+        }
+
+        ImGui.TableSetupColumn(
+            "###CompetitiveKeepOrderHandle",
+            ImGuiTableColumnFlags.WidthFixed,
+            28f
+        );
+        ImGui.TableSetupColumn("###CompetitiveKeepOrderRule", ImGuiTableColumnFlags.WidthStretch);
+
+        DrawKeepRuleGroupHeader(Loc.Text("Config.KeepRules.Protected"));
+        DrawProtectedKeepRuleRows();
+
+        if (DrawKeepRuleGroupHeader(Loc.Text("Config.KeepRules.Priority"), showResetButton: true))
+        {
+            CompetitiveKeepOrder.Reset(configuration);
+            SaveAndRefreshWithoutRuleReset();
+        }
+
+        foreach (var rule in configuration.CompetitiveKeepRuleOrder.ToArray())
+        {
+            DrawCompetitiveKeepRuleOrderRow(rule);
+        }
+
+        ImGui.EndTable();
+
+        if (showRaceSexPriorityEditor)
+        {
+            ImGui.Indent();
+            DrawRaceFilterEditor();
+            ImGui.Unindent();
+        }
+
+        if (draggedCompetitiveKeepRule.HasValue && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+        {
+            draggedCompetitiveKeepRule = null;
+            if (competitiveKeepRuleOrderChanged)
+            {
+                competitiveKeepRuleOrderChanged = false;
+                SaveAndRefreshWithoutRuleReset();
+            }
         }
     }
 
-    private void DrawPartyKeepRule()
+    private static bool DrawKeepRuleGroupHeader(string label, bool showResetButton = false)
     {
-        var keepPartyAndAllianceMembers = configuration.KeepPartyAndAllianceMembers;
-        if (
-            ImGui.Checkbox(
-                Loc.Text("Config.KeepPartyAndAllianceMembers"),
-                ref keepPartyAndAllianceMembers
-            )
-        )
+        ImGui.TableNextRow();
+        ImGui.TableNextColumn();
+        ImGui.TableNextColumn();
+        ImGui.TextDisabled(label);
+
+        if (!showResetButton)
         {
-            configuration.KeepPartyAndAllianceMembers = keepPartyAndAllianceMembers;
-            SaveAndRefresh();
+            return false;
         }
+
+        ImGui.SameLine();
+        return ImGui.SmallButton(Loc.Text("Config.CompetitiveKeepOrder.Reset"));
     }
 
-    private void DrawRecruitingKeepRule()
-    {
-        var keepRecruitingPlayers = configuration.KeepRecruitingPlayers;
-        if (ImGui.Checkbox(Loc.Text("Config.KeepRecruitingPlayers"), ref keepRecruitingPlayers))
-        {
-            configuration.KeepRecruitingPlayers = keepRecruitingPlayers;
-            SaveAndRefresh();
-        }
-    }
-
-    private void DrawRecentChatKeepRule()
-    {
-        var keepRecentChatPlayers = configuration.KeepRecentChatPlayers;
-        if (ImGui.Checkbox(Loc.Text("Config.KeepRecentChatPlayers"), ref keepRecentChatPlayers))
-        {
-            configuration.KeepRecentChatPlayers = keepRecentChatPlayers;
-            SaveAndRefresh();
-        }
-        DrawHelpMarker(Loc.Text("Config.KeepRecentChatPlayers.Help"));
-    }
-
-    private void DrawTargetKeepRule()
+    private void DrawProtectedKeepRuleRows()
     {
         var keepTargetAndFocusPlayers = configuration.KeepTargetAndFocusPlayers;
+        DrawProtectedKeepRuleRow(
+            Loc.Text("Config.KeepTargetAndFocusPlayers"),
+            ref keepTargetAndFocusPlayers,
+            Loc.Text("Config.KeepTargetAndFocusPlayers.Help"),
+            value => configuration.KeepTargetAndFocusPlayers = value
+        );
+
+        var keepPartyAndAllianceMembers = configuration.KeepPartyAndAllianceMembers;
+        DrawProtectedKeepRuleRow(
+            Loc.Text("Config.KeepPartyAndAllianceMembers"),
+            ref keepPartyAndAllianceMembers,
+            string.Empty,
+            value => configuration.KeepPartyAndAllianceMembers = value
+        );
+
+        var keepFriends = configuration.KeepFriends;
+        DrawProtectedKeepRuleRow(
+            Loc.Text("Config.KeepFriends"),
+            ref keepFriends,
+            string.Empty,
+            value => configuration.KeepFriends = value
+        );
+    }
+
+    private void DrawProtectedKeepRuleRow(
+        string label,
+        ref bool value,
+        string helpText,
+        Action<bool> setValue
+    )
+    {
+        ImGui.TableNextRow();
+        ImGui.TableNextColumn();
+        ImGui.TextUnformatted(string.Empty);
+
+        ImGui.TableNextColumn();
+        if (ImGui.Checkbox(label, ref value))
+        {
+            setValue(value);
+            SaveAndRefresh();
+        }
+
+        if (!string.IsNullOrEmpty(helpText))
+        {
+            DrawHelpMarker(helpText);
+        }
+    }
+
+    private void DrawCompetitiveKeepRuleOrderRow(CompetitiveKeepRule rule)
+    {
+        ImGui.TableNextRow();
+        ImGui.TableNextColumn();
+        var handleState = DrawCompetitiveKeepRuleHandle(rule);
+
+        ImGui.TableNextColumn();
+        var ruleItemState = DrawCompetitiveKeepRuleControl(rule);
+
+        if (handleState.Active && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+        {
+            draggedCompetitiveKeepRule = rule;
+        }
+
+        if (
+            draggedCompetitiveKeepRule.HasValue
+            && draggedCompetitiveKeepRule.Value != rule
+            && (handleState.Hovered || ruleItemState.Hovered)
+        )
+        {
+            MoveCompetitiveKeepRuleTo(draggedCompetitiveKeepRule.Value, rule);
+        }
+    }
+
+    private static ImGuiItemState DrawCompetitiveKeepRuleHandle(CompetitiveKeepRule rule)
+    {
+        var handleSize = new Vector2(20f, ImGui.GetTextLineHeightWithSpacing());
+        ImGui.InvisibleButton($"###CompetitiveKeepRuleHandle{rule}", handleSize);
+
+        var hovered = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
+        var active = ImGui.IsItemActive();
+        DrawHandleLines(ImGui.GetItemRectMin(), ImGui.GetItemRectMax(), hovered || active);
+
+        return new ImGuiItemState(hovered, active);
+    }
+
+    private static void DrawHandleLines(Vector2 min, Vector2 max, bool highlighted)
+    {
+        var drawList = ImGui.GetWindowDrawList();
+        var color = ImGui.GetColorU32(highlighted ? ImGuiCol.Text : ImGuiCol.TextDisabled);
+        var width = 11f;
+        var left = min.X + (max.X - min.X - width) * 0.5f;
+        var centerY = (min.Y + max.Y) * 0.5f;
+
+        for (var i = -1; i <= 1; i++)
+        {
+            var y = centerY + i * 4f;
+            drawList.AddLine(new Vector2(left, y), new Vector2(left + width, y), color, 1.5f);
+        }
+    }
+
+    private ImGuiItemState DrawCompetitiveKeepRuleControl(CompetitiveKeepRule rule)
+    {
+        var enabled = IsCompetitiveKeepRuleEnabled(rule);
         if (
             ImGui.Checkbox(
-                Loc.Text("Config.KeepTargetAndFocusPlayers"),
-                ref keepTargetAndFocusPlayers
+                $"{GetCompetitiveKeepRuleLabel(rule)}###CompetitiveKeepRule{rule}",
+                ref enabled
             )
         )
         {
-            configuration.KeepTargetAndFocusPlayers = keepTargetAndFocusPlayers;
+            SetCompetitiveKeepRuleEnabled(rule, enabled);
             SaveAndRefresh();
         }
-        DrawHelpMarker(Loc.Text("Config.KeepTargetAndFocusPlayers.Help"));
+        var itemState = new ImGuiItemState(
+            ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem)
+        );
+
+        switch (rule)
+        {
+            case CompetitiveKeepRule.TargetingMe:
+                DrawHelpMarker(Loc.Text("Config.KeepPlayersTargetingMe.Help"));
+                break;
+            case CompetitiveKeepRule.RecentChat:
+                DrawHelpMarker(Loc.Text("Config.KeepRecentChatPlayers.Help"));
+                break;
+            case CompetitiveKeepRule.Nearby:
+                DrawNearbyPlayerPriorityOptions();
+                break;
+            case CompetitiveKeepRule.Race:
+                ImGui.SameLine();
+                if (ImGui.SmallButton(Loc.Text("Config.RaceFilter.Edit")))
+                {
+                    showRaceSexPriorityEditor = !showRaceSexPriorityEditor;
+                }
+                break;
+        }
+
+        return itemState;
     }
 
-    private void DrawTargetingMeKeepRule()
+    private void DrawNearbyPlayerPriorityOptions()
     {
-        var keepPlayersTargetingMe = configuration.KeepPlayersTargetingMe;
-        if (ImGui.Checkbox(Loc.Text("Config.KeepPlayersTargetingMe"), ref keepPlayersTargetingMe))
+        ImGui.SameLine();
+        ImGui.TextUnformatted(Loc.Text("Config.KeepNearbyPlayersRange"));
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(140f);
+        var range = configuration.KeepNearbyPlayersRange;
+        if (
+            ImGui.SliderFloat(
+                "###KeepNearbyPlayersRange",
+                ref range,
+                1f,
+                50f,
+                Loc.Text("Config.DistanceSliderFormat")
+            )
+        )
         {
-            configuration.KeepPlayersTargetingMe = keepPlayersTargetingMe;
+            configuration.KeepNearbyPlayersRange = Math.Clamp(range, 1f, 50f);
+        }
+
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
             SaveAndRefresh();
         }
-        DrawHelpMarker(Loc.Text("Config.KeepPlayersTargetingMe.Help"));
     }
 
-    private void DrawNearbyPlayerKeepRule()
+    private bool IsCompetitiveKeepRuleEnabled(CompetitiveKeepRule rule) =>
+        rule switch
+        {
+            CompetitiveKeepRule.TargetingMe => configuration.KeepPlayersTargetingMe,
+            CompetitiveKeepRule.RecentChat => configuration.KeepRecentChatPlayers,
+            CompetitiveKeepRule.Recruiting => configuration.KeepRecruitingPlayers,
+            CompetitiveKeepRule.Nearby => configuration.KeepNearbyPlayers,
+            CompetitiveKeepRule.Race => configuration.KeepSelectedRaces,
+            _ => false,
+        };
+
+    private void SetCompetitiveKeepRuleEnabled(CompetitiveKeepRule rule, bool enabled)
     {
-        var keepNearbyPlayers = configuration.KeepNearbyPlayers;
-        if (ImGui.Checkbox(Loc.Text("Config.KeepNearbyPlayers"), ref keepNearbyPlayers))
+        switch (rule)
         {
-            configuration.KeepNearbyPlayers = keepNearbyPlayers;
-            SaveAndRefresh();
-        }
-
-        if (configuration.KeepNearbyPlayers)
-        {
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(180f);
-            var range = configuration.KeepNearbyPlayersRange;
-            if (
-                ImGui.SliderFloat(
-                    "###KeepNearbyPlayersRange",
-                    ref range,
-                    1f,
-                    50f,
-                    Loc.Text("Config.DistanceSliderFormat")
-                )
-            )
-            {
-                configuration.KeepNearbyPlayersRange = Math.Clamp(range, 1f, 50f);
-            }
-
-            if (ImGui.IsItemDeactivatedAfterEdit())
-            {
-                SaveAndRefresh();
-            }
-
-            ImGui.SameLine();
-
-            var previewNearbyPlayerRange = configuration.PreviewNearbyPlayerRange;
-            if (
-                ImGui.Checkbox(
-                    Loc.Text("Config.PreviewNearbyPlayerRange"),
-                    ref previewNearbyPlayerRange
-                )
-            )
-            {
-                configuration.PreviewNearbyPlayerRange = previewNearbyPlayerRange;
-                configuration.Save();
-            }
+            case CompetitiveKeepRule.TargetingMe:
+                configuration.KeepPlayersTargetingMe = enabled;
+                break;
+            case CompetitiveKeepRule.RecentChat:
+                configuration.KeepRecentChatPlayers = enabled;
+                break;
+            case CompetitiveKeepRule.Recruiting:
+                configuration.KeepRecruitingPlayers = enabled;
+                break;
+            case CompetitiveKeepRule.Nearby:
+                configuration.KeepNearbyPlayers = enabled;
+                break;
+            case CompetitiveKeepRule.Race:
+                configuration.KeepSelectedRaces = enabled;
+                break;
         }
     }
+
+    private void MoveCompetitiveKeepRuleTo(CompetitiveKeepRule dragged, CompetitiveKeepRule target)
+    {
+        var order = configuration.CompetitiveKeepRuleOrder;
+        var from = order.IndexOf(dragged);
+        var to = order.IndexOf(target);
+        if (from < 0 || to < 0 || from == to)
+        {
+            return;
+        }
+
+        order.RemoveAt(from);
+        order.Insert(Math.Min(to, order.Count), dragged);
+        competitiveKeepRuleOrderChanged = true;
+    }
+
+    private static string GetCompetitiveKeepRuleLabel(CompetitiveKeepRule rule) =>
+        rule switch
+        {
+            CompetitiveKeepRule.TargetingMe => Loc.Text("Config.KeepPlayersTargetingMe"),
+            CompetitiveKeepRule.RecentChat => Loc.Text("Config.KeepRecentChatPlayers"),
+            CompetitiveKeepRule.Recruiting => Loc.Text("Config.KeepRecruitingPlayers"),
+            CompetitiveKeepRule.Nearby => Loc.Text("Config.KeepNearbyPlayers"),
+            CompetitiveKeepRule.Race => Loc.Text("Config.KeepRaceFilter"),
+            _ => rule.ToString(),
+        };
 
     private static void DrawHelpMarker(string text)
     {
@@ -438,34 +630,34 @@ public class ConfigWindow : Window, IDisposable
         ImGui.EndTooltip();
     }
 
-    private static void DrawSectionHeader(string label)
+    private static void DrawSectionHeader(string label, string helpText = "")
     {
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
         ImGui.TextUnformatted(label);
+        if (!string.IsNullOrEmpty(helpText))
+        {
+            DrawHelpMarker(helpText);
+        }
         ImGui.Spacing();
+    }
+
+    private static bool DrawCollapsibleSectionHeader(string label, string helpText = "")
+    {
+        ImGui.Spacing();
+        var open = ImGui.TreeNode(label);
+        if (!string.IsNullOrEmpty(helpText))
+        {
+            DrawHelpMarker(helpText);
+        }
+
+        return open;
     }
 
     #endregion
 
     #region Race/Sex Filter
-
-    private void DrawRaceFilter()
-    {
-        var keepSelectedRaces = configuration.KeepSelectedRaces;
-        if (ImGui.Checkbox(Loc.Text("Config.KeepRaceFilter"), ref keepSelectedRaces))
-        {
-            configuration.KeepSelectedRaces = keepSelectedRaces;
-            SaveAndRefresh();
-        }
-
-        if (ImGui.TreeNode(Loc.Text("Config.RaceFilter.Edit")))
-        {
-            DrawRaceFilterEditor();
-            ImGui.TreePop();
-        }
-    }
 
     private void DrawRaceFilterEditor()
     {
@@ -647,6 +839,13 @@ public class ConfigWindow : Window, IDisposable
     {
         configuration.Save();
         plugin.RefreshObjectCulling(resetRuleState: true);
+        plugin.RefreshDtrBar();
+    }
+
+    private void SaveAndRefreshWithoutRuleReset()
+    {
+        configuration.Save();
+        plugin.RefreshObjectCulling();
         plugin.RefreshDtrBar();
     }
 

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Dalamud.Game.Chat;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin.Services;
@@ -18,6 +19,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly PlayerKeepRules playerKeepRules;
     private readonly HiddenObjectTracker hiddenObjectTracker;
     private readonly ObjectFadeController fadeController;
+    private PlayerKeepBudgetStats keepBudgetStats;
 
     public ObjectCuller(
         Configuration configuration,
@@ -78,7 +80,12 @@ internal sealed unsafe class ObjectCuller : IDisposable
             ResetFades(manager);
         }
 
-        var visibleOtherPlayers = 0;
+        var playerKeepPlan = PlayerKeepPlan.Build(configuration, GetPlayerKeepCandidates(manager));
+        keepBudgetStats = new(
+            playerKeepPlan.ProtectedPlayerCount,
+            playerKeepPlan.VisibleCompetitivePlayerCount,
+            Math.Clamp(configuration.VisiblePlayerCountLimit, 1, 100)
+        );
 
         for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
         {
@@ -93,7 +100,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
                 continue;
             }
 
-            var shouldHide = ShouldHidePlayerSlotObject(gameObject, index, ref visibleOtherPlayers);
+            var shouldHide = ShouldHidePlayerSlotObject(gameObject, index, playerKeepPlan);
 
             if (UpdateFade(gameObject, shouldHide))
             {
@@ -209,6 +216,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         hiddenObjectTracker.Clear();
         fadeController.Clear();
         playerKeepRules.Clear();
+        keepBudgetStats = default;
     }
 
     #endregion
@@ -233,10 +241,10 @@ internal sealed unsafe class ObjectCuller : IDisposable
             && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]);
     }
 
-    private bool ShouldHidePlayerSlotObject(
+    private static bool ShouldHidePlayerSlotObject(
         GameObject* gameObject,
         int index,
-        ref int visibleOtherPlayers
+        PlayerKeepPlan playerKeepPlan
     )
     {
         if (!IsPlayerRelatedEvenSlot(index) || IsLocalPlayerReservedSlot(index))
@@ -244,8 +252,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
             return false;
         }
 
-        return !playerKeepRules.ShouldKeep(gameObject)
-            || ShouldHideByVisiblePlayerLimit(ref visibleOtherPlayers);
+        return playerKeepPlan.ShouldHide((nint)gameObject);
     }
 
     private bool ShouldHideNonPlayerSlotObject(
@@ -283,21 +290,31 @@ internal sealed unsafe class ObjectCuller : IDisposable
         return false;
     }
 
-    private bool ShouldHideByVisiblePlayerLimit(ref int visibleOtherPlayers)
+    private List<PlayerKeepCandidate> GetPlayerKeepCandidates(GameObjectManager* manager)
     {
-        if (!configuration.LimitVisiblePlayerCount)
+        var candidates = new List<PlayerKeepCandidate>();
+
+        for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
         {
-            return false;
+            if (!IsPlayerRelatedEvenSlot(index) || IsLocalPlayerReservedSlot(index))
+            {
+                continue;
+            }
+
+            var gameObject = manager->Objects.IndexSorted[index].Value;
+            if (gameObject == null || gameObject->ObjectKind != ObjectKind.Pc)
+            {
+                continue;
+            }
+
+            var keepDecision = playerKeepRules.GetKeepDecision(gameObject);
+            if (keepDecision.Kind != PlayerKeepDecisionKind.None)
+            {
+                candidates.Add(new((nint)gameObject, keepDecision, gameObject->EntityId));
+            }
         }
 
-        var visiblePlayerLimit = Math.Clamp(configuration.VisiblePlayerCountLimit, 1, 100);
-        if (visibleOtherPlayers < visiblePlayerLimit)
-        {
-            visibleOtherPlayers++;
-            return false;
-        }
-
-        return true;
+        return candidates;
     }
 
     #endregion
@@ -348,6 +365,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
     }
 
     public int GetHiddenPlayerCount() => hiddenObjectTracker.HiddenPlayerCount;
+
+    public PlayerKeepBudgetStats GetKeepBudgetStats() => keepBudgetStats;
 
     public bool NeedsDynamicRefresh()
     {

@@ -22,6 +22,7 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
     public bool NeedsDynamicRefresh => objectCuller.NeedsDynamicRefresh();
     public bool HasActiveFades => objectCuller.HasActiveFades;
     public int HiddenPlayerCount => objectCuller.GetHiddenPlayerCount();
+    public PlayerKeepBudgetStats KeepBudgetStats => objectCuller.GetKeepBudgetStats();
 
     public UpdateObjectArraysHook(
         IGameInteropProvider gameInteropProvider,

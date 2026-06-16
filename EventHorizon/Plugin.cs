@@ -71,13 +71,13 @@ public sealed class Plugin : IDalamudPlugin
     public readonly WindowSystem WindowSystem = new("EventHorizon");
     private ConfigWindow ConfigWindow { get; init; }
     private UpdateObjectArraysHook UpdateObjectArraysHook { get; init; }
-    private WorldOverlay WorldOverlay { get; init; }
     private DtrBarIntegration DtrBarIntegration { get; init; }
     private CharacterAlphaController CharacterAlphaController { get; init; }
 
     private long nextDynamicCullingRefresh;
     private long nextDtrBarRefresh;
     public int HiddenPlayerCount => UpdateObjectArraysHook.HiddenPlayerCount;
+    internal PlayerKeepBudgetStats KeepBudgetStats => UpdateObjectArraysHook.KeepBudgetStats;
     public bool IsDutyCullingSuspended =>
         Configuration.HideAllOtherPlayers
         && Configuration.DisableInDuty
@@ -101,7 +101,6 @@ public sealed class Plugin : IDalamudPlugin
             ObjectTable,
             TargetManager
         );
-        WorldOverlay = new WorldOverlay(PluginInterface, Configuration, ObjectTable);
         CharacterAlphaController = new CharacterAlphaController(ObjectTable);
         DtrBarIntegration = new DtrBarIntegration(
             DtrBar,
@@ -147,7 +146,6 @@ public sealed class Plugin : IDalamudPlugin
         DtrBarIntegration.Dispose();
         CharacterAlphaController.Dispose();
         UpdateObjectArraysHook.Dispose();
-        WorldOverlay.Dispose();
 
         CommandManager.RemoveHandler(PrimaryCommandName);
         CommandManager.RemoveHandler(ShortCommandName);
@@ -216,15 +214,6 @@ public sealed class Plugin : IDalamudPlugin
         catch (Exception ex)
         {
             Log.Error(ex, "WindowSystem.Draw threw.");
-        }
-
-        try
-        {
-            WorldOverlay.Draw();
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "WorldOverlay.Draw threw.");
         }
     }
 
