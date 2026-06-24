@@ -102,24 +102,12 @@ public sealed class Plugin : IDalamudPlugin
             TargetManager
         );
         CharacterAlphaController = new CharacterAlphaController(ObjectTable);
-        DtrBarIntegration = new DtrBarIntegration(
-            DtrBar,
-            Configuration,
-            GetDtrBarState,
-            SetPlayerHidingEnabled,
-            ToggleConfigUi
-        );
+        DtrBarIntegration = new DtrBarIntegration(DtrBar, Configuration, GetDtrBarState, SetPlayerHidingEnabled, ToggleConfigUi);
 
         WindowSystem.AddWindow(ConfigWindow);
 
-        CommandManager.AddHandler(
-            PrimaryCommandName,
-            new CommandInfo(OnCommand) { HelpMessage = Loc.Text("Command.Help.OpenSettings") }
-        );
-        CommandManager.AddHandler(
-            ShortCommandName,
-            new CommandInfo(OnCommand) { HelpMessage = BuildCommandHelp(ShortCommandName) }
-        );
+        CommandManager.AddHandler(PrimaryCommandName, new CommandInfo(OnCommand) { HelpMessage = Loc.Text("Command.Help.OpenSettings") });
+        CommandManager.AddHandler(ShortCommandName, new CommandInfo(OnCommand) { HelpMessage = BuildCommandHelp(ShortCommandName) });
 
         PluginInterface.UiBuilder.Draw += OnDraw;
         PluginInterface.UiBuilder.OpenConfigUi += OpenConfigUi;
@@ -200,8 +188,7 @@ public sealed class Plugin : IDalamudPlugin
 
     public void RefreshDtrBar() => DtrBarIntegration.Refresh();
 
-    public bool TrySetLocalPlayerAlpha(float alpha) =>
-        CharacterAlphaController.TrySetLocalPlayerAlpha(alpha);
+    public bool TrySetLocalPlayerAlpha(float alpha) => CharacterAlphaController.TrySetLocalPlayerAlpha(alpha);
 
     public void ResetLocalPlayerAlpha() => CharacterAlphaController.ResetLocalPlayerAlpha();
 
@@ -242,9 +229,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private int GetDynamicCullingRefreshIntervalMs()
     {
-        return UpdateObjectArraysHook.HasActiveFades
-            ? FadeCullingRefreshIntervalMs
-            : DynamicCullingRefreshIntervalMs;
+        return UpdateObjectArraysHook.HasActiveFades ? FadeCullingRefreshIntervalMs : DynamicCullingRefreshIntervalMs;
     }
 
     private void RefreshDtrBarIfNeeded()
@@ -304,8 +289,7 @@ public sealed class Plugin : IDalamudPlugin
 
         if (
             Configuration.DisableCullingBelowPlayerCount
-            && ObjectTableStats.CurrentOtherPlayerCount()
-                < Configuration.DisableCullingPlayerCountThreshold
+            && ObjectTableStats.CurrentOtherPlayerCount() < Configuration.DisableCullingPlayerCountThreshold
         )
         {
             pauseReasonKeys.Add("Dtr.PauseReason.LowPlayerCount");

@@ -118,20 +118,12 @@ public class ConfigWindow : Window, IDisposable
             ImGui.TreePop();
         }
 
-        DrawSectionHeader(
-            Loc.Text("Config.Section.VisiblePlayerBudget"),
-            Loc.Text("Config.LimitVisiblePlayerCount.Help")
-        );
+        DrawSectionHeader(Loc.Text("Config.Section.VisiblePlayerBudget"), Loc.Text("Config.LimitVisiblePlayerCount.Help"));
         DrawVisiblePlayerLimitRule();
 
         DrawKeepRules();
 
-        if (
-            DrawCollapsibleSectionHeader(
-                Loc.Text("Config.Section.AttachedObjects"),
-                Loc.Text("Config.AttachedObjects.Help")
-            )
-        )
+        if (DrawCollapsibleSectionHeader(Loc.Text("Config.Section.AttachedObjects"), Loc.Text("Config.AttachedObjects.Help")))
         {
             DrawOtherPlayerCompanionRule();
             DrawOtherPlayerOrnamentRule();
@@ -180,16 +172,11 @@ public class ConfigWindow : Window, IDisposable
         ImGui.Spacing();
         if (!string.IsNullOrEmpty(suspensionReason))
         {
-            ImGui.TextColored(
-                warningTextColor,
-                string.Format(Loc.Text("Config.StatusPaused"), suspensionReason)
-            );
+            ImGui.TextColored(warningTextColor, string.Format(Loc.Text("Config.StatusPaused"), suspensionReason));
             return;
         }
 
-        ImGui.TextDisabled(
-            string.Format(Loc.Text("Config.StatusRunning"), keptOtherPlayerCount, hiddenPlayerCount)
-        );
+        ImGui.TextDisabled(string.Format(Loc.Text("Config.StatusRunning"), keptOtherPlayerCount, hiddenPlayerCount));
     }
 
     private string GetCullingSuspensionReason(int currentOtherPlayerCount)
@@ -221,12 +208,7 @@ public class ConfigWindow : Window, IDisposable
     private void DrawLowPlayerCountRule()
     {
         var disableCullingBelowPlayerCount = configuration.DisableCullingBelowPlayerCount;
-        if (
-            ImGui.Checkbox(
-                Loc.Text("Config.DisableCullingBelowPlayerCount"),
-                ref disableCullingBelowPlayerCount
-            )
-        )
+        if (ImGui.Checkbox(Loc.Text("Config.DisableCullingBelowPlayerCount"), ref disableCullingBelowPlayerCount))
         {
             configuration.DisableCullingBelowPlayerCount = disableCullingBelowPlayerCount;
             SaveAndRefresh();
@@ -293,12 +275,7 @@ public class ConfigWindow : Window, IDisposable
     private void DrawOtherPlayerCompanionRule()
     {
         var hideOtherPlayerCompanions = configuration.HideOtherPlayerCompanions;
-        if (
-            ImGui.Checkbox(
-                Loc.Text("Config.HideOtherPlayerCompanions"),
-                ref hideOtherPlayerCompanions
-            )
-        )
+        if (ImGui.Checkbox(Loc.Text("Config.HideOtherPlayerCompanions"), ref hideOtherPlayerCompanions))
         {
             configuration.HideOtherPlayerCompanions = hideOtherPlayerCompanions;
             SaveAndRefresh();
@@ -308,12 +285,7 @@ public class ConfigWindow : Window, IDisposable
     private void DrawOtherPlayerOrnamentRule()
     {
         var hideOtherPlayerOrnaments = configuration.HideOtherPlayerOrnaments;
-        if (
-            ImGui.Checkbox(
-                Loc.Text("Config.HideOtherPlayerOrnaments"),
-                ref hideOtherPlayerOrnaments
-            )
-        )
+        if (ImGui.Checkbox(Loc.Text("Config.HideOtherPlayerOrnaments"), ref hideOtherPlayerOrnaments))
         {
             configuration.HideOtherPlayerOrnaments = hideOtherPlayerOrnaments;
             SaveAndRefresh();
@@ -329,11 +301,7 @@ public class ConfigWindow : Window, IDisposable
             return;
         }
 
-        ImGui.TableSetupColumn(
-            "###CompetitiveKeepOrderHandle",
-            ImGuiTableColumnFlags.WidthFixed,
-            28f
-        );
+        ImGui.TableSetupColumn("###CompetitiveKeepOrderHandle", ImGuiTableColumnFlags.WidthFixed, 28f);
         ImGui.TableSetupColumn("###CompetitiveKeepOrderRule", ImGuiTableColumnFlags.WidthStretch);
 
         DrawKeepRuleGroupHeader(Loc.Text("Config.KeepRules.Protected"));
@@ -405,20 +373,10 @@ public class ConfigWindow : Window, IDisposable
         );
 
         var keepFriends = configuration.KeepFriends;
-        DrawProtectedKeepRuleRow(
-            Loc.Text("Config.KeepFriends"),
-            ref keepFriends,
-            string.Empty,
-            value => configuration.KeepFriends = value
-        );
+        DrawProtectedKeepRuleRow(Loc.Text("Config.KeepFriends"), ref keepFriends, string.Empty, value => configuration.KeepFriends = value);
     }
 
-    private void DrawProtectedKeepRuleRow(
-        string label,
-        ref bool value,
-        string helpText,
-        Action<bool> setValue
-    )
+    private void DrawProtectedKeepRuleRow(string label, ref bool value, string helpText, Action<bool> setValue)
     {
         ImGui.TableNextRow();
         ImGui.TableNextColumn();
@@ -491,19 +449,12 @@ public class ConfigWindow : Window, IDisposable
     private ImGuiItemState DrawCompetitiveKeepRuleControl(CompetitiveKeepRule rule)
     {
         var enabled = IsCompetitiveKeepRuleEnabled(rule);
-        if (
-            ImGui.Checkbox(
-                $"{GetCompetitiveKeepRuleLabel(rule)}###CompetitiveKeepRule{rule}",
-                ref enabled
-            )
-        )
+        if (ImGui.Checkbox($"{GetCompetitiveKeepRuleLabel(rule)}###CompetitiveKeepRule{rule}", ref enabled))
         {
             SetCompetitiveKeepRuleEnabled(rule, enabled);
             SaveAndRefresh();
         }
-        var itemState = new ImGuiItemState(
-            ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem)
-        );
+        var itemState = new ImGuiItemState(ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem));
 
         switch (rule)
         {
@@ -535,15 +486,7 @@ public class ConfigWindow : Window, IDisposable
         ImGui.SameLine();
         ImGui.SetNextItemWidth(140f);
         var range = configuration.KeepNearbyPlayersRange;
-        if (
-            ImGui.SliderFloat(
-                "###KeepNearbyPlayersRange",
-                ref range,
-                1f,
-                50f,
-                Loc.Text("Config.DistanceSliderFormat")
-            )
-        )
+        if (ImGui.SliderFloat("###KeepNearbyPlayersRange", ref range, 1f, 50f, Loc.Text("Config.DistanceSliderFormat")))
         {
             configuration.KeepNearbyPlayersRange = Math.Clamp(range, 1f, 50f);
         }
@@ -685,9 +628,7 @@ public class ConfigWindow : Window, IDisposable
             !ImGui.BeginTable(
                 "###RaceSexFilterTable",
                 3,
-                ImGuiTableFlags.SizingFixedFit
-                    | ImGuiTableFlags.RowBg
-                    | ImGuiTableFlags.BordersInnerV
+                ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV
             )
         )
         {
@@ -796,9 +737,7 @@ public class ConfigWindow : Window, IDisposable
     {
         var allSelected =
             configuration.KeptRaceSex.Contains(RaceSexFilter.Pack(race, RaceSexFilter.MaleSex))
-            && configuration.KeptRaceSex.Contains(
-                RaceSexFilter.Pack(race, RaceSexFilter.FemaleSex)
-            );
+            && configuration.KeptRaceSex.Contains(RaceSexFilter.Pack(race, RaceSexFilter.FemaleSex));
 
         SetRaceSexFilter(race, RaceSexFilter.MaleSex, !allSelected);
         SetRaceSexFilter(race, RaceSexFilter.FemaleSex, !allSelected);

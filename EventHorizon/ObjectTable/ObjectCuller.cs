@@ -10,8 +10,7 @@ namespace EventHorizon.ObjectTable;
 internal sealed unsafe class ObjectCuller : IDisposable
 {
     private const VisibilityFlags PluginCustomProbe = (VisibilityFlags)0x1000;
-    private const VisibilityFlags InvisibleFlag =
-        PluginCustomProbe | VisibilityFlags.Nameplate | VisibilityFlags.Model;
+    private const VisibilityFlags InvisibleFlag = PluginCustomProbe | VisibilityFlags.Nameplate | VisibilityFlags.Model;
 
     private readonly Configuration configuration;
     private readonly IPlayerState playerState;
@@ -231,21 +230,15 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private bool ShouldSuspendCulling(GameObjectManager* manager)
     {
         return configuration.DisableCullingBelowPlayerCount
-            && ObjectTableStats.CountOtherPlayerObjects(manager)
-                < configuration.DisableCullingPlayerCountThreshold;
+            && ObjectTableStats.CountOtherPlayerObjects(manager) < configuration.DisableCullingPlayerCountThreshold;
     }
 
     private bool ShouldSuspendCullingInDuty()
     {
-        return configuration.DisableInDuty
-            && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]);
+        return configuration.DisableInDuty && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]);
     }
 
-    private static bool ShouldHidePlayerSlotObject(
-        GameObject* gameObject,
-        int index,
-        PlayerKeepPlan playerKeepPlan
-    )
+    private static bool ShouldHidePlayerSlotObject(GameObject* gameObject, int index, PlayerKeepPlan playerKeepPlan)
     {
         if (!IsPlayerRelatedEvenSlot(index) || IsLocalPlayerReservedSlot(index))
         {
@@ -255,11 +248,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         return playerKeepPlan.ShouldHide((nint)gameObject);
     }
 
-    private bool ShouldHideNonPlayerSlotObject(
-        GameObjectManager* manager,
-        GameObject* gameObject,
-        int index
-    )
+    private bool ShouldHideNonPlayerSlotObject(GameObjectManager* manager, GameObject* gameObject, int index)
     {
         if (IsLocalPlayerReservedSlot(index))
         {
@@ -323,11 +312,9 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
     private static bool IsPlayerRelatedSlot(int index) => index is >= 0 and <= 199;
 
-    private static bool IsPlayerRelatedEvenSlot(int index) =>
-        IsPlayerRelatedSlot(index) && index % 2 == 0;
+    private static bool IsPlayerRelatedEvenSlot(int index) => IsPlayerRelatedSlot(index) && index % 2 == 0;
 
-    private static bool IsPlayerRelatedOddSlot(int index) =>
-        IsPlayerRelatedSlot(index) && index % 2 == 1;
+    private static bool IsPlayerRelatedOddSlot(int index) => IsPlayerRelatedSlot(index) && index % 2 == 1;
 
     private static bool IsLocalPlayerReservedSlot(int index) => index is 0 or 1;
 
@@ -346,11 +333,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
             }
 
             var owner = manager->Objects.IndexSorted[index].Value;
-            if (
-                owner != null
-                && owner->ObjectKind == ObjectKind.Pc
-                && owner->EntityId == gameObject->OwnerId
-            )
+            if (owner != null && owner->ObjectKind == ObjectKind.Pc && owner->EntityId == gameObject->OwnerId)
             {
                 return owner;
             }

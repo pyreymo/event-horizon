@@ -5,10 +5,7 @@ using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.ObjectTable;
 
-internal sealed unsafe class ObjectFadeController(
-    HiddenObjectTracker hiddenObjectTracker,
-    VisibilityFlags hiddenFlags
-)
+internal sealed unsafe class ObjectFadeController(HiddenObjectTracker hiddenObjectTracker, VisibilityFlags hiddenFlags)
 {
     private const int FadeInDurationMs = 220;
     private const int FadeOutDurationMs = 180;
@@ -33,22 +30,14 @@ internal sealed unsafe class ObjectFadeController(
         {
             if (shouldHide && !isHidden)
             {
-                FadeVisibleObjectHidden(
-                    gameObject,
-                    address,
-                    FadeRecord.From(gameObject, desiredVisible: false, alpha: OpaqueAlpha)
-                );
+                FadeVisibleObjectHidden(gameObject, address, FadeRecord.From(gameObject, desiredVisible: false, alpha: OpaqueAlpha));
                 return true;
             }
 
             if (!shouldHide && isHidden)
             {
                 hiddenObjectTracker.RestoreIfHidden(gameObject);
-                FadeHiddenObjectVisible(
-                    gameObject,
-                    address,
-                    FadeRecord.From(gameObject, desiredVisible: true, alpha: 0f)
-                );
+                FadeHiddenObjectVisible(gameObject, address, FadeRecord.From(gameObject, desiredVisible: true, alpha: 0f));
                 return true;
             }
 
@@ -193,11 +182,7 @@ internal sealed unsafe class ObjectFadeController(
         return start + ((end - start) * progress);
     }
 
-    private static GameObject* FindObject(
-        GameObjectManager* manager,
-        nint address,
-        FadeRecord record
-    )
+    private static GameObject* FindObject(GameObjectManager* manager, nint address, FadeRecord record)
     {
         if (manager == null || address == nint.Zero)
         {
@@ -241,18 +226,10 @@ internal sealed unsafe class ObjectFadeController(
 
         public FadeRecord BeginTransition(bool desiredVisible, long now)
         {
-            return this with
-            {
-                DesiredVisible = desiredVisible,
-                StartAlpha = Alpha,
-                TransitionStart = now,
-                LastUpdate = now,
-            };
+            return this with { DesiredVisible = desiredVisible, StartAlpha = Alpha, TransitionStart = now, LastUpdate = now };
         }
 
         public bool IsSameObject(GameObject* gameObject) =>
-            gameObject != null
-            && (ulong)gameObject->GetGameObjectId() == GameObjectId
-            && gameObject->EntityId == EntityId;
+            gameObject != null && (ulong)gameObject->GetGameObjectId() == GameObjectId && gameObject->EntityId == EntityId;
     }
 }

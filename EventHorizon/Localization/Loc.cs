@@ -36,11 +36,7 @@ internal static class Loc
         return Fallbacks.TryGetValue(key, out var fallback) ? fallback : key;
     }
 
-    private static void LoadLanguage(
-        IDalamudPluginInterface pluginInterface,
-        string language,
-        Dictionary<string, string> destination
-    )
+    private static void LoadLanguage(IDalamudPluginInterface pluginInterface, string language, Dictionary<string, string> destination)
     {
         var directory = pluginInterface.AssemblyLocation.Directory?.FullName;
         if (directory is null)

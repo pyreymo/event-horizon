@@ -104,16 +104,10 @@ internal sealed unsafe class HiddenObjectTracker
 
     public bool IsHidden(GameObject* gameObject)
     {
-        return gameObject != null
-            && hiddenObjects.TryGetValue((nint)gameObject, out var record)
-            && record.IsSameObject(gameObject);
+        return gameObject != null && hiddenObjects.TryGetValue((nint)gameObject, out var record) && record.IsSameObject(gameObject);
     }
 
-    private static GameObject* FindObject(
-        GameObjectManager* manager,
-        nint address,
-        HiddenObjectRecord record
-    )
+    private static GameObject* FindObject(GameObjectManager* manager, nint address, HiddenObjectRecord record)
     {
         if (manager == null || address == nint.Zero)
         {
@@ -132,27 +126,15 @@ internal sealed unsafe class HiddenObjectTracker
         return null;
     }
 
-    private readonly record struct HiddenObjectRecord(
-        ulong GameObjectId,
-        uint EntityId,
-        ObjectKind ObjectKind,
-        VisibilityFlags AddedFlags
-    )
+    private readonly record struct HiddenObjectRecord(ulong GameObjectId, uint EntityId, ObjectKind ObjectKind, VisibilityFlags AddedFlags)
     {
         public static HiddenObjectRecord From(GameObject* gameObject, VisibilityFlags targetFlags)
         {
             var addedFlags = targetFlags & ~gameObject->RenderFlags;
-            return new(
-                (ulong)gameObject->GetGameObjectId(),
-                gameObject->EntityId,
-                gameObject->ObjectKind,
-                addedFlags
-            );
+            return new((ulong)gameObject->GetGameObjectId(), gameObject->EntityId, gameObject->ObjectKind, addedFlags);
         }
 
         public bool IsSameObject(GameObject* gameObject) =>
-            gameObject != null
-            && (ulong)gameObject->GetGameObjectId() == GameObjectId
-            && gameObject->EntityId == EntityId;
+            gameObject != null && (ulong)gameObject->GetGameObjectId() == GameObjectId && gameObject->EntityId == EntityId;
     }
 }

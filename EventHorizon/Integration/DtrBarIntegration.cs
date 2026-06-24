@@ -133,10 +133,7 @@ internal sealed class DtrBarIntegration : IDisposable
             reasons.Add(Loc.Text(key));
         }
 
-        return string.Format(
-            Loc.Text("Dtr.Status.Paused"),
-            string.Join(Loc.Text("Dtr.PauseReason.Separator"), reasons)
-        );
+        return string.Format(Loc.Text("Dtr.Status.Paused"), string.Join(Loc.Text("Dtr.PauseReason.Separator"), reasons));
     }
 }
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Dalamud.Configuration;
+using Newtonsoft.Json;
 
 namespace EventHorizon;
 
@@ -10,8 +11,8 @@ public class Configuration : IPluginConfiguration
     public int Version { get; set; } = 0;
 
     public bool HideAllOtherPlayers { get; set; } = true;
-    public bool DisableInDuty { get; set; }
-    public bool DisableCullingBelowPlayerCount { get; set; }
+    public bool DisableInDuty { get; set; } = true;
+    public bool DisableCullingBelowPlayerCount { get; set; } = true;
     public int DisableCullingPlayerCountThreshold { get; set; } = 25;
     public bool LimitVisiblePlayerCount { get; set; }
     public int VisiblePlayerCountLimit { get; set; } = 30;
@@ -28,8 +29,9 @@ public class Configuration : IPluginConfiguration
     public bool KeepTargetAndFocusPlayers { get; set; } = true;
     public bool KeepPlayersTargetingMe { get; set; } = true;
     public bool KeepSelectedRaces { get; set; }
-    public List<CompetitiveKeepRule> CompetitiveKeepRuleOrder { get; set; } =
-        CompetitiveKeepOrder.CreateDefaultOrder();
+
+    [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+    public List<CompetitiveKeepRule> CompetitiveKeepRuleOrder { get; set; } = CompetitiveKeepOrder.CreateDefaultOrder();
     public HashSet<byte> KeptRaceSex { get; set; } = [];
 
     public void Save()

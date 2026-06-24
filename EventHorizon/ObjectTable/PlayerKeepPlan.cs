@@ -8,10 +8,7 @@ internal sealed class PlayerKeepPlan
     private readonly Dictionary<nint, PlayerKeepDecision> keepDecisions;
     private readonly HashSet<nint>? visibleCompetitivePlayers;
 
-    private PlayerKeepPlan(
-        Dictionary<nint, PlayerKeepDecision> keepDecisions,
-        HashSet<nint>? visibleCompetitivePlayers
-    )
+    private PlayerKeepPlan(Dictionary<nint, PlayerKeepDecision> keepDecisions, HashSet<nint>? visibleCompetitivePlayers)
     {
         this.keepDecisions = keepDecisions;
         this.visibleCompetitivePlayers = visibleCompetitivePlayers;
@@ -20,10 +17,7 @@ internal sealed class PlayerKeepPlan
     public int ProtectedPlayerCount { get; private init; }
     public int VisibleCompetitivePlayerCount { get; private init; }
 
-    public static PlayerKeepPlan Build(
-        Configuration configuration,
-        IReadOnlyList<PlayerKeepCandidate> candidates
-    )
+    public static PlayerKeepPlan Build(Configuration configuration, IReadOnlyList<PlayerKeepCandidate> candidates)
     {
         var keepDecisions = new Dictionary<nint, PlayerKeepDecision>();
         foreach (var candidate in candidates)
@@ -35,10 +29,7 @@ internal sealed class PlayerKeepPlan
         return new PlayerKeepPlan(keepDecisions, visibleCompetitivePlayers)
         {
             ProtectedPlayerCount = CountProtectedPlayers(candidates),
-            VisibleCompetitivePlayerCount = CountVisibleCompetitivePlayers(
-                candidates,
-                visibleCompetitivePlayers
-            ),
+            VisibleCompetitivePlayerCount = CountVisibleCompetitivePlayers(candidates, visibleCompetitivePlayers),
         };
     }
 
@@ -52,16 +43,12 @@ internal sealed class PlayerKeepPlan
         return keepDecision.Kind switch
         {
             PlayerKeepDecisionKind.Protected => false,
-            PlayerKeepDecisionKind.Competitive => visibleCompetitivePlayers?.Contains(address)
-                == false,
+            PlayerKeepDecisionKind.Competitive => visibleCompetitivePlayers?.Contains(address) == false,
             _ => true,
         };
     }
 
-    private static HashSet<nint>? GetVisibleCompetitivePlayers(
-        Configuration configuration,
-        IReadOnlyList<PlayerKeepCandidate> candidates
-    )
+    private static HashSet<nint>? GetVisibleCompetitivePlayers(Configuration configuration, IReadOnlyList<PlayerKeepCandidate> candidates)
     {
         if (!configuration.LimitVisiblePlayerCount)
         {
@@ -125,10 +112,7 @@ internal sealed class PlayerKeepPlan
         return count;
     }
 
-    private static int CompareCompetitivePlayers(
-        PlayerKeepCandidate left,
-        PlayerKeepCandidate right
-    )
+    private static int CompareCompetitivePlayers(PlayerKeepCandidate left, PlayerKeepCandidate right)
     {
         var rankComparison = left.KeepDecision.Rank.CompareTo(right.KeepDecision.Rank);
         if (rankComparison != 0)
@@ -136,18 +120,14 @@ internal sealed class PlayerKeepPlan
             return rankComparison;
         }
 
-        var distanceComparison = left.KeepDecision.DistanceSq.CompareTo(
-            right.KeepDecision.DistanceSq
-        );
+        var distanceComparison = left.KeepDecision.DistanceSq.CompareTo(right.KeepDecision.DistanceSq);
         if (distanceComparison != 0)
         {
             return distanceComparison;
         }
 
         var entityComparison = left.EntityId.CompareTo(right.EntityId);
-        return entityComparison != 0
-            ? entityComparison
-            : left.Address.ToInt64().CompareTo(right.Address.ToInt64());
+        return entityComparison != 0 ? entityComparison : left.Address.ToInt64().CompareTo(right.Address.ToInt64());
     }
 }
 
@@ -157,11 +137,7 @@ internal readonly record struct PlayerKeepBudgetStats(
     int VisibleCompetitivePlayerLimit
 );
 
-internal readonly record struct PlayerKeepCandidate(
-    nint Address,
-    PlayerKeepDecision KeepDecision,
-    uint EntityId
-);
+internal readonly record struct PlayerKeepCandidate(nint Address, PlayerKeepDecision KeepDecision, uint EntityId);
 
 internal enum PlayerKeepDecisionKind
 {
@@ -170,20 +146,11 @@ internal enum PlayerKeepDecisionKind
     Competitive,
 }
 
-internal readonly record struct PlayerKeepDecision(
-    PlayerKeepDecisionKind Kind,
-    int Rank,
-    float DistanceSq
-)
+internal readonly record struct PlayerKeepDecision(PlayerKeepDecisionKind Kind, int Rank, float DistanceSq)
 {
     public static readonly PlayerKeepDecision None = new(PlayerKeepDecisionKind.None, 0, 0f);
 
-    public static readonly PlayerKeepDecision Protected = new(
-        PlayerKeepDecisionKind.Protected,
-        0,
-        0f
-    );
+    public static readonly PlayerKeepDecision Protected = new(PlayerKeepDecisionKind.Protected, 0, 0f);
 
-    public static PlayerKeepDecision Competitive(int rank, float distanceSq) =>
-        new(PlayerKeepDecisionKind.Competitive, rank, distanceSq);
+    public static PlayerKeepDecision Competitive(int rank, float distanceSq) => new(PlayerKeepDecisionKind.Competitive, rank, distanceSq);
 }

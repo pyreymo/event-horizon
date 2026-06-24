@@ -13,11 +13,7 @@ using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.ObjectTable;
 
-internal sealed unsafe class PlayerKeepRules(
-    Configuration configuration,
-    IObjectTable objectTable,
-    ITargetManager targetManager
-)
+internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjectTable objectTable, ITargetManager targetManager)
 {
     private const int TargetingMePlayerKeepMs = 60_000;
     private const int RecentTargetPlayerKeepMs = 30_000;
@@ -30,9 +26,7 @@ internal sealed unsafe class PlayerKeepRules(
     private readonly HashSet<ulong> nearbyKeptPlayers = [];
     private readonly Dictionary<ulong, long> recentTargetPlayers = [];
     private readonly Dictionary<ulong, long> targetingMePlayers = [];
-    private readonly Dictionary<string, long> recentChatPlayers = new(
-        StringComparer.OrdinalIgnoreCase
-    );
+    private readonly Dictionary<string, long> recentChatPlayers = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock recentChatPlayersLock = new();
 
     public bool NeedsDynamicRefresh =>
@@ -91,11 +85,7 @@ internal sealed unsafe class PlayerKeepRules(
             return PlayerKeepDecision.None;
         }
 
-        if (
-            ShouldKeepTargetOrFocusPlayer(gameObject)
-            || ShouldKeepFriend(gameObject)
-            || ShouldKeepPartyOrAllianceMember(gameObject)
-        )
+        if (ShouldKeepTargetOrFocusPlayer(gameObject) || ShouldKeepFriend(gameObject) || ShouldKeepPartyOrAllianceMember(gameObject))
         {
             return PlayerKeepDecision.Protected;
         }
@@ -129,9 +119,7 @@ internal sealed unsafe class PlayerKeepRules(
             rank = GetBetterRank(rank, CompetitiveKeepRule.Race);
         }
 
-        return !rank.HasValue
-            ? PlayerKeepDecision.None
-            : PlayerKeepDecision.Competitive(rank.Value, distanceSq);
+        return !rank.HasValue ? PlayerKeepDecision.None : PlayerKeepDecision.Competitive(rank.Value, distanceSq);
     }
 
     private bool ShouldKeepFriend(GameObject* gameObject)
@@ -298,9 +286,7 @@ internal sealed unsafe class PlayerKeepRules(
 
         var player = (BattleChara*)gameObject;
         var customizeData = player->DrawData.CustomizeData;
-        return configuration.KeptRaceSex.Contains(
-            RaceSexFilter.Pack(customizeData.Race, customizeData.Sex)
-        );
+        return configuration.KeptRaceSex.Contains(RaceSexFilter.Pack(customizeData.Race, customizeData.Sex));
     }
 
     #endregion
@@ -315,11 +301,7 @@ internal sealed unsafe class PlayerKeepRules(
         PruneExpiredRecentChatPlayers(now);
     }
 
-    private static bool IsTimedKeepAlive(
-        Dictionary<ulong, long> keepAlivePlayers,
-        ulong playerId,
-        long now
-    )
+    private static bool IsTimedKeepAlive(Dictionary<ulong, long> keepAlivePlayers, ulong playerId, long now)
     {
         if (!keepAlivePlayers.TryGetValue(playerId, out var expireTime))
         {
@@ -337,9 +319,7 @@ internal sealed unsafe class PlayerKeepRules(
 
     private static void PruneExpiredKeepState(Dictionary<ulong, long> keepAlivePlayers, long now)
     {
-        foreach (
-            var (playerId, expireTime) in new List<KeyValuePair<ulong, long>>(keepAlivePlayers)
-        )
+        foreach (var (playerId, expireTime) in new List<KeyValuePair<ulong, long>>(keepAlivePlayers))
         {
             if (expireTime <= now)
             {
@@ -417,17 +397,13 @@ internal sealed unsafe class PlayerKeepRules(
             return string.Empty;
         }
 
-        return string.Join(
-            ' ',
-            playerName.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
-        );
+        return string.Join(' ', playerName.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
     }
 
     private bool IsTargetOrFocus(GameObject* gameObject)
     {
         var address = (nint)gameObject;
-        return address == targetManager.Target?.Address
-            || address == targetManager.FocusTarget?.Address;
+        return address == targetManager.Target?.Address || address == targetManager.FocusTarget?.Address;
     }
 
     private static ulong GetPlayerTrackingId(BattleChara* player)
@@ -435,8 +411,7 @@ internal sealed unsafe class PlayerKeepRules(
         return player == null ? 0 : (ulong)((GameObject*)player)->GetGameObjectId();
     }
 
-    private static bool IsPlayerObject(GameObject* gameObject) =>
-        gameObject->ObjectKind == ObjectKind.Pc;
+    private static bool IsPlayerObject(GameObject* gameObject) => gameObject->ObjectKind == ObjectKind.Pc;
 
     private int GetBetterRank(int? currentRank, CompetitiveKeepRule rule)
     {
@@ -452,12 +427,7 @@ internal sealed unsafe class PlayerKeepRules(
     {
         lock (recentChatPlayersLock)
         {
-            foreach (
-                var playerName in recentChatPlayers
-                    .Where(x => x.Value <= now)
-                    .Select(x => x.Key)
-                    .ToArray()
-            )
+            foreach (var playerName in recentChatPlayers.Where(x => x.Value <= now).Select(x => x.Key).ToArray())
             {
                 recentChatPlayers.Remove(playerName);
             }

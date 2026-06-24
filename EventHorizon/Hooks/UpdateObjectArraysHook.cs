@@ -33,13 +33,7 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         ITargetManager targetManager
     )
     {
-        objectCuller = new ObjectCuller(
-            configuration,
-            playerState,
-            condition,
-            objectTable,
-            targetManager
-        );
+        objectCuller = new ObjectCuller(configuration, playerState, condition, objectTable, targetManager);
         hook = gameInteropProvider.HookFromSignature<UpdateObjectArraysDelegate>(Signature, Detour);
     }
 
