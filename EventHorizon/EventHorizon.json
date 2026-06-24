@@ -1,7 +1,7 @@
 {
   "Author": "pyreymo",
   "Name": "Event Horizon",
-  "Changelog": "- Reworked player keep rules into protected players and priority players. Targets, party/alliance members, and friends can now stay visible outside the visible player budget.\n- Added drag-and-drop ordering for priority keep rules, so limited visible slots are assigned by user-defined rule order instead of object table order.\n- Redesigned the culling settings UI with compact status, budget, keep-rule, pause-condition, and attached-object sections.\n- Removed the nearby range live preview and the ffxiv_pictomancy dependency.",
+  "Changelog": "- Fixed a configuration loading issue that caused sortable keep rules to appear twice.\n- Enabled DisableInDuty and DisableCullingBelowPlayerCount by default for safer initial behavior.",
   "Punchline": "Cull what doesn't orbit you.",
   "Description": "Cull distant or irrelevant world objects around your character. Use /eventhorizon or /eh to open settings.",
   "RepoUrl": "https://github.com/pyreymo/event-horizon",
