@@ -3,7 +3,7 @@
     "Author": "pyreymo",
     "Name": "Event Horizon",
     "InternalName": "EventHorizon",
-    "AssemblyVersion": "0.1.5.0",
+    "AssemblyVersion": "0.1.6.0",
     "Description": "Cull distant or irrelevant world objects around your character. Use /eventhorizon or /eh to open settings.",
     "ApplicableVersion": "any",
     "RepoUrl": "https://github.com/pyreymo/event-horizon",
@@ -20,9 +20,9 @@
     "Punchline": "Cull what doesn't orbit you.",
     "AcceptsFeedback": true,
     "IconUrl": "https://raw.githubusercontent.com/pyreymo/event-horizon/master/images/icon.png",
-    "DownloadLinkInstall": "https://github.com/pyreymo/event-horizon/releases/download/v0.1.5/EventHorizon.zip",
-    "DownloadLinkUpdate": "https://github.com/pyreymo/event-horizon/releases/download/v0.1.5/EventHorizon.zip",
-    "LastUpdate": 1781620222,
-    "Changelog": "- Reworked player keep rules into protected players and priority players. Targets, party/alliance members, and friends can now stay visible outside the visible player budget.\n- Added drag-and-drop ordering for priority keep rules, so limited visible slots are assigned by user-defined rule order instead of object table order.\n- Redesigned the culling settings UI with compact status, budget, keep-rule, pause-condition, and attached-object sections.\n- Removed the nearby range live preview and the ffxiv_pictomancy dependency."
+    "DownloadLinkInstall": "https://github.com/pyreymo/event-horizon/releases/download/v0.1.6/EventHorizon.zip",
+    "DownloadLinkUpdate": "https://github.com/pyreymo/event-horizon/releases/download/v0.1.6/EventHorizon.zip",
+    "LastUpdate": 1782280848,
+    "Changelog": "- Fixed a configuration loading issue that caused sortable keep rules to appear twice.\n- Enabled DisableInDuty and DisableCullingBelowPlayerCount by default for safer initial behavior."
   }
 ]
