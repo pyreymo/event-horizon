@@ -23,7 +23,7 @@ public class ConfigWindow : Window, IDisposable
     private readonly Plugin plugin;
     private readonly Configuration configuration;
     private readonly IDataManager dataManager;
-    private readonly PlayerPreviewRenderer playerPreviewRenderer = new();
+    private readonly PlayerPreviewRenderer playerPreviewRenderer;
 
     private Tab? pendingSelectedTab;
     private PlayerKeepRuleId? draggedKeepRule;
@@ -37,7 +37,7 @@ public class ConfigWindow : Window, IDisposable
 
     #region Lifecycle
 
-    public ConfigWindow(Plugin plugin, IDataManager dataManager)
+    public ConfigWindow(Plugin plugin, IDataManager dataManager, IGameGui gameGui)
         : base($"{Loc.Text("Config.Title")}###EventHorizonConfig")
     {
         Size = new Vector2(960, 780);
@@ -46,6 +46,7 @@ public class ConfigWindow : Window, IDisposable
         this.plugin = plugin;
         this.dataManager = dataManager;
         configuration = plugin.Configuration;
+        playerPreviewRenderer = new PlayerPreviewRenderer(gameGui);
     }
 
     public void Dispose() { }

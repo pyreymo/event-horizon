@@ -1,6 +1,7 @@
 using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Plugin.Services;
 using EventHorizon.Localization;
 using EventHorizon.ObjectTable;
 
@@ -8,8 +9,14 @@ namespace EventHorizon.Windows;
 
 internal sealed class PlayerPreviewRenderer
 {
+    private readonly IGameGui gameGui;
     private uint? selectedPlayerEntityId;
     private float viewRange = PlayerPreviewConstants.DefaultViewRange;
+
+    public PlayerPreviewRenderer(IGameGui gameGui)
+    {
+        this.gameGui = gameGui;
+    }
 
     public void Draw(PlayerPreviewSnapshot snapshot, float side, Func<PlayerKeepRuleId, string> getRuleLabel)
     {
@@ -42,6 +49,7 @@ internal sealed class PlayerPreviewRenderer
         var hoveredPlayer = FindHoveredPlayer(snapshot, center, rangeRadius);
         UpdateSelectedPlayer(snapshot, start, end, hoveredPlayer);
         var selectedPlayer = FindSelectedPlayer(snapshot);
+        var pointedPlayer = selectedPlayer ?? hoveredPlayer;
         foreach (var player in snapshot.Players)
         {
             var position = MapToPreview(player.RelativeXZ, effectiveViewRange, center, rangeRadius);
@@ -74,6 +82,11 @@ internal sealed class PlayerPreviewRenderer
                     PlayerPreviewConstants.BudgetCutRingThickness
                 );
             }
+        }
+
+        if (pointedPlayer.HasValue)
+        {
+            PlayerPreviewWorldArrowRenderer.Draw(pointedPlayer.Value, gameGui);
         }
 
         if (selectedPlayer.HasValue)

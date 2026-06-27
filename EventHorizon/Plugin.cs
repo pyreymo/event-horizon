@@ -45,6 +45,9 @@ public sealed class Plugin : IDalamudPlugin
     internal static ITargetManager TargetManager { get; private set; } = null!;
 
     [PluginService]
+    internal static IGameGui GameGui { get; private set; } = null!;
+
+    [PluginService]
     internal static IChatGui ChatGui { get; private set; } = null!;
 
     [PluginService]
@@ -93,7 +96,7 @@ public sealed class Plugin : IDalamudPlugin
         Loc.Load(PluginInterface);
 
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
-        ConfigWindow = new ConfigWindow(this, DataManager);
+        ConfigWindow = new ConfigWindow(this, DataManager, GameGui);
         UpdateObjectArraysHook = new UpdateObjectArraysHook(
             GameInteropProvider,
             Configuration,

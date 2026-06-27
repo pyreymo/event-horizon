@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace EventHorizon.ObjectTable;
 
 internal static class PlayerPreviewConstants
@@ -31,4 +33,11 @@ internal static class PlayerPreviewConstants
     public const float HoverRadius = 7f;
     public const float BudgetCutRingPadding = 2f;
     public const float SelectedPlayerRingPadding = 4f;
+
+    public static readonly Vector4 WorldArrowColor = new(1f, 0.5f, 0f, 1f);
+    public const float WorldArrowLineThickness = 2f;
+    public const float WorldArrowHeadLength = 12f;
+    public const float WorldArrowHeadHalfWidth = 5f;
+    public const float WorldArrowTargetRadius = 3f;
+    public const float WorldArrowScreenEdgePadding = 24f;
 }
