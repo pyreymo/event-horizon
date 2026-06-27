@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface;
+using Dalamud.Interface.Components;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
 using EventHorizon.Localization;
@@ -956,18 +958,7 @@ public class ConfigWindow : Window, IDisposable
             ImGui.SameLine();
         }
 
-        ImGui.TextDisabled("?");
-
-        if (!ImGui.IsItemHovered())
-        {
-            return;
-        }
-
-        ImGui.BeginTooltip();
-        ImGui.PushTextWrapPos(ImGui.GetFontSize() * 32f);
-        ImGui.TextUnformatted(text);
-        ImGui.PopTextWrapPos();
-        ImGui.EndTooltip();
+        ImGuiComponents.HelpMarker(text, FontAwesomeIcon.InfoCircle);
     }
 
     #endregion
