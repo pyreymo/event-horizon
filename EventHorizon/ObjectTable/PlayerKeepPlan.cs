@@ -14,8 +14,8 @@ internal sealed class PlayerKeepPlan
         this.visibleBudgetedPlayers = visibleBudgetedPlayers;
     }
 
-    public int ProtectedPlayerCount { get; private init; }
-    public int VisibleCompetitivePlayerCount { get; private init; }
+    public int BudgetExemptPlayerCount { get; private init; }
+    public int VisibleBudgetedPlayerCount { get; private init; }
 
     public static PlayerKeepPlan Build(Configuration configuration, IReadOnlyList<PlayerKeepCandidate> candidates)
     {
@@ -28,8 +28,8 @@ internal sealed class PlayerKeepPlan
         var visibleBudgetedPlayers = GetVisibleBudgetedPlayers(configuration, candidates);
         return new PlayerKeepPlan(keepDecisions, visibleBudgetedPlayers)
         {
-            ProtectedPlayerCount = CountBudgetExemptPlayers(candidates),
-            VisibleCompetitivePlayerCount = CountVisibleBudgetedPlayers(candidates, visibleBudgetedPlayers),
+            BudgetExemptPlayerCount = CountBudgetExemptPlayers(candidates),
+            VisibleBudgetedPlayerCount = CountVisibleBudgetedPlayers(candidates, visibleBudgetedPlayers),
         };
     }
 
@@ -130,9 +130,9 @@ internal sealed class PlayerKeepPlan
 }
 
 internal readonly record struct PlayerKeepBudgetStats(
-    int ProtectedPlayerCount,
-    int VisibleCompetitivePlayerCount,
-    int VisibleCompetitivePlayerLimit
+    int BudgetExemptPlayerCount,
+    int VisibleBudgetedPlayerCount,
+    int VisibleBudgetedPlayerLimit
 );
 
 internal readonly record struct PlayerKeepCandidate(nint Address, PlayerKeepDecision KeepDecision, uint EntityId);
@@ -141,24 +141,6 @@ internal enum PlayerKeepDecisionKind
 {
     None,
     Keep,
-}
-
-internal enum PlayerKeepBudgetPolicy
-{
-    Exempt,
-    Counted,
-}
-
-internal enum PlayerKeepRuleId
-{
-    TargetFocus,
-    PartyAlliance,
-    Friends,
-    TargetingMe,
-    RecentChat,
-    Recruiting,
-    Nearby,
-    Race,
 }
 
 internal readonly record struct PlayerKeepTieBreaker(float DistanceSq)
@@ -184,9 +166,10 @@ internal readonly record struct PlayerKeepDecision(
         PlayerKeepTieBreaker.None
     );
 
-    public static PlayerKeepDecision Exempt(PlayerKeepRuleId ruleId) =>
-        new(PlayerKeepDecisionKind.Keep, ruleId, int.MaxValue, PlayerKeepBudgetPolicy.Exempt, PlayerKeepTieBreaker.None);
-
-    public static PlayerKeepDecision Counted(PlayerKeepRuleId ruleId, int rank, PlayerKeepTieBreaker tieBreaker) =>
-        new(PlayerKeepDecisionKind.Keep, ruleId, rank, PlayerKeepBudgetPolicy.Counted, tieBreaker);
+    public static PlayerKeepDecision Keep(
+        PlayerKeepRuleId ruleId,
+        int rank,
+        PlayerKeepBudgetPolicy budgetPolicy,
+        PlayerKeepTieBreaker tieBreaker
+    ) => new(PlayerKeepDecisionKind.Keep, ruleId, rank, budgetPolicy, tieBreaker);
 }

@@ -81,8 +81,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
         var playerKeepPlan = PlayerKeepPlan.Build(configuration, GetPlayerKeepCandidates(manager));
         keepBudgetStats = new(
-            playerKeepPlan.ProtectedPlayerCount,
-            playerKeepPlan.VisibleCompetitivePlayerCount,
+            playerKeepPlan.BudgetExemptPlayerCount,
+            playerKeepPlan.VisibleBudgetedPlayerCount,
             Math.Clamp(configuration.VisiblePlayerCountLimit, 1, 100)
         );
 

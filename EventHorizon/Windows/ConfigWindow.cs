@@ -24,9 +24,9 @@ public class ConfigWindow : Window, IDisposable
     private readonly Vector4 warningTextColor = new(1f, 0.72f, 0.24f, 1f);
 
     private Tab? pendingSelectedTab;
-    private CompetitiveKeepRule? draggedCompetitiveKeepRule;
-    private bool competitiveKeepRuleOrderChanged;
-    private bool showRaceSexPriorityEditor;
+    private PlayerKeepRuleId? draggedKeepRule;
+    private bool keepRuleOrderChanged;
+    private bool showRaceSexEditor;
 
     private readonly record struct ImGuiItemState(bool Hovered, bool Active = false);
 
@@ -270,7 +270,7 @@ public class ConfigWindow : Window, IDisposable
         ImGui.SameLine();
         ImGui.TextUnformatted(Loc.Text("Config.VisiblePlayerCountLimitSuffix"));
         ImGui.SameLine();
-        ImGui.TextDisabled(Loc.Text("Config.ProtectedPlayersIgnoreLimit"));
+        ImGui.TextDisabled(Loc.Text("Config.PerRuleBudget"));
     }
 
     private void DrawOtherPlayerCompanionRule()
@@ -297,133 +297,82 @@ public class ConfigWindow : Window, IDisposable
     {
         DrawSectionHeader(Loc.Text("Config.Section.KeepRules"), Loc.Text("Config.KeepRules.Help"));
 
-        if (!ImGui.BeginTable("###CompetitiveKeepOrderTable", 2, ImGuiTableFlags.SizingStretchProp))
+        if (!ImGui.BeginTable("###KeepRuleOrderTable", 3, ImGuiTableFlags.SizingStretchProp))
         {
             return;
         }
 
-        ImGui.TableSetupColumn("###CompetitiveKeepOrderHandle", ImGuiTableColumnFlags.WidthFixed, 28f);
-        ImGui.TableSetupColumn("###CompetitiveKeepOrderRule", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableSetupColumn("###KeepRuleOrderHandle", ImGuiTableColumnFlags.WidthFixed, 28f);
+        ImGui.TableSetupColumn("###KeepRuleOrderRule", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableSetupColumn("###KeepRuleOrderBudget", ImGuiTableColumnFlags.WidthFixed, 88f);
 
-        DrawKeepRuleGroupHeader(Loc.Text("Config.KeepRules.Protected"));
-        DrawProtectedKeepRuleRows();
-
-        if (DrawKeepRuleGroupHeader(Loc.Text("Config.KeepRules.Priority"), showResetButton: true))
+        DrawKeepRuleHeader();
+        foreach (var rule in PlayerKeepRuleOrder.GetEffectiveOrder(configuration))
         {
-            CompetitiveKeepOrder.Reset(configuration);
-            SaveAndRefreshWithoutRuleReset();
-        }
-
-        foreach (var rule in CompetitiveKeepOrder.GetEffectiveOrder(configuration))
-        {
-            DrawCompetitiveKeepRuleOrderRow(rule);
+            DrawKeepRuleOrderRow(rule);
         }
 
         ImGui.EndTable();
 
-        if (showRaceSexPriorityEditor)
+        if (showRaceSexEditor)
         {
             ImGui.Indent();
             DrawRaceFilterEditor();
             ImGui.Unindent();
         }
 
-        if (draggedCompetitiveKeepRule.HasValue && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+        if (draggedKeepRule.HasValue && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
         {
-            draggedCompetitiveKeepRule = null;
-            if (competitiveKeepRuleOrderChanged)
+            draggedKeepRule = null;
+            if (keepRuleOrderChanged)
             {
-                competitiveKeepRuleOrderChanged = false;
+                keepRuleOrderChanged = false;
                 SaveAndRefreshWithoutRuleReset();
             }
         }
     }
 
-    private static bool DrawKeepRuleGroupHeader(string label, bool showResetButton = false)
+    private void DrawKeepRuleHeader()
     {
         ImGui.TableNextRow();
         ImGui.TableNextColumn();
         ImGui.TableNextColumn();
-        ImGui.TextDisabled(label);
-
-        if (!showResetButton)
+        if (ImGui.SmallButton(Loc.Text("Config.KeepRuleOrder.Reset")))
         {
-            return false;
+            PlayerKeepRuleOrder.Reset(configuration);
+            SaveAndRefreshWithoutRuleReset();
         }
 
-        ImGui.SameLine();
-        return ImGui.SmallButton(Loc.Text("Config.CompetitiveKeepOrder.Reset"));
+        ImGui.TableNextColumn();
+        ImGui.TextDisabled(Loc.Text("Config.KeepRules.UsesBudget"));
     }
 
-    private void DrawProtectedKeepRuleRows()
-    {
-        var keepTargetAndFocusPlayers = configuration.KeepTargetAndFocusPlayers;
-        DrawProtectedKeepRuleRow(
-            Loc.Text("Config.KeepTargetAndFocusPlayers"),
-            ref keepTargetAndFocusPlayers,
-            Loc.Text("Config.KeepTargetAndFocusPlayers.Help"),
-            value => configuration.KeepTargetAndFocusPlayers = value
-        );
-
-        var keepPartyAndAllianceMembers = configuration.KeepPartyAndAllianceMembers;
-        DrawProtectedKeepRuleRow(
-            Loc.Text("Config.KeepPartyAndAllianceMembers"),
-            ref keepPartyAndAllianceMembers,
-            string.Empty,
-            value => configuration.KeepPartyAndAllianceMembers = value
-        );
-
-        var keepFriends = configuration.KeepFriends;
-        DrawProtectedKeepRuleRow(Loc.Text("Config.KeepFriends"), ref keepFriends, string.Empty, value => configuration.KeepFriends = value);
-    }
-
-    private void DrawProtectedKeepRuleRow(string label, ref bool value, string helpText, Action<bool> setValue)
+    private void DrawKeepRuleOrderRow(PlayerKeepRuleId rule)
     {
         ImGui.TableNextRow();
         ImGui.TableNextColumn();
-        ImGui.TextUnformatted(string.Empty);
+        var handleState = DrawKeepRuleHandle(rule);
 
         ImGui.TableNextColumn();
-        if (ImGui.Checkbox(label, ref value))
-        {
-            setValue(value);
-            SaveAndRefresh();
-        }
-
-        if (!string.IsNullOrEmpty(helpText))
-        {
-            DrawHelpMarker(helpText);
-        }
-    }
-
-    private void DrawCompetitiveKeepRuleOrderRow(CompetitiveKeepRule rule)
-    {
-        ImGui.TableNextRow();
+        var ruleItemState = DrawKeepRuleControl(rule);
         ImGui.TableNextColumn();
-        var handleState = DrawCompetitiveKeepRuleHandle(rule);
-
-        ImGui.TableNextColumn();
-        var ruleItemState = DrawCompetitiveKeepRuleControl(rule);
+        DrawKeepRuleBudgetPolicyCheckbox(rule);
 
         if (handleState.Active && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
         {
-            draggedCompetitiveKeepRule = rule;
+            draggedKeepRule = rule;
         }
 
-        if (
-            draggedCompetitiveKeepRule.HasValue
-            && draggedCompetitiveKeepRule.Value != rule
-            && (handleState.Hovered || ruleItemState.Hovered)
-        )
+        if (draggedKeepRule.HasValue && draggedKeepRule.Value != rule && (handleState.Hovered || ruleItemState.Hovered))
         {
-            MoveCompetitiveKeepRuleTo(draggedCompetitiveKeepRule.Value, rule);
+            MoveKeepRuleTo(draggedKeepRule.Value, rule);
         }
     }
 
-    private static ImGuiItemState DrawCompetitiveKeepRuleHandle(CompetitiveKeepRule rule)
+    private static ImGuiItemState DrawKeepRuleHandle(PlayerKeepRuleId rule)
     {
         var handleSize = new Vector2(20f, ImGui.GetTextLineHeightWithSpacing());
-        ImGui.InvisibleButton($"###CompetitiveKeepRuleHandle{rule}", handleSize);
+        ImGui.InvisibleButton($"###KeepRuleHandle{rule}", handleSize);
 
         var hovered = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
         var active = ImGui.IsItemActive();
@@ -447,32 +396,35 @@ public class ConfigWindow : Window, IDisposable
         }
     }
 
-    private ImGuiItemState DrawCompetitiveKeepRuleControl(CompetitiveKeepRule rule)
+    private ImGuiItemState DrawKeepRuleControl(PlayerKeepRuleId rule)
     {
-        var enabled = IsCompetitiveKeepRuleEnabled(rule);
-        if (ImGui.Checkbox($"{GetCompetitiveKeepRuleLabel(rule)}###CompetitiveKeepRule{rule}", ref enabled))
+        var enabled = IsKeepRuleEnabled(rule);
+        if (ImGui.Checkbox($"{GetKeepRuleLabel(rule)}###KeepRule{rule}", ref enabled))
         {
-            SetCompetitiveKeepRuleEnabled(rule, enabled);
+            SetKeepRuleEnabled(rule, enabled);
             SaveAndRefresh();
         }
         var itemState = new ImGuiItemState(ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem));
 
         switch (rule)
         {
-            case CompetitiveKeepRule.TargetingMe:
+            case PlayerKeepRuleId.TargetFocus:
+                DrawHelpMarker(Loc.Text("Config.KeepTargetAndFocusPlayers.Help"));
+                break;
+            case PlayerKeepRuleId.TargetingMe:
                 DrawHelpMarker(Loc.Text("Config.KeepPlayersTargetingMe.Help"));
                 break;
-            case CompetitiveKeepRule.RecentChat:
+            case PlayerKeepRuleId.RecentChat:
                 DrawHelpMarker(Loc.Text("Config.KeepRecentChatPlayers.Help"));
                 break;
-            case CompetitiveKeepRule.Nearby:
-                DrawNearbyPlayerPriorityOptions();
+            case PlayerKeepRuleId.Nearby:
+                DrawNearbyPlayerOptions();
                 break;
-            case CompetitiveKeepRule.Race:
+            case PlayerKeepRuleId.Race:
                 ImGui.SameLine();
                 if (ImGui.SmallButton(Loc.Text("Config.RaceFilter.Edit")))
                 {
-                    showRaceSexPriorityEditor = !showRaceSexPriorityEditor;
+                    showRaceSexEditor = !showRaceSexEditor;
                 }
                 break;
         }
@@ -480,7 +432,7 @@ public class ConfigWindow : Window, IDisposable
         return itemState;
     }
 
-    private void DrawNearbyPlayerPriorityOptions()
+    private void DrawNearbyPlayerOptions()
     {
         ImGui.SameLine();
         ImGui.TextUnformatted(Loc.Text("Config.KeepNearbyPlayersRange"));
@@ -498,42 +450,68 @@ public class ConfigWindow : Window, IDisposable
         }
     }
 
-    private bool IsCompetitiveKeepRuleEnabled(CompetitiveKeepRule rule) =>
+    private bool IsKeepRuleEnabled(PlayerKeepRuleId rule) =>
         rule switch
         {
-            CompetitiveKeepRule.TargetingMe => configuration.KeepPlayersTargetingMe,
-            CompetitiveKeepRule.RecentChat => configuration.KeepRecentChatPlayers,
-            CompetitiveKeepRule.Recruiting => configuration.KeepRecruitingPlayers,
-            CompetitiveKeepRule.Nearby => configuration.KeepNearbyPlayers,
-            CompetitiveKeepRule.Race => configuration.KeepSelectedRaces,
+            PlayerKeepRuleId.TargetFocus => configuration.KeepTargetAndFocusPlayers,
+            PlayerKeepRuleId.PartyAlliance => configuration.KeepPartyAndAllianceMembers,
+            PlayerKeepRuleId.Friends => configuration.KeepFriends,
+            PlayerKeepRuleId.TargetingMe => configuration.KeepPlayersTargetingMe,
+            PlayerKeepRuleId.RecentChat => configuration.KeepRecentChatPlayers,
+            PlayerKeepRuleId.Recruiting => configuration.KeepRecruitingPlayers,
+            PlayerKeepRuleId.Nearby => configuration.KeepNearbyPlayers,
+            PlayerKeepRuleId.Race => configuration.KeepSelectedRaces,
             _ => false,
         };
 
-    private void SetCompetitiveKeepRuleEnabled(CompetitiveKeepRule rule, bool enabled)
+    private void SetKeepRuleEnabled(PlayerKeepRuleId rule, bool enabled)
     {
         switch (rule)
         {
-            case CompetitiveKeepRule.TargetingMe:
+            case PlayerKeepRuleId.TargetFocus:
+                configuration.KeepTargetAndFocusPlayers = enabled;
+                break;
+            case PlayerKeepRuleId.PartyAlliance:
+                configuration.KeepPartyAndAllianceMembers = enabled;
+                break;
+            case PlayerKeepRuleId.Friends:
+                configuration.KeepFriends = enabled;
+                break;
+            case PlayerKeepRuleId.TargetingMe:
                 configuration.KeepPlayersTargetingMe = enabled;
                 break;
-            case CompetitiveKeepRule.RecentChat:
+            case PlayerKeepRuleId.RecentChat:
                 configuration.KeepRecentChatPlayers = enabled;
                 break;
-            case CompetitiveKeepRule.Recruiting:
+            case PlayerKeepRuleId.Recruiting:
                 configuration.KeepRecruitingPlayers = enabled;
                 break;
-            case CompetitiveKeepRule.Nearby:
+            case PlayerKeepRuleId.Nearby:
                 configuration.KeepNearbyPlayers = enabled;
                 break;
-            case CompetitiveKeepRule.Race:
+            case PlayerKeepRuleId.Race:
                 configuration.KeepSelectedRaces = enabled;
                 break;
         }
     }
 
-    private void MoveCompetitiveKeepRuleTo(CompetitiveKeepRule dragged, CompetitiveKeepRule target)
+    private void DrawKeepRuleBudgetPolicyCheckbox(PlayerKeepRuleId ruleId)
     {
-        var order = new List<CompetitiveKeepRule>(CompetitiveKeepOrder.GetEffectiveOrder(configuration));
+        var usesBudget = PlayerKeepRuleBudgetDefaults.GetPolicy(configuration, ruleId) == PlayerKeepBudgetPolicy.Counted;
+        if (ImGui.Checkbox($"###KeepRuleBudgetPolicy{ruleId}", ref usesBudget))
+        {
+            PlayerKeepRuleBudgetDefaults.SetPolicy(
+                configuration,
+                ruleId,
+                usesBudget ? PlayerKeepBudgetPolicy.Counted : PlayerKeepBudgetPolicy.Exempt
+            );
+            SaveAndRefresh();
+        }
+    }
+
+    private void MoveKeepRuleTo(PlayerKeepRuleId dragged, PlayerKeepRuleId target)
+    {
+        var order = new List<PlayerKeepRuleId>(PlayerKeepRuleOrder.GetEffectiveOrder(configuration));
         var from = order.IndexOf(dragged);
         var to = order.IndexOf(target);
         if (from < 0 || to < 0 || from == to)
@@ -543,18 +521,21 @@ public class ConfigWindow : Window, IDisposable
 
         order.RemoveAt(from);
         order.Insert(Math.Min(to, order.Count), dragged);
-        configuration.CompetitiveKeepRuleOrder = order;
-        competitiveKeepRuleOrderChanged = true;
+        configuration.KeepRuleOrder = order;
+        keepRuleOrderChanged = true;
     }
 
-    private static string GetCompetitiveKeepRuleLabel(CompetitiveKeepRule rule) =>
+    private static string GetKeepRuleLabel(PlayerKeepRuleId rule) =>
         rule switch
         {
-            CompetitiveKeepRule.TargetingMe => Loc.Text("Config.KeepPlayersTargetingMe"),
-            CompetitiveKeepRule.RecentChat => Loc.Text("Config.KeepRecentChatPlayers"),
-            CompetitiveKeepRule.Recruiting => Loc.Text("Config.KeepRecruitingPlayers"),
-            CompetitiveKeepRule.Nearby => Loc.Text("Config.KeepNearbyPlayers"),
-            CompetitiveKeepRule.Race => Loc.Text("Config.KeepRaceFilter"),
+            PlayerKeepRuleId.TargetFocus => Loc.Text("Config.KeepTargetAndFocusPlayers"),
+            PlayerKeepRuleId.PartyAlliance => Loc.Text("Config.KeepPartyAndAllianceMembers"),
+            PlayerKeepRuleId.Friends => Loc.Text("Config.KeepFriends"),
+            PlayerKeepRuleId.TargetingMe => Loc.Text("Config.KeepPlayersTargetingMe"),
+            PlayerKeepRuleId.RecentChat => Loc.Text("Config.KeepRecentChatPlayers"),
+            PlayerKeepRuleId.Recruiting => Loc.Text("Config.KeepRecruitingPlayers"),
+            PlayerKeepRuleId.Nearby => Loc.Text("Config.KeepNearbyPlayers"),
+            PlayerKeepRuleId.Race => Loc.Text("Config.KeepRaceFilter"),
             _ => rule.ToString(),
         };
 

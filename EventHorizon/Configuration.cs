@@ -31,7 +31,12 @@ public class Configuration : IPluginConfiguration
     public bool KeepSelectedRaces { get; set; }
 
     [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
-    public List<CompetitiveKeepRule> CompetitiveKeepRuleOrder { get; set; } = CompetitiveKeepOrder.CreateDefaultOrder();
+    public List<PlayerKeepRuleId> KeepRuleOrder { get; set; } = PlayerKeepRuleOrder.CreateDefaultOrder();
+
+    [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+    public Dictionary<PlayerKeepRuleId, PlayerKeepBudgetPolicy> KeepRuleBudgetPolicies { get; set; } =
+        PlayerKeepRuleBudgetDefaults.Create();
+
     public HashSet<byte> KeptRaceSex { get; set; } = [];
 
     public void Save()
@@ -40,24 +45,78 @@ public class Configuration : IPluginConfiguration
     }
 }
 
-internal static class CompetitiveKeepOrder
+public enum PlayerKeepBudgetPolicy
 {
-    private static readonly CompetitiveKeepRule[] DefaultOrder =
+    Exempt,
+    Counted,
+}
+
+public enum PlayerKeepRuleId
+{
+    TargetFocus,
+    PartyAlliance,
+    Friends,
+    TargetingMe,
+    RecentChat,
+    Recruiting,
+    Nearby,
+    Race,
+}
+
+internal static class PlayerKeepRuleBudgetDefaults
+{
+    public static Dictionary<PlayerKeepRuleId, PlayerKeepBudgetPolicy> Create() =>
+        new()
+        {
+            [PlayerKeepRuleId.TargetFocus] = PlayerKeepBudgetPolicy.Exempt,
+            [PlayerKeepRuleId.PartyAlliance] = PlayerKeepBudgetPolicy.Exempt,
+            [PlayerKeepRuleId.Friends] = PlayerKeepBudgetPolicy.Exempt,
+            [PlayerKeepRuleId.TargetingMe] = PlayerKeepBudgetPolicy.Counted,
+            [PlayerKeepRuleId.RecentChat] = PlayerKeepBudgetPolicy.Counted,
+            [PlayerKeepRuleId.Recruiting] = PlayerKeepBudgetPolicy.Counted,
+            [PlayerKeepRuleId.Nearby] = PlayerKeepBudgetPolicy.Counted,
+            [PlayerKeepRuleId.Race] = PlayerKeepBudgetPolicy.Counted,
+        };
+
+    public static PlayerKeepBudgetPolicy GetPolicy(Configuration configuration, PlayerKeepRuleId ruleId)
+    {
+        if (configuration.KeepRuleBudgetPolicies?.TryGetValue(ruleId, out var policy) == true)
+        {
+            return policy;
+        }
+
+        var defaultPolicies = Create();
+        return defaultPolicies[ruleId];
+    }
+
+    public static void SetPolicy(Configuration configuration, PlayerKeepRuleId ruleId, PlayerKeepBudgetPolicy policy)
+    {
+        configuration.KeepRuleBudgetPolicies ??= [];
+        configuration.KeepRuleBudgetPolicies[ruleId] = policy;
+    }
+}
+
+internal static class PlayerKeepRuleOrder
+{
+    private static readonly PlayerKeepRuleId[] DefaultOrder =
     [
-        CompetitiveKeepRule.TargetingMe,
-        CompetitiveKeepRule.Nearby,
-        CompetitiveKeepRule.RecentChat,
-        CompetitiveKeepRule.Race,
-        CompetitiveKeepRule.Recruiting,
+        PlayerKeepRuleId.TargetFocus,
+        PlayerKeepRuleId.PartyAlliance,
+        PlayerKeepRuleId.Friends,
+        PlayerKeepRuleId.TargetingMe,
+        PlayerKeepRuleId.Nearby,
+        PlayerKeepRuleId.RecentChat,
+        PlayerKeepRuleId.Race,
+        PlayerKeepRuleId.Recruiting,
     ];
 
-    public static List<CompetitiveKeepRule> CreateDefaultOrder() => [.. DefaultOrder];
+    public static List<PlayerKeepRuleId> CreateDefaultOrder() => [.. DefaultOrder];
 
-    public static IReadOnlyList<CompetitiveKeepRule> GetEffectiveOrder(Configuration configuration)
+    public static IReadOnlyList<PlayerKeepRuleId> GetEffectiveOrder(Configuration configuration)
     {
-        var effectiveOrder = new List<CompetitiveKeepRule>();
-        var seenRules = new HashSet<CompetitiveKeepRule>();
-        var configuredOrder = configuration.CompetitiveKeepRuleOrder;
+        var effectiveOrder = new List<PlayerKeepRuleId>();
+        var seenRules = new HashSet<PlayerKeepRuleId>();
+        var configuredOrder = configuration.KeepRuleOrder;
 
         if (configuredOrder != null)
         {
@@ -83,12 +142,12 @@ internal static class CompetitiveKeepOrder
         return effectiveOrder;
     }
 
-    public static int GetRank(Configuration configuration, CompetitiveKeepRule rule)
+    public static int GetRank(Configuration configuration, PlayerKeepRuleId ruleId)
     {
         var effectiveOrder = GetEffectiveOrder(configuration);
         for (var index = 0; index < effectiveOrder.Count; index++)
         {
-            if (effectiveOrder[index] == rule)
+            if (effectiveOrder[index] == ruleId)
             {
                 return index;
             }
@@ -99,15 +158,6 @@ internal static class CompetitiveKeepOrder
 
     public static void Reset(Configuration configuration)
     {
-        configuration.CompetitiveKeepRuleOrder = CreateDefaultOrder();
+        configuration.KeepRuleOrder = CreateDefaultOrder();
     }
-}
-
-public enum CompetitiveKeepRule
-{
-    TargetingMe,
-    RecentChat,
-    Recruiting,
-    Nearby,
-    Race,
 }
