@@ -35,7 +35,9 @@ Then install **Event Horizon** from the plugin installer.
 
 Event Horizon applies hiding rules to other players around you.
 
-Players are kept visible when they match enabled keep rules. Everyone else may be hidden, faded out, or limited by your configured visibility settings.
+Players are kept visible when they match enabled keep rules. Those rules can be reordered, and each rule can either count toward or bypass your visible-player budget.
+
+Everyone else may be hidden, faded out, or limited by your configured visibility settings.
 
 Your own character is never hidden.
 
@@ -56,6 +58,8 @@ Keep rules include:
 - Recruiting players
 - Selected race and sex combinations
 
+Keep rules can be reordered, enabled individually, and configured to either use or ignore the visible-player budget.
+
 ### Smooth transitions
 
 Players can fade out and back in instead of disappearing abruptly.
@@ -66,7 +70,13 @@ Fade transitions can be disabled if you prefer immediate visibility changes.
 
 You can limit how many other players remain visible after keep rules are applied.
 
-This is useful in cities, venues, hunt trains, and other crowded scenes.
+This is useful in cities, venues, hunt trains, and other crowded scenes. Budget-exempt rules can keep important players visible beyond that limit.
+
+### Live preview
+
+The settings window includes a live preview of nearby players, showing who is visible or hidden, which keep rule matched, whether that player counts toward the budget, and the nearby-player keep range.
+
+Preview dots can be selected while tuning rules, which makes it easier to see why a specific player is being kept or hidden.
 
 ### Attached object cleanup
 
