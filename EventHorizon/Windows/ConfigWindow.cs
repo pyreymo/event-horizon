@@ -21,10 +21,10 @@ public class ConfigWindow : Window, IDisposable
     private readonly Plugin plugin;
     private readonly Configuration configuration;
     private readonly IDataManager dataManager;
-    private readonly Vector4 warningTextColor = new(1f, 0.72f, 0.24f, 1f);
 
     private Tab? pendingSelectedTab;
     private PlayerKeepRuleId? draggedKeepRule;
+    private float cullingLeftColumnWidth = 690f;
     private bool keepRuleOrderChanged;
     private bool showRaceSexEditor;
 
@@ -35,8 +35,8 @@ public class ConfigWindow : Window, IDisposable
     public ConfigWindow(Plugin plugin, IDataManager dataManager)
         : base($"{Loc.Text("Config.Title")}###EventHorizonConfig")
     {
-        Size = new Vector2(640, 1000);
-        SizeCondition = ImGuiCond.FirstUseEver;
+        Size = new Vector2(960, 740);
+        SizeCondition = ImGuiCond.Always;
 
         this.plugin = plugin;
         this.dataManager = dataManager;
@@ -61,6 +61,13 @@ public class ConfigWindow : Window, IDisposable
     }
 
     public override void Draw()
+    {
+        DrawTabBar();
+
+        pendingSelectedTab = null;
+    }
+
+    private void DrawTabBar()
     {
         if (!ImGui.BeginTabBar("###EventHorizonConfigTabs"))
         {
@@ -92,61 +99,258 @@ public class ConfigWindow : Window, IDisposable
         }
 
         ImGui.EndTabBar();
-
-        pendingSelectedTab = null;
     }
 
     private void DrawCullingTab()
     {
-        var hideAllOtherPlayers = configuration.HideAllOtherPlayers;
-        if (ImGui.Checkbox(Loc.Text("Config.HideAllOtherPlayers"), ref hideAllOtherPlayers))
+        if (!configuration.HideAllOtherPlayers)
         {
-            configuration.HideAllOtherPlayers = hideAllOtherPlayers;
-            SaveAndRefresh();
+            DrawStatusSummaryCard();
+            return;
         }
 
-        DrawStatusOverview();
+        var availableWidth = ImGui.GetContentRegionAvail().X;
+        var splitterWidth = 8f;
+        var rightPaddingWidth = 12f;
+        var minLeftWidth = 420f;
+        var minRightWidth = 260f;
+        var maxLeftWidth = Math.Max(minLeftWidth, availableWidth - splitterWidth - rightPaddingWidth - minRightWidth);
+        cullingLeftColumnWidth = Math.Clamp(cullingLeftColumnWidth, minLeftWidth, maxLeftWidth);
 
-        if (!configuration.HideAllOtherPlayers)
+        if (!ImGui.BeginTable("###CullingContentColumns", 4, ImGuiTableFlags.SizingStretchProp))
         {
             return;
         }
 
-        if (DrawCollapsibleSectionHeader(Loc.Text("Config.Section.HideTriggers")))
+        ImGui.TableSetupColumn("###CullingMainColumn", ImGuiTableColumnFlags.WidthFixed, cullingLeftColumnWidth);
+        ImGui.TableSetupColumn("###CullingColumnSplitter", ImGuiTableColumnFlags.WidthFixed, splitterWidth);
+        ImGui.TableSetupColumn("###CullingInfoColumn", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableSetupColumn("###CullingRightPaddingColumn", ImGuiTableColumnFlags.WidthFixed, rightPaddingWidth);
+        ImGui.TableNextRow();
+        ImGui.TableNextColumn();
+        var contentStartY = ImGui.GetCursorScreenPos().Y;
+
+        DrawCard(
+            Loc.Text("Config.Section.HideTriggers"),
+            () =>
+            {
+                DrawDutyRule();
+                DrawLowPlayerCountRule();
+            }
+        );
+
+        DrawCard(Loc.Text("Config.Section.VisiblePlayerBudget"), DrawVisiblePlayerLimitRule);
+        DrawCard(Loc.Text("Config.Section.KeepRules"), DrawKeepRules, DrawResetKeepRuleOrderButton);
+
+        DrawCard(
+            Loc.Text("Config.Section.AttachedObjects"),
+            () =>
+            {
+                DrawHelpText(Loc.Text("Config.AttachedObjects.Help"));
+                ImGui.Spacing();
+                DrawOtherPlayerCompanionRule();
+                DrawOtherPlayerOrnamentRule();
+            }
+        );
+        var leftContentEndY = ImGui.GetCursorScreenPos().Y;
+
+        ImGui.TableNextColumn();
+        ImGui.TableNextColumn();
+        DrawRightPanel();
+        var rightContentEndY = ImGui.GetCursorScreenPos().Y;
+        ImGui.TableNextColumn();
+
+        var splitterHeight = Math.Max(160f, Math.Max(leftContentEndY, rightContentEndY) - contentStartY);
+        ImGui.TableSetColumnIndex(1);
+        DrawCullingColumnSplitter(splitterHeight, minLeftWidth, maxLeftWidth);
+
+        ImGui.EndTable();
+    }
+
+    private void DrawCullingColumnSplitter(float height, float minLeftWidth, float maxLeftWidth)
+    {
+        ImGui.InvisibleButton("###CullingColumnSplitterHandle", new Vector2(8f, height));
+
+        if (ImGui.IsItemActive())
         {
-            DrawDutyRule();
-            DrawLowPlayerCountRule();
-            ImGui.TreePop();
+            cullingLeftColumnWidth = Math.Clamp(cullingLeftColumnWidth + ImGui.GetIO().MouseDelta.X, minLeftWidth, maxLeftWidth);
         }
 
-        DrawSectionHeader(Loc.Text("Config.Section.VisiblePlayerBudget"), Loc.Text("Config.LimitVisiblePlayerCount.Help"));
-        DrawVisiblePlayerLimitRule();
+        var min = ImGui.GetItemRectMin();
+        var max = ImGui.GetItemRectMax();
+        var x = (min.X + max.X) * 0.5f;
+        var color = ImGui.GetColorU32(ImGui.IsItemHovered() || ImGui.IsItemActive() ? ImGuiCol.SeparatorHovered : ImGuiCol.Separator);
+        ImGui.GetWindowDrawList().AddLine(new Vector2(x, min.Y), new Vector2(x, max.Y), color, 1.5f);
+    }
 
-        DrawKeepRules();
+    private void DrawRightPanel()
+    {
+        DrawStatusSummaryCard();
+        DrawPreviewPlaceholder();
+    }
 
-        if (DrawCollapsibleSectionHeader(Loc.Text("Config.Section.AttachedObjects"), Loc.Text("Config.AttachedObjects.Help")))
-        {
-            DrawOtherPlayerCompanionRule();
-            DrawOtherPlayerOrnamentRule();
-            ImGui.TreePop();
-        }
+    private void DrawPreviewPlaceholder()
+    {
+        DrawCard(
+            Loc.Text("Config.Preview.Title"),
+            () =>
+            {
+                var drawList = ImGui.GetWindowDrawList();
+                var start = ImGui.GetCursorScreenPos();
+                var side = Math.Max(1f, ImGui.GetContentRegionAvail().X - 18f);
+                var size = new Vector2(side, side);
+                var end = start + size;
+                var center = start + (size * 0.5f);
+                var radius = Math.Min(size.X, size.Y) * 0.26f;
+                var borderColor = ImGui.GetColorU32(ImGuiCol.Border);
+                var textColor = ImGui.GetColorU32(ImGuiCol.TextDisabled);
+
+                drawList.AddRect(start, end, borderColor, 4f);
+                drawList.AddCircle(center, radius, textColor, 48, 1.2f);
+                drawList.AddCircleFilled(center, 4f, textColor, 16);
+
+                for (var i = 0; i < 12; i++)
+                {
+                    var angle = i / 12f * MathF.Tau;
+                    var offset = new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * radius * 0.72f;
+                    drawList.AddCircleFilled(center + offset, 3f, textColor, 12);
+                }
+
+                ImGui.Dummy(size);
+            }
+        );
     }
 
     private void DrawBehaviorTab()
     {
-        var showDtrBar = configuration.ShowDtrBar;
-        if (ImGui.Checkbox(Loc.Text("Config.ShowDtrBar"), ref showDtrBar))
+        DrawCard(
+            Loc.Text("Config.Tab.Behavior"),
+            () =>
+            {
+                var showDtrBar = configuration.ShowDtrBar;
+                if (ImGui.Checkbox(Loc.Text("Config.ShowDtrBar"), ref showDtrBar))
+                {
+                    configuration.ShowDtrBar = showDtrBar;
+                    SaveAndRefreshDtrBar();
+                }
+
+                var enableFadeTransitions = configuration.EnableFadeTransitions;
+                if (ImGui.Checkbox(Loc.Text("Config.EnableFadeTransitions"), ref enableFadeTransitions))
+                {
+                    configuration.EnableFadeTransitions = enableFadeTransitions;
+                    SaveAndRefresh();
+                }
+            }
+        );
+    }
+
+    #endregion
+
+    #region Layout Helpers
+
+    private static void AddVerticalSpace(float height)
+    {
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() + height);
+    }
+
+    private static void CenterCursorYInRow(float rowY, float rowHeight, float itemHeight)
+    {
+        var cursor = ImGui.GetCursorScreenPos();
+        var centeredY = rowY + Math.Max(0f, (rowHeight - itemHeight) * 0.5f);
+        ImGui.SetCursorScreenPos(new Vector2(cursor.X, centeredY));
+    }
+
+    private void DrawCard(string title, System.Action content, System.Action? headerAction = null)
+    {
+        AddVerticalSpace(8f);
+        DrawFramedCard(
+            $"###Card{title}",
+            () =>
+            {
+                DrawCardHeader(title, headerAction);
+                DrawCardSeparator();
+                content();
+            }
+        );
+    }
+
+    private static void DrawCardHeader(string title, System.Action? headerAction)
+    {
+        if (headerAction is null)
         {
-            configuration.ShowDtrBar = showDtrBar;
-            SaveAndRefreshDtrBar();
+            ImGui.TextUnformatted(title);
+            return;
         }
 
-        var enableFadeTransitions = configuration.EnableFadeTransitions;
-        if (ImGui.Checkbox(Loc.Text("Config.EnableFadeTransitions"), ref enableFadeTransitions))
+        if (!ImGui.BeginTable($"###CardHeader{title}", 3, ImGuiTableFlags.SizingStretchProp))
         {
-            configuration.EnableFadeTransitions = enableFadeTransitions;
-            SaveAndRefresh();
+            ImGui.TextUnformatted(title);
+            ImGui.SameLine();
+            headerAction();
+            return;
         }
+
+        ImGui.TableSetupColumn("###CardHeaderTitle", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableSetupColumn("###CardHeaderAction", ImGuiTableColumnFlags.WidthFixed, 150f);
+        ImGui.TableSetupColumn("###CardHeaderPadding", ImGuiTableColumnFlags.WidthFixed, 12f);
+        ImGui.TableNextRow();
+        ImGui.TableNextColumn();
+        ImGui.TextUnformatted(title);
+        ImGui.TableNextColumn();
+        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + Math.Max(0f, ImGui.GetContentRegionAvail().X - 142f));
+        headerAction();
+        ImGui.TableNextColumn();
+        ImGui.EndTable();
+    }
+
+    private static void DrawFramedCard(string id, System.Action content)
+    {
+        var drawList = ImGui.GetWindowDrawList();
+        var start = ImGui.GetCursorScreenPos();
+        var width = Math.Max(1f, ImGui.GetContentRegionAvail().X - 6f);
+        var padding = new Vector2(12f, 10f);
+        var rightPadding = 18f;
+
+        drawList.ChannelsSplit(2);
+        drawList.ChannelsSetCurrent(1);
+
+        ImGui.PushID(id);
+        ImGui.SetCursorScreenPos(start + padding);
+        ImGui.BeginGroup();
+        ImGui.PushTextWrapPos(start.X + width - rightPadding);
+        content();
+        ImGui.PopTextWrapPos();
+        ImGui.EndGroup();
+        ImGui.PopID();
+
+        var contentMax = ImGui.GetItemRectMax();
+        var height = Math.Max(ImGui.GetTextLineHeightWithSpacing() + (padding.Y * 2f), contentMax.Y - start.Y + padding.Y);
+        var end = new Vector2(start.X + width, start.Y + height);
+
+        drawList.ChannelsSetCurrent(0);
+        drawList.AddRectFilled(start, end, ImGui.GetColorU32(ImGuiCol.ChildBg), 6f);
+        drawList.AddRect(start, end, ImGui.GetColorU32(ImGuiCol.Border), 6f);
+        drawList.ChannelsMerge();
+
+        ImGui.SetCursorScreenPos(new Vector2(start.X, end.Y));
+    }
+
+    private static void DrawCardSeparator()
+    {
+        var drawList = ImGui.GetWindowDrawList();
+        var start = ImGui.GetCursorScreenPos();
+        var width = Math.Max(1f, ImGui.GetContentRegionAvail().X - 18f);
+        var gapHeight = 9f;
+        var y = start.Y + (gapHeight * 0.5f);
+        drawList.AddLine(new Vector2(start.X, y), new Vector2(start.X + width, y), ImGui.GetColorU32(ImGuiCol.Separator));
+        ImGui.Dummy(new Vector2(width, gapHeight));
+    }
+
+    private static void DrawHelpText(string text)
+    {
+        ImGui.PushTextWrapPos();
+        ImGui.TextDisabled(text);
+        ImGui.PopTextWrapPos();
     }
 
     #endregion
@@ -165,19 +369,90 @@ public class ConfigWindow : Window, IDisposable
 
     private void DrawStatusOverview()
     {
+        DrawStatusSummaryCard();
+    }
+
+    private void DrawStatusSummaryCard()
+    {
         var currentOtherPlayerCount = ObjectTableStats.CurrentOtherPlayerCount();
         var hiddenPlayerCount = plugin.HiddenPlayerCount;
         var keptOtherPlayerCount = Math.Max(0, currentOtherPlayerCount - hiddenPlayerCount);
         var suspensionReason = GetCullingSuspensionReason(currentOtherPlayerCount);
 
-        ImGui.Spacing();
-        if (!string.IsNullOrEmpty(suspensionReason))
+        DrawCard(
+            Loc.Text("Config.StatusSummary.Title"),
+            () =>
+            {
+                DrawPlayerHidingMasterSwitch();
+                ImGui.Spacing();
+
+                if (!string.IsNullOrEmpty(suspensionReason))
+                {
+                    DrawSummaryRow(
+                        Loc.Text("Config.StatusSummary.State"),
+                        string.Format(Loc.Text("Config.StatusPaused.Compact"), suspensionReason)
+                    );
+                }
+                else
+                {
+                    DrawSummaryRow(Loc.Text("Config.StatusSummary.State"), Loc.Text("Config.StatusSummary.Running"));
+                }
+
+                DrawSummaryRow(
+                    Loc.Text("Config.StatusSummary.VisibleHidden"),
+                    string.Format(Loc.Text("Config.StatusSummary.VisibleHidden.Value"), keptOtherPlayerCount, hiddenPlayerCount)
+                );
+
+                DrawSummaryRow(Loc.Text("Config.StatusSummary.BudgetLimit"), GetBudgetLimitSummary());
+            }
+        );
+    }
+
+    private void DrawPlayerHidingMasterSwitch()
+    {
+        var statusText = configuration.HideAllOtherPlayers
+            ? Loc.Text("Config.MasterSwitch.Enabled")
+            : Loc.Text("Config.MasterSwitch.Disabled");
+        var label = $"{Loc.Text("Config.HideAllOtherPlayers.Short")} · {statusText}###PlayerHidingMasterSwitch";
+        var width = Math.Max(1f, ImGui.GetContentRegionAvail().X - 18f);
+        var pushedColors = false;
+
+        ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(8f, 6f));
+        if (configuration.HideAllOtherPlayers)
         {
-            ImGui.TextColored(warningTextColor, string.Format(Loc.Text("Config.StatusPaused"), suspensionReason));
-            return;
+            ImGui.PushStyleColor(ImGuiCol.Button, ImGui.GetStyle().Colors[(int)ImGuiCol.ButtonActive]);
+            pushedColors = true;
         }
 
-        ImGui.TextDisabled(string.Format(Loc.Text("Config.StatusRunning"), keptOtherPlayerCount, hiddenPlayerCount));
+        if (ImGui.Button(label, new Vector2(width, 0f)))
+        {
+            configuration.HideAllOtherPlayers = !configuration.HideAllOtherPlayers;
+            SaveAndRefresh();
+        }
+
+        if (pushedColors)
+        {
+            ImGui.PopStyleColor();
+        }
+
+        ImGui.PopStyleVar();
+    }
+
+    private static void DrawSummaryRow(string label, string value)
+    {
+        ImGui.TextDisabled(label);
+        ImGui.SameLine();
+        ImGui.TextUnformatted(value);
+    }
+
+    private string GetBudgetLimitSummary()
+    {
+        if (!configuration.LimitVisiblePlayerCount)
+        {
+            return Loc.Text("Config.StatusSummary.BudgetLimit.Disabled");
+        }
+
+        return string.Format(Loc.Text("Config.StatusSummary.BudgetLimit.Value"), configuration.VisiblePlayerCountLimit);
     }
 
     private string GetCullingSuspensionReason(int currentOtherPlayerCount)
@@ -215,27 +490,60 @@ public class ConfigWindow : Window, IDisposable
             SaveAndRefresh();
         }
 
-        if (configuration.DisableCullingBelowPlayerCount)
+        if (!configuration.DisableCullingBelowPlayerCount)
         {
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(120f);
-            var threshold = configuration.DisableCullingPlayerCountThreshold;
-            if (ImGui.SliderInt("###DisableCullingPlayerCountThreshold", ref threshold, 1, 100))
-            {
-                configuration.DisableCullingPlayerCountThreshold = Math.Clamp(threshold, 1, 100);
-            }
-
-            if (ImGui.IsItemDeactivatedAfterEdit())
-            {
-                SaveAndRefresh();
-            }
-
-            ImGui.SameLine();
-            ImGui.TextUnformatted(Loc.Text("Config.DisableCullingPlayerCountThresholdSuffix"));
+            return;
         }
+
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(120f);
+        var threshold = configuration.DisableCullingPlayerCountThreshold;
+        if (ImGui.SliderInt("###DisableCullingPlayerCountThreshold", ref threshold, 1, 100))
+        {
+            configuration.DisableCullingPlayerCountThreshold = Math.Clamp(threshold, 1, 100);
+        }
+
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            SaveAndRefresh();
+        }
+
+        ImGui.SameLine();
+        ImGui.TextUnformatted(Loc.Text("Config.DisableCullingPlayerCountThresholdSuffix"));
     }
 
     private void DrawVisiblePlayerLimitRule()
+    {
+        if (!ImGui.BeginTable("###VisiblePlayerLimitRule", 3, ImGuiTableFlags.SizingStretchProp))
+        {
+            DrawVisiblePlayerLimitRuleFallback();
+            return;
+        }
+
+        ImGui.TableSetupColumn("###VisibleLimitEnabled", ImGuiTableColumnFlags.WidthFixed, 180f);
+        ImGui.TableSetupColumn("###VisibleLimitSlider", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableSetupColumn("###VisibleLimitPadding", ImGuiTableColumnFlags.WidthFixed, 12f);
+        ImGui.TableNextRow();
+
+        ImGui.TableNextColumn();
+        var limitVisiblePlayerCount = configuration.LimitVisiblePlayerCount;
+        if (ImGui.Checkbox(Loc.Text("Config.LimitVisiblePlayerCount"), ref limitVisiblePlayerCount))
+        {
+            configuration.LimitVisiblePlayerCount = limitVisiblePlayerCount;
+            SaveAndRefresh();
+        }
+
+        ImGui.TableNextColumn();
+        DrawVisiblePlayerLimitSlider(Math.Max(1f, ImGui.GetContentRegionAvail().X - 6f));
+        ImGui.TableNextColumn();
+
+        ImGui.EndTable();
+
+        AddVerticalSpace(4f);
+        DrawHelpText(Loc.Text("Config.LimitVisiblePlayerCount.Help"));
+    }
+
+    private void DrawVisiblePlayerLimitRuleFallback()
     {
         var limitVisiblePlayerCount = configuration.LimitVisiblePlayerCount;
         if (ImGui.Checkbox(Loc.Text("Config.LimitVisiblePlayerCount"), ref limitVisiblePlayerCount))
@@ -245,13 +553,21 @@ public class ConfigWindow : Window, IDisposable
         }
 
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(120f);
-        var limit = configuration.VisiblePlayerCountLimit;
+        DrawVisiblePlayerLimitSlider(Math.Max(120f, ImGui.GetContentRegionAvail().X - 12f));
+
+        AddVerticalSpace(4f);
+        DrawHelpText(Loc.Text("Config.LimitVisiblePlayerCount.Help"));
+    }
+
+    private void DrawVisiblePlayerLimitSlider(float width)
+    {
         if (!configuration.LimitVisiblePlayerCount)
         {
             ImGui.BeginDisabled();
         }
 
+        ImGui.SetNextItemWidth(width);
+        var limit = configuration.VisiblePlayerCountLimit;
         if (ImGui.SliderInt("###VisiblePlayerCountLimit", ref limit, 1, 100))
         {
             configuration.VisiblePlayerCountLimit = Math.Clamp(limit, 1, 100);
@@ -266,11 +582,6 @@ public class ConfigWindow : Window, IDisposable
         {
             ImGui.EndDisabled();
         }
-
-        ImGui.SameLine();
-        ImGui.TextUnformatted(Loc.Text("Config.VisiblePlayerCountLimitSuffix"));
-        ImGui.SameLine();
-        ImGui.TextDisabled(Loc.Text("Config.PerRuleBudget"));
     }
 
     private void DrawOtherPlayerCompanionRule()
@@ -295,21 +606,24 @@ public class ConfigWindow : Window, IDisposable
 
     private void DrawKeepRules()
     {
-        DrawSectionHeader(Loc.Text("Config.Section.KeepRules"), Loc.Text("Config.KeepRules.Help"));
+        var tableMinX = ImGui.GetCursorScreenPos().X;
+        var tableMaxX = tableMinX + ImGui.GetContentRegionAvail().X - 12f;
 
-        if (!ImGui.BeginTable("###KeepRuleOrderTable", 3, ImGuiTableFlags.SizingStretchProp))
+        if (!ImGui.BeginTable("###KeepRuleOrderTable", 6, ImGuiTableFlags.SizingStretchProp))
         {
             return;
         }
 
-        ImGui.TableSetupColumn("###KeepRuleOrderHandle", ImGuiTableColumnFlags.WidthFixed, 28f);
-        ImGui.TableSetupColumn("###KeepRuleOrderRule", ImGuiTableColumnFlags.WidthStretch);
-        ImGui.TableSetupColumn("###KeepRuleOrderBudget", ImGuiTableColumnFlags.WidthFixed, 88f);
+        ImGui.TableSetupColumn("###KeepRuleOrderHandle", ImGuiTableColumnFlags.WidthFixed, 30f);
+        ImGui.TableSetupColumn("###KeepRuleEnabled", ImGuiTableColumnFlags.WidthFixed, 36f);
+        ImGui.TableSetupColumn("###KeepRuleName", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableSetupColumn("###KeepRuleParameters", ImGuiTableColumnFlags.WidthFixed, 160f);
+        ImGui.TableSetupColumn("###KeepRuleBudget", ImGuiTableColumnFlags.WidthFixed, 54f);
+        ImGui.TableSetupColumn("###KeepRulePadding", ImGuiTableColumnFlags.WidthFixed, 12f);
 
-        DrawKeepRuleHeader();
         foreach (var rule in PlayerKeepRuleOrder.GetEffectiveOrder(configuration))
         {
-            DrawKeepRuleOrderRow(rule);
+            DrawRuleRow(rule, tableMinX, tableMaxX);
         }
 
         ImGui.EndTable();
@@ -320,6 +634,8 @@ public class ConfigWindow : Window, IDisposable
             DrawRaceFilterEditor();
             ImGui.Unindent();
         }
+
+        DrawKeepRulesExplanation();
 
         if (draggedKeepRule.HasValue && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
         {
@@ -332,46 +648,77 @@ public class ConfigWindow : Window, IDisposable
         }
     }
 
-    private void DrawKeepRuleHeader()
+    private static void DrawKeepRulesExplanation()
     {
-        ImGui.TableNextRow();
-        ImGui.TableNextColumn();
-        ImGui.TableNextColumn();
-        if (ImGui.SmallButton(Loc.Text("Config.KeepRuleOrder.Reset")))
-        {
-            PlayerKeepRuleOrder.Reset(configuration);
-            SaveAndRefreshWithoutRuleReset();
-        }
-
-        ImGui.TableNextColumn();
-        ImGui.TextDisabled(Loc.Text("Config.KeepRules.UsesBudget"));
+        ImGui.Spacing();
+        DrawCardSeparator();
+        ImGui.Spacing();
+        ImGui.TextDisabled(Loc.Text("Config.KeepRules.ExplanationTitle"));
+        DrawHelpText(Loc.Text("Config.KeepRules.Help"));
     }
 
-    private void DrawKeepRuleOrderRow(PlayerKeepRuleId rule)
+    private void DrawRuleRow(PlayerKeepRuleId rule, float rowMinX, float rowMaxX)
     {
-        ImGui.TableNextRow();
+        var rowHeight = Math.Max(34f, ImGui.GetFrameHeight() + 10f);
+        ImGui.TableNextRow(ImGuiTableRowFlags.None, rowHeight);
+
         ImGui.TableNextColumn();
+        var rowY = ImGui.GetCursorScreenPos().Y;
+        var rowMin = new Vector2(rowMinX, rowY);
+        var rowMax = new Vector2(rowMaxX, rowY + rowHeight);
+        var rowHovered = IsMouseInRect(rowMin, rowMax);
+        DrawKeepRuleCellBackground(rowHovered);
+
+        CenterCursorYInRow(rowY, rowHeight, ImGui.GetFrameHeight());
         var handleState = DrawKeepRuleHandle(rule);
 
         ImGui.TableNextColumn();
-        var ruleItemState = DrawKeepRuleControl(rule);
+        DrawKeepRuleCellBackground(rowHovered);
+        CenterCursorYInRow(rowY, rowHeight, ImGui.GetFrameHeight());
+        DrawKeepRuleEnabledCheckbox(rule);
+
         ImGui.TableNextColumn();
-        DrawKeepRuleBudgetPolicyCheckbox(rule);
+        DrawKeepRuleCellBackground(rowHovered);
+        CenterCursorYInRow(rowY, rowHeight, ImGui.GetFrameHeight());
+        DrawKeepRuleLabel(rule);
+
+        ImGui.TableNextColumn();
+        DrawKeepRuleCellBackground(rowHovered);
+        CenterCursorYInRow(rowY, rowHeight, ImGui.GetFrameHeight());
+        DrawKeepRuleParameters(rule);
+
+        ImGui.TableNextColumn();
+        DrawKeepRuleCellBackground(rowHovered);
+        CenterCursorYInRow(rowY, rowHeight, ImGui.GetFrameHeight());
+        DrawBudgetChip(rule);
+
+        ImGui.TableNextColumn();
 
         if (handleState.Active && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
         {
             draggedKeepRule = rule;
         }
 
-        if (draggedKeepRule.HasValue && draggedKeepRule.Value != rule && (handleState.Hovered || ruleItemState.Hovered))
+        if (draggedKeepRule.HasValue && draggedKeepRule.Value != rule && rowHovered)
         {
             MoveKeepRuleTo(draggedKeepRule.Value, rule);
         }
     }
 
+    private static void DrawKeepRuleCellBackground(bool hovered)
+    {
+        ImGui.TableSetBgColor(ImGuiTableBgTarget.CellBg, ImGui.GetColorU32(hovered ? ImGuiCol.HeaderHovered : ImGuiCol.TableRowBg));
+    }
+
+    private static bool IsMouseInRect(Vector2 min, Vector2 max)
+    {
+        var mouse = ImGui.GetMousePos();
+        return mouse.X >= min.X && mouse.X <= max.X && mouse.Y >= min.Y && mouse.Y <= max.Y;
+    }
+
     private static ImGuiItemState DrawKeepRuleHandle(PlayerKeepRuleId rule)
     {
-        var handleSize = new Vector2(20f, ImGui.GetTextLineHeightWithSpacing());
+        var handleSize = new Vector2(22f, ImGui.GetFrameHeight());
         ImGui.InvisibleButton($"###KeepRuleHandle{rule}", handleSize);
 
         var hovered = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
@@ -386,58 +733,61 @@ public class ConfigWindow : Window, IDisposable
         var drawList = ImGui.GetWindowDrawList();
         var color = ImGui.GetColorU32(highlighted ? ImGuiCol.Text : ImGuiCol.TextDisabled);
         var width = 11f;
-        var left = min.X + (max.X - min.X - width) * 0.5f;
+        var left = min.X + ((max.X - min.X - width) * 0.5f);
         var centerY = (min.Y + max.Y) * 0.5f;
 
         for (var i = -1; i <= 1; i++)
         {
-            var y = centerY + i * 4f;
+            var y = centerY + (i * 4f);
             drawList.AddLine(new Vector2(left, y), new Vector2(left + width, y), color, 1.5f);
         }
     }
 
-    private ImGuiItemState DrawKeepRuleControl(PlayerKeepRuleId rule)
+    private ImGuiItemState DrawKeepRuleEnabledCheckbox(PlayerKeepRuleId rule)
     {
         var enabled = IsKeepRuleEnabled(rule);
-        if (ImGui.Checkbox($"{GetKeepRuleLabel(rule)}###KeepRule{rule}", ref enabled))
+        if (ImGui.Checkbox($"###KeepRule{rule}", ref enabled))
         {
             SetKeepRuleEnabled(rule, enabled);
             SaveAndRefresh();
         }
-        var itemState = new ImGuiItemState(ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem));
 
+        return new ImGuiItemState(ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem));
+    }
+
+    private void DrawKeepRuleParameters(PlayerKeepRuleId rule)
+    {
         switch (rule)
         {
-            case PlayerKeepRuleId.TargetFocus:
-                DrawHelpMarker(Loc.Text("Config.KeepTargetAndFocusPlayers.Help"));
-                break;
-            case PlayerKeepRuleId.TargetingMe:
-                DrawHelpMarker(Loc.Text("Config.KeepPlayersTargetingMe.Help"));
-                break;
-            case PlayerKeepRuleId.RecentChat:
-                DrawHelpMarker(Loc.Text("Config.KeepRecentChatPlayers.Help"));
-                break;
             case PlayerKeepRuleId.Nearby:
                 DrawNearbyPlayerOptions();
                 break;
             case PlayerKeepRuleId.Race:
-                ImGui.SameLine();
                 if (ImGui.SmallButton(Loc.Text("Config.RaceFilter.Edit")))
                 {
                     showRaceSexEditor = !showRaceSexEditor;
                 }
                 break;
+            default:
+                break;
         }
+    }
 
-        return itemState;
+    private static void DrawKeepRuleLabel(PlayerKeepRuleId rule)
+    {
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted(GetKeepRuleLabel(rule));
+
+        var helpText = GetKeepRuleHelpText(rule);
+        if (!string.IsNullOrEmpty(helpText))
+        {
+            DrawHelpMarker(helpText);
+        }
     }
 
     private void DrawNearbyPlayerOptions()
     {
-        ImGui.SameLine();
-        ImGui.TextUnformatted(Loc.Text("Config.KeepNearbyPlayersRange"));
-        ImGui.SameLine();
-        ImGui.SetNextItemWidth(140f);
+        ImGui.SetNextItemWidth(Math.Min(126f, ImGui.GetContentRegionAvail().X));
         var range = configuration.KeepNearbyPlayersRange;
         if (ImGui.SliderFloat("###KeepNearbyPlayersRange", ref range, 1f, 50f, Loc.Text("Config.DistanceSliderFormat")))
         {
@@ -495,9 +845,17 @@ public class ConfigWindow : Window, IDisposable
         }
     }
 
-    private void DrawKeepRuleBudgetPolicyCheckbox(PlayerKeepRuleId ruleId)
+    private void DrawBudgetChip(PlayerKeepRuleId ruleId)
     {
         var usesBudget = PlayerKeepRuleBudgetDefaults.GetPolicy(configuration, ruleId) == PlayerKeepBudgetPolicy.Counted;
+
+        var checkboxSize = ImGui.GetFrameHeight();
+        var availableWidth = ImGui.GetContentRegionAvail().X;
+        if (availableWidth > checkboxSize)
+        {
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + ((availableWidth - checkboxSize) * 0.5f));
+        }
+
         if (ImGui.Checkbox($"###KeepRuleBudgetPolicy{ruleId}", ref usesBudget))
         {
             PlayerKeepRuleBudgetDefaults.SetPolicy(
@@ -506,6 +864,24 @@ public class ConfigWindow : Window, IDisposable
                 usesBudget ? PlayerKeepBudgetPolicy.Counted : PlayerKeepBudgetPolicy.Exempt
             );
             SaveAndRefresh();
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.BeginTooltip();
+            ImGui.TextUnformatted(
+                Loc.Text(usesBudget ? "Config.KeepRules.Budget.Counted.Tooltip" : "Config.KeepRules.Budget.Exempt.Tooltip")
+            );
+            ImGui.EndTooltip();
+        }
+    }
+
+    private void DrawResetKeepRuleOrderButton()
+    {
+        if (ImGui.SmallButton(Loc.Text("Config.KeepRuleOrder.Reset")))
+        {
+            PlayerKeepRuleOrder.Reset(configuration);
+            SaveAndRefreshWithoutRuleReset();
         }
     }
 
@@ -539,9 +915,22 @@ public class ConfigWindow : Window, IDisposable
             _ => rule.ToString(),
         };
 
-    private static void DrawHelpMarker(string text)
+    private static string GetKeepRuleHelpText(PlayerKeepRuleId rule) =>
+        rule switch
+        {
+            PlayerKeepRuleId.TargetFocus => Loc.Text("Config.KeepTargetAndFocusPlayers.Help"),
+            PlayerKeepRuleId.TargetingMe => Loc.Text("Config.KeepPlayersTargetingMe.Help"),
+            PlayerKeepRuleId.RecentChat => Loc.Text("Config.KeepRecentChatPlayers.Help"),
+            _ => string.Empty,
+        };
+
+    private static void DrawHelpMarker(string text, bool sameLine = true)
     {
-        ImGui.SameLine();
+        if (sameLine)
+        {
+            ImGui.SameLine();
+        }
+
         ImGui.TextDisabled("?");
 
         if (!ImGui.IsItemHovered())
@@ -554,31 +943,6 @@ public class ConfigWindow : Window, IDisposable
         ImGui.TextUnformatted(text);
         ImGui.PopTextWrapPos();
         ImGui.EndTooltip();
-    }
-
-    private static void DrawSectionHeader(string label, string helpText = "")
-    {
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        ImGui.TextUnformatted(label);
-        if (!string.IsNullOrEmpty(helpText))
-        {
-            DrawHelpMarker(helpText);
-        }
-        ImGui.Spacing();
-    }
-
-    private static bool DrawCollapsibleSectionHeader(string label, string helpText = "")
-    {
-        ImGui.Spacing();
-        var open = ImGui.TreeNode(label);
-        if (!string.IsNullOrEmpty(helpText))
-        {
-            DrawHelpMarker(helpText);
-        }
-
-        return open;
     }
 
     #endregion
@@ -610,7 +974,7 @@ public class ConfigWindow : Window, IDisposable
         if (
             !ImGui.BeginTable(
                 "###RaceSexFilterTable",
-                3,
+                4,
                 ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV
             )
         )
@@ -621,6 +985,7 @@ public class ConfigWindow : Window, IDisposable
         ImGui.TableSetupColumn(Loc.Text("Config.RaceFilter.Race"));
         ImGui.TableSetupColumn(Loc.Text("Config.RaceFilter.Male"));
         ImGui.TableSetupColumn(Loc.Text("Config.RaceFilter.Female"));
+        ImGui.TableSetupColumn("###RaceFilterPadding", ImGuiTableColumnFlags.WidthFixed, 12f);
         ImGui.TableNextRow(ImGuiTableRowFlags.Headers);
         ImGui.TableNextColumn();
         ImGui.TextUnformatted(Loc.Text("Config.RaceFilter.Race"));
@@ -628,6 +993,7 @@ public class ConfigWindow : Window, IDisposable
         DrawSexColumnHeader(RaceSexFilter.MaleSex, Loc.Text("Config.RaceFilter.Male"));
         ImGui.TableNextColumn();
         DrawSexColumnHeader(RaceSexFilter.FemaleSex, Loc.Text("Config.RaceFilter.Female"));
+        ImGui.TableNextColumn();
 
         for (var race = RaceSexFilter.MinRace; race <= RaceSexFilter.MaxRace; race++)
         {
@@ -637,6 +1003,7 @@ public class ConfigWindow : Window, IDisposable
 
             DrawRaceSexFilterCell(race, RaceSexFilter.MaleSex);
             DrawRaceSexFilterCell(race, RaceSexFilter.FemaleSex);
+            ImGui.TableNextColumn();
         }
 
         ImGui.EndTable();
