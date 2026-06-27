@@ -17,7 +17,7 @@ public class Configuration : IPluginConfiguration
     public bool LimitVisiblePlayerCount { get; set; }
     public int VisiblePlayerCountLimit { get; set; } = 30;
     public bool HideOtherPlayerCompanions { get; set; } = true;
-    public bool HideOtherPlayerOrnaments { get; set; } = true;
+    public bool HideOtherPlayerOrnaments { get; set; } = false;
     public bool ShowDtrBar { get; set; } = true;
     public bool EnableFadeTransitions { get; set; } = true;
     public bool KeepFriends { get; set; } = true;
@@ -42,19 +42,59 @@ public class Configuration : IPluginConfiguration
 
 internal static class CompetitiveKeepOrder
 {
-    public static List<CompetitiveKeepRule> CreateDefaultOrder() =>
-        [
-            CompetitiveKeepRule.TargetingMe,
-            CompetitiveKeepRule.Nearby,
-            CompetitiveKeepRule.RecentChat,
-            CompetitiveKeepRule.Race,
-            CompetitiveKeepRule.Recruiting,
-        ];
+    private static readonly CompetitiveKeepRule[] DefaultOrder =
+    [
+        CompetitiveKeepRule.TargetingMe,
+        CompetitiveKeepRule.Nearby,
+        CompetitiveKeepRule.RecentChat,
+        CompetitiveKeepRule.Race,
+        CompetitiveKeepRule.Recruiting,
+    ];
+
+    public static List<CompetitiveKeepRule> CreateDefaultOrder() => [.. DefaultOrder];
+
+    public static IReadOnlyList<CompetitiveKeepRule> GetEffectiveOrder(Configuration configuration)
+    {
+        var effectiveOrder = new List<CompetitiveKeepRule>();
+        var seenRules = new HashSet<CompetitiveKeepRule>();
+        var configuredOrder = configuration.CompetitiveKeepRuleOrder;
+
+        if (configuredOrder != null)
+        {
+            foreach (var rule in configuredOrder)
+            {
+                if (Array.IndexOf(DefaultOrder, rule) < 0 || !seenRules.Add(rule))
+                {
+                    continue;
+                }
+
+                effectiveOrder.Add(rule);
+            }
+        }
+
+        foreach (var rule in DefaultOrder)
+        {
+            if (seenRules.Add(rule))
+            {
+                effectiveOrder.Add(rule);
+            }
+        }
+
+        return effectiveOrder;
+    }
 
     public static int GetRank(Configuration configuration, CompetitiveKeepRule rule)
     {
-        var index = configuration.CompetitiveKeepRuleOrder.IndexOf(rule);
-        return index < 0 ? configuration.CompetitiveKeepRuleOrder.Count : index;
+        var effectiveOrder = GetEffectiveOrder(configuration);
+        for (var index = 0; index < effectiveOrder.Count; index++)
+        {
+            if (effectiveOrder[index] == rule)
+            {
+                return index;
+            }
+        }
+
+        return effectiveOrder.Count;
     }
 
     public static void Reset(Configuration configuration)

@@ -85,41 +85,56 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
             return PlayerKeepDecision.None;
         }
 
-        if (ShouldKeepTargetOrFocusPlayer(gameObject) || ShouldKeepFriend(gameObject) || ShouldKeepPartyOrAllianceMember(gameObject))
+        if (ShouldKeepTargetOrFocusPlayer(gameObject))
         {
-            return PlayerKeepDecision.Protected;
+            return PlayerKeepDecision.Exempt(PlayerKeepRuleId.TargetFocus);
         }
 
-        int? rank = null;
-        var distanceSq = float.MaxValue;
+        if (ShouldKeepFriend(gameObject))
+        {
+            return PlayerKeepDecision.Exempt(PlayerKeepRuleId.Friends);
+        }
 
+        if (ShouldKeepPartyOrAllianceMember(gameObject))
+        {
+            return PlayerKeepDecision.Exempt(PlayerKeepRuleId.PartyAlliance);
+        }
+
+        CompetitiveKeepRule? winningRule = null;
+        int? rank = null;
         if (ShouldKeepPlayerTargetingLocalPlayer(gameObject))
         {
-            rank = GetBetterRank(rank, CompetitiveKeepRule.TargetingMe);
+            KeepBetterRule(ref winningRule, ref rank, CompetitiveKeepRule.TargetingMe);
         }
 
         if (ShouldKeepRecentChatPlayer(gameObject))
         {
-            rank = GetBetterRank(rank, CompetitiveKeepRule.RecentChat);
+            KeepBetterRule(ref winningRule, ref rank, CompetitiveKeepRule.RecentChat);
         }
 
         if (ShouldKeepRecruitingPlayer(gameObject))
         {
-            rank = GetBetterRank(rank, CompetitiveKeepRule.Recruiting);
+            KeepBetterRule(ref winningRule, ref rank, CompetitiveKeepRule.Recruiting);
         }
 
         if (ShouldKeepNearbyPlayer(gameObject, out var nearbyDistanceSq))
         {
-            rank = GetBetterRank(rank, CompetitiveKeepRule.Nearby);
-            distanceSq = nearbyDistanceSq;
+            KeepBetterRule(ref winningRule, ref rank, CompetitiveKeepRule.Nearby);
         }
 
         if (ShouldKeepByRace(gameObject))
         {
-            rank = GetBetterRank(rank, CompetitiveKeepRule.Race);
+            KeepBetterRule(ref winningRule, ref rank, CompetitiveKeepRule.Race);
         }
 
-        return !rank.HasValue ? PlayerKeepDecision.None : PlayerKeepDecision.Competitive(rank.Value, distanceSq);
+        if (!winningRule.HasValue || !rank.HasValue)
+        {
+            return PlayerKeepDecision.None;
+        }
+
+        var tieBreaker =
+            winningRule == CompetitiveKeepRule.Nearby ? PlayerKeepTieBreaker.Nearby(nearbyDistanceSq) : PlayerKeepTieBreaker.None;
+        return PlayerKeepDecision.Counted(ToPlayerKeepRuleId(winningRule.Value), rank.Value, tieBreaker);
     }
 
     private bool ShouldKeepFriend(GameObject* gameObject)
@@ -413,10 +428,25 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
 
     private static bool IsPlayerObject(GameObject* gameObject) => gameObject->ObjectKind == ObjectKind.Pc;
 
-    private int GetBetterRank(int? currentRank, CompetitiveKeepRule rule)
+    private static PlayerKeepRuleId ToPlayerKeepRuleId(CompetitiveKeepRule rule) =>
+        rule switch
+        {
+            CompetitiveKeepRule.TargetingMe => PlayerKeepRuleId.TargetingMe,
+            CompetitiveKeepRule.RecentChat => PlayerKeepRuleId.RecentChat,
+            CompetitiveKeepRule.Recruiting => PlayerKeepRuleId.Recruiting,
+            CompetitiveKeepRule.Nearby => PlayerKeepRuleId.Nearby,
+            CompetitiveKeepRule.Race => PlayerKeepRuleId.Race,
+            _ => throw new ArgumentOutOfRangeException(nameof(rule), rule, null),
+        };
+
+    private void KeepBetterRule(ref CompetitiveKeepRule? winningRule, ref int? currentRank, CompetitiveKeepRule rule)
     {
         var rank = CompetitiveKeepOrder.GetRank(configuration, rule);
-        return currentRank.HasValue ? Math.Min(currentRank.Value, rank) : rank;
+        if (!currentRank.HasValue || rank < currentRank.Value)
+        {
+            winningRule = rule;
+            currentRank = rank;
+        }
     }
 
     #endregion

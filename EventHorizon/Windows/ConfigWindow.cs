@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
@@ -313,7 +314,7 @@ public class ConfigWindow : Window, IDisposable
             SaveAndRefreshWithoutRuleReset();
         }
 
-        foreach (var rule in configuration.CompetitiveKeepRuleOrder.ToArray())
+        foreach (var rule in CompetitiveKeepOrder.GetEffectiveOrder(configuration))
         {
             DrawCompetitiveKeepRuleOrderRow(rule);
         }
@@ -532,7 +533,7 @@ public class ConfigWindow : Window, IDisposable
 
     private void MoveCompetitiveKeepRuleTo(CompetitiveKeepRule dragged, CompetitiveKeepRule target)
     {
-        var order = configuration.CompetitiveKeepRuleOrder;
+        var order = new List<CompetitiveKeepRule>(CompetitiveKeepOrder.GetEffectiveOrder(configuration));
         var from = order.IndexOf(dragged);
         var to = order.IndexOf(target);
         if (from < 0 || to < 0 || from == to)
@@ -542,6 +543,7 @@ public class ConfigWindow : Window, IDisposable
 
         order.RemoveAt(from);
         order.Insert(Math.Min(to, order.Count), dragged);
+        configuration.CompetitiveKeepRuleOrder = order;
         competitiveKeepRuleOrderChanged = true;
     }
 
