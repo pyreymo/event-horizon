@@ -53,6 +53,11 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         OnObjectArraysUpdated(GameObjectManager.Instance());
     }
 
+    public void RefreshPlayerPreview()
+    {
+        objectCuller.RefreshPlayerPreview(GameObjectManager.Instance());
+    }
+
     public void RecordChatMessage(IChatMessage message)
     {
         objectCuller.RecordChatMessage(message);

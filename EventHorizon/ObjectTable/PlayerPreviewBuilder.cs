@@ -47,8 +47,7 @@ internal sealed unsafe class PlayerPreviewBuilder
             return;
         }
 
-        var relativeXz = new Vector2(gameObject->Position.X - localPlayerPosition.X, gameObject->Position.Z - localPlayerPosition.Z);
-        var distance = relativeXz.Length();
+        var (relativeXz, distance) = GetRelativePosition(gameObject);
 
         if (shouldHide)
         {
@@ -77,6 +76,35 @@ internal sealed unsafe class PlayerPreviewBuilder
         );
     }
 
+    public void Add(GameObject* gameObject, int objectIndex, PlayerPreviewEntry previousEntry)
+    {
+        if (gameObject == null)
+        {
+            return;
+        }
+
+        var (relativeXz, distance) = GetRelativePosition(gameObject);
+
+        if (previousEntry.IsVisible)
+        {
+            visiblePlayers++;
+        }
+        else
+        {
+            hiddenPlayers++;
+        }
+
+        players.Add(
+            previousEntry with
+            {
+                EntityId = gameObject->EntityId,
+                ObjectIndex = objectIndex,
+                RelativeXZ = relativeXz,
+                Distance = distance,
+            }
+        );
+    }
+
     public PlayerPreviewSnapshot Build()
     {
         return new PlayerPreviewSnapshot(
@@ -98,6 +126,12 @@ internal sealed unsafe class PlayerPreviewBuilder
 
         var localPlayer = manager->Objects.IndexSorted[0].Value;
         return localPlayer != null ? localPlayer->Position : Vector3.Zero;
+    }
+
+    private (Vector2 RelativeXZ, float Distance) GetRelativePosition(GameObject* gameObject)
+    {
+        var relativeXz = new Vector2(gameObject->Position.X - localPlayerPosition.X, gameObject->Position.Z - localPlayerPosition.Z);
+        return (relativeXz, relativeXz.Length());
     }
 
     private static string GetObjectName(GameObject* gameObject)

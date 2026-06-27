@@ -255,6 +255,11 @@ public sealed class Plugin : IDalamudPlugin
         UpdateObjectArraysHook.Refresh(resetRuleState);
     }
 
+    internal void RefreshPlayerPreview()
+    {
+        UpdateObjectArraysHook.RefreshPlayerPreview();
+    }
+
     private void SetPlayerHidingEnabled(bool enabled)
     {
         if (Configuration.HideAllOtherPlayers == enabled)

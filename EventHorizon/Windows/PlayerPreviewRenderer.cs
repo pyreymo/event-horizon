@@ -8,7 +8,9 @@ namespace EventHorizon.Windows;
 
 internal sealed class PlayerPreviewRenderer
 {
-    public static void Draw(PlayerPreviewSnapshot snapshot, float side, Func<PlayerKeepRuleId, string> getRuleLabel)
+    private float viewRange = PlayerPreviewConstants.DefaultViewRange;
+
+    public void Draw(PlayerPreviewSnapshot snapshot, float side, Func<PlayerKeepRuleId, string> getRuleLabel)
     {
         var drawList = ImGui.GetWindowDrawList();
         var start = ImGui.GetCursorScreenPos();
@@ -16,6 +18,9 @@ internal sealed class PlayerPreviewRenderer
         var end = start + size;
         var center = start + (size * 0.5f);
         var rangeRadius = Math.Max(PlayerPreviewConstants.MinimumRange, (side * 0.5f) - PlayerPreviewConstants.PreviewOuterPadding);
+        var effectiveViewRange = GetEffectiveViewRange(snapshot);
+
+        UpdateZoom(start, end, ref effectiveViewRange);
 
         drawList.AddRect(start, end, ImGui.GetColorU32(ImGuiCol.Border), PlayerPreviewConstants.BorderRounding);
         drawList.AddCircle(
@@ -25,7 +30,7 @@ internal sealed class PlayerPreviewRenderer
             PlayerPreviewConstants.RangeCircleSegments,
             PlayerPreviewConstants.RangeCircleThickness
         );
-        DrawNearbyRangeCircle(drawList, snapshot, center, rangeRadius);
+        DrawNearbyRangeCircle(drawList, snapshot, effectiveViewRange, center, rangeRadius);
         drawList.AddCircleFilled(
             center,
             PlayerPreviewConstants.LocalPlayerDotRadius,
@@ -36,7 +41,7 @@ internal sealed class PlayerPreviewRenderer
         var hoveredPlayer = FindHoveredPlayer(snapshot, center, rangeRadius);
         foreach (var player in snapshot.Players)
         {
-            var position = MapToPreview(player.RelativeXZ, snapshot.ViewRange, center, rangeRadius);
+            var position = MapToPreview(player.RelativeXZ, effectiveViewRange, center, rangeRadius);
             var color = GetPlayerColor(player);
             var radius =
                 hoveredPlayer.HasValue && player.Equals(hoveredPlayer.Value)
@@ -71,15 +76,16 @@ internal sealed class PlayerPreviewRenderer
         ImGui.Dummy(size);
     }
 
-    private static PlayerPreviewEntry? FindHoveredPlayer(PlayerPreviewSnapshot snapshot, Vector2 center, float rangeRadius)
+    private PlayerPreviewEntry? FindHoveredPlayer(PlayerPreviewSnapshot snapshot, Vector2 center, float rangeRadius)
     {
         var mouse = ImGui.GetMousePos();
         PlayerPreviewEntry? hoveredPlayer = null;
         var bestDistanceSq = PlayerPreviewConstants.HoverRadius * PlayerPreviewConstants.HoverRadius;
+        var effectiveViewRange = GetEffectiveViewRange(snapshot);
 
         foreach (var player in snapshot.Players)
         {
-            var position = MapToPreview(player.RelativeXZ, snapshot.ViewRange, center, rangeRadius);
+            var position = MapToPreview(player.RelativeXZ, effectiveViewRange, center, rangeRadius);
             var distanceSq = Vector2.DistanceSquared(mouse, position);
             if (distanceSq > bestDistanceSq)
             {
@@ -91,6 +97,38 @@ internal sealed class PlayerPreviewRenderer
         }
 
         return hoveredPlayer;
+    }
+
+    private float GetEffectiveViewRange(PlayerPreviewSnapshot snapshot)
+    {
+        if (viewRange <= 0f)
+        {
+            viewRange = snapshot.ViewRange;
+        }
+
+        viewRange = Math.Clamp(viewRange, PlayerPreviewConstants.MinimumViewRange, PlayerPreviewConstants.MaximumViewRange);
+        return viewRange;
+    }
+
+    private void UpdateZoom(Vector2 min, Vector2 max, ref float effectiveViewRange)
+    {
+        if (!ImGui.IsMouseHoveringRect(min, max))
+        {
+            return;
+        }
+
+        var wheel = ImGui.GetIO().MouseWheel;
+        if (wheel == 0f)
+        {
+            return;
+        }
+
+        viewRange = Math.Clamp(
+            viewRange / MathF.Pow(PlayerPreviewConstants.MouseWheelZoomStep, wheel),
+            PlayerPreviewConstants.MinimumViewRange,
+            PlayerPreviewConstants.MaximumViewRange
+        );
+        effectiveViewRange = viewRange;
     }
 
     private static Vector2 MapToPreview(Vector2 relativeXz, float viewRange, Vector2 center, float rangeRadius)
@@ -105,7 +143,13 @@ internal sealed class PlayerPreviewRenderer
         return center + new Vector2(relativeXz.X, relativeXz.Y) * scale;
     }
 
-    private static void DrawNearbyRangeCircle(ImDrawListPtr drawList, PlayerPreviewSnapshot snapshot, Vector2 center, float rangeRadius)
+    private static void DrawNearbyRangeCircle(
+        ImDrawListPtr drawList,
+        PlayerPreviewSnapshot snapshot,
+        float viewRange,
+        Vector2 center,
+        float rangeRadius
+    )
     {
         if (snapshot.NearbyRange <= PlayerPreviewConstants.DisabledNearbyRange)
         {
@@ -115,7 +159,7 @@ internal sealed class PlayerPreviewRenderer
         var radius =
             rangeRadius
             * Math.Clamp(
-                snapshot.NearbyRange / Math.Max(PlayerPreviewConstants.MinimumRange, snapshot.ViewRange),
+                snapshot.NearbyRange / Math.Max(PlayerPreviewConstants.MinimumRange, viewRange),
                 PlayerPreviewConstants.DisabledNearbyRange,
                 PlayerPreviewConstants.MinimumRange
             );

@@ -180,6 +180,42 @@ internal sealed unsafe class ObjectCuller : IDisposable
         playerKeepRules.RecordChatMessage(message);
     }
 
+    public void RefreshPlayerPreview(GameObjectManager* manager)
+    {
+        if (manager == null || !IsCullingEnabled() || !playerState.IsLoaded || playerPreviewSnapshot.Players.Count == 0)
+        {
+            return;
+        }
+
+        var previousPlayers = new Dictionary<uint, PlayerPreviewEntry>();
+        foreach (var player in playerPreviewSnapshot.Players)
+        {
+            previousPlayers[player.EntityId] = player;
+        }
+
+        var previewBuilder = PlayerPreviewBuilder.Begin(manager, configuration);
+        for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
+        {
+            if (!IsPlayerRelatedEvenSlot(index) || IsLocalPlayerReservedSlot(index))
+            {
+                continue;
+            }
+
+            var gameObject = manager->Objects.IndexSorted[index].Value;
+            if (gameObject == null || gameObject->ObjectKind != ObjectKind.Pc)
+            {
+                continue;
+            }
+
+            if (previousPlayers.TryGetValue(gameObject->EntityId, out var previousPlayer))
+            {
+                previewBuilder.Add(gameObject, index, previousPlayer);
+            }
+        }
+
+        playerPreviewSnapshot = previewBuilder.Build();
+    }
+
     public void Dispose()
     {
         Reset(GameObjectManager.Instance());

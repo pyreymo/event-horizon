@@ -3,10 +3,14 @@ namespace EventHorizon.ObjectTable;
 internal static class PlayerPreviewConstants
 {
     public const float DefaultViewRange = 50f;
+    public const float MinimumViewRange = 10f;
+    public const float MaximumViewRange = 120f;
+    public const float MouseWheelZoomStep = 1.15f;
     public const float MinimumRange = 1f;
     public const float DisabledNearbyRange = 0f;
     public const float NearbyRangeMin = 1f;
     public const float NearbyRangeMax = DefaultViewRange;
+    public const int FastRefreshIntervalMs = 33;
 
     // FFXIVClientStructs GameObject._name: FieldOffset(0x30), FixedSizeArray64<byte>.
     public const int GameObjectNameOffset = 0x30;

@@ -26,7 +26,9 @@ public class ConfigWindow : Window, IDisposable
     private Tab? pendingSelectedTab;
     private PlayerKeepRuleId? draggedKeepRule;
     private float cullingLeftColumnWidth = 690f;
+    private long nextPlayerPreviewRefresh;
     private bool keepRuleOrderChanged;
+    private bool playerPreviewEnabled = true;
     private bool showRaceSexEditor;
 
     private readonly record struct ImGuiItemState(bool Hovered, bool Active = false);
@@ -36,7 +38,7 @@ public class ConfigWindow : Window, IDisposable
     public ConfigWindow(Plugin plugin, IDataManager dataManager)
         : base($"{Loc.Text("Config.Title")}###EventHorizonConfig")
     {
-        Size = new Vector2(960, 740);
+        Size = new Vector2(960, 780);
         SizeCondition = ImGuiCond.FirstUseEver;
 
         this.plugin = plugin;
@@ -196,13 +198,40 @@ public class ConfigWindow : Window, IDisposable
             Loc.Text("Config.Preview.Title"),
             () =>
             {
+                if (!playerPreviewEnabled)
+                {
+                    DrawHelpText(Loc.Text("Config.Preview.Disabled"));
+                    return;
+                }
+
+                RefreshPlayerPreviewIfNeeded();
                 var side = Math.Max(
                     PlayerPreviewConstants.MinimumRange,
                     ImGui.GetContentRegionAvail().X - PlayerPreviewConstants.CardContentRightPadding
                 );
-                PlayerPreviewRenderer.Draw(plugin.PlayerPreviewSnapshot, side, GetKeepRuleLabel);
-            }
+                playerPreviewRenderer.Draw(plugin.PlayerPreviewSnapshot, side, GetKeepRuleLabel);
+                AddVerticalSpace(4f);
+                DrawHelpText(Loc.Text("Config.Preview.PerformanceNote"));
+            },
+            DrawPlayerPreviewToggle
         );
+    }
+
+    private void DrawPlayerPreviewToggle()
+    {
+        ImGui.Checkbox(Loc.Text("Config.Preview.Toggle"), ref playerPreviewEnabled);
+    }
+
+    private void RefreshPlayerPreviewIfNeeded()
+    {
+        var now = Environment.TickCount64;
+        if (now < nextPlayerPreviewRefresh)
+        {
+            return;
+        }
+
+        plugin.RefreshPlayerPreview();
+        nextPlayerPreviewRefresh = now + PlayerPreviewConstants.FastRefreshIntervalMs;
     }
 
     private void DrawBehaviorTab()
