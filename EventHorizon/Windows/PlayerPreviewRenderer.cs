@@ -8,6 +8,7 @@ namespace EventHorizon.Windows;
 
 internal sealed class PlayerPreviewRenderer
 {
+    private uint? selectedPlayerEntityId;
     private float viewRange = PlayerPreviewConstants.DefaultViewRange;
 
     public void Draw(PlayerPreviewSnapshot snapshot, float side, Func<PlayerKeepRuleId, string> getRuleLabel)
@@ -39,15 +40,29 @@ internal sealed class PlayerPreviewRenderer
         );
 
         var hoveredPlayer = FindHoveredPlayer(snapshot, center, rangeRadius);
+        UpdateSelectedPlayer(snapshot, start, end, hoveredPlayer);
+        var selectedPlayer = FindSelectedPlayer(snapshot);
         foreach (var player in snapshot.Players)
         {
             var position = MapToPreview(player.RelativeXZ, effectiveViewRange, center, rangeRadius);
             var color = GetPlayerColor(player);
+            var isSelected = IsSelected(player);
             var radius =
-                hoveredPlayer.HasValue && player.Equals(hoveredPlayer.Value)
+                (hoveredPlayer.HasValue && player.Equals(hoveredPlayer.Value)) || isSelected
                     ? PlayerPreviewConstants.HoveredPlayerDotRadius
                     : PlayerPreviewConstants.PlayerDotRadius;
             drawList.AddCircleFilled(position, radius, color, PlayerPreviewConstants.DotCircleSegments);
+
+            if (isSelected)
+            {
+                drawList.AddCircle(
+                    position,
+                    radius + PlayerPreviewConstants.SelectedPlayerRingPadding,
+                    ImGui.GetColorU32(ImGuiCol.NavHighlight),
+                    PlayerPreviewConstants.DotCircleSegments,
+                    PlayerPreviewConstants.SelectedPlayerRingThickness
+                );
+            }
 
             if (player.CutByBudget)
             {
@@ -61,7 +76,11 @@ internal sealed class PlayerPreviewRenderer
             }
         }
 
-        if (hoveredPlayer.HasValue)
+        if (selectedPlayer.HasValue)
+        {
+            DrawTooltip(selectedPlayer.Value, getRuleLabel);
+        }
+        else if (hoveredPlayer.HasValue)
         {
             DrawTooltip(hoveredPlayer.Value, getRuleLabel);
         }
@@ -75,6 +94,68 @@ internal sealed class PlayerPreviewRenderer
 
         ImGui.Dummy(size);
     }
+
+    private void UpdateSelectedPlayer(
+        PlayerPreviewSnapshot snapshot,
+        Vector2 previewMin,
+        Vector2 previewMax,
+        PlayerPreviewEntry? hoveredPlayer
+    )
+    {
+        if (selectedPlayerEntityId.HasValue && !HasSelectedPlayer(snapshot))
+        {
+            selectedPlayerEntityId = null;
+        }
+
+        if (!ImGui.IsMouseHoveringRect(previewMin, previewMax))
+        {
+            return;
+        }
+
+        if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+        {
+            selectedPlayerEntityId = null;
+            return;
+        }
+
+        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        {
+            selectedPlayerEntityId = hoveredPlayer?.EntityId;
+        }
+    }
+
+    private PlayerPreviewEntry? FindSelectedPlayer(PlayerPreviewSnapshot snapshot)
+    {
+        if (!selectedPlayerEntityId.HasValue)
+        {
+            return null;
+        }
+
+        foreach (var player in snapshot.Players)
+        {
+            if (IsSelected(player))
+            {
+                return player;
+            }
+        }
+
+        return null;
+    }
+
+    private bool HasSelectedPlayer(PlayerPreviewSnapshot snapshot)
+    {
+        foreach (var player in snapshot.Players)
+        {
+            if (IsSelected(player))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsSelected(PlayerPreviewEntry player) => selectedPlayerEntityId == player.EntityId;
 
     private PlayerPreviewEntry? FindHoveredPlayer(PlayerPreviewSnapshot snapshot, Vector2 center, float rangeRadius)
     {

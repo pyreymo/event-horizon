@@ -23,10 +23,12 @@ internal static class PlayerPreviewConstants
     public const int DotCircleSegments = 16;
     public const float RangeCircleThickness = 1.2f;
     public const float BudgetCutRingThickness = 1.4f;
+    public const float SelectedPlayerRingThickness = 2f;
 
     public const float LocalPlayerDotRadius = 4f;
     public const float PlayerDotRadius = 4f;
     public const float HoveredPlayerDotRadius = 6f;
     public const float HoverRadius = 7f;
     public const float BudgetCutRingPadding = 2f;
+    public const float SelectedPlayerRingPadding = 4f;
 }
