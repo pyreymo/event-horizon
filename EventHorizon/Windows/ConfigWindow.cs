@@ -623,31 +623,44 @@ public class ConfigWindow : Window, IDisposable
     {
         var tableMinX = ImGui.GetCursorScreenPos().X;
         var tableMaxX = tableMinX + ImGui.GetContentRegionAvail().X - 12f;
+        var tableSegment = 0;
+        var rules = PlayerKeepRuleOrder.GetEffectiveOrder(configuration);
+        var tableOpen = true;
 
-        if (!ImGui.BeginTable("###KeepRuleOrderTable", 6, ImGuiTableFlags.SizingStretchProp))
+        if (!BeginKeepRuleTable(tableSegment))
         {
             return;
         }
 
-        ImGui.TableSetupColumn("###KeepRuleOrderHandle", ImGuiTableColumnFlags.WidthFixed, 30f);
-        ImGui.TableSetupColumn("###KeepRuleEnabled", ImGuiTableColumnFlags.WidthFixed, 36f);
-        ImGui.TableSetupColumn("###KeepRuleName", ImGuiTableColumnFlags.WidthStretch);
-        ImGui.TableSetupColumn("###KeepRuleParameters", ImGuiTableColumnFlags.WidthFixed, 160f);
-        ImGui.TableSetupColumn("###KeepRuleBudget", ImGuiTableColumnFlags.WidthFixed, 54f);
-        ImGui.TableSetupColumn("###KeepRulePadding", ImGuiTableColumnFlags.WidthFixed, 12f);
-
-        foreach (var rule in PlayerKeepRuleOrder.GetEffectiveOrder(configuration))
+        for (var i = 0; i < rules.Count; i++)
         {
+            var rule = rules[i];
             DrawRuleRow(rule, tableMinX, tableMaxX);
+
+            if (rule != PlayerKeepRuleId.Race || !showRaceSexEditor)
+            {
+                continue;
+            }
+
+            ImGui.EndTable();
+            tableOpen = false;
+            DrawRaceFilterEditorInline();
+
+            if (i < rules.Count - 1)
+            {
+                tableSegment++;
+                if (!BeginKeepRuleTable(tableSegment))
+                {
+                    return;
+                }
+
+                tableOpen = true;
+            }
         }
 
-        ImGui.EndTable();
-
-        if (showRaceSexEditor)
+        if (tableOpen)
         {
-            ImGui.Indent();
-            DrawRaceFilterEditor();
-            ImGui.Unindent();
+            ImGui.EndTable();
         }
 
         DrawKeepRulesExplanation();
@@ -661,6 +674,23 @@ public class ConfigWindow : Window, IDisposable
                 SaveAndRefreshWithoutRuleReset();
             }
         }
+    }
+
+    private static bool BeginKeepRuleTable(int segment)
+    {
+        if (!ImGui.BeginTable($"###KeepRuleOrderTable{segment}", 6, ImGuiTableFlags.SizingStretchProp))
+        {
+            return false;
+        }
+
+        ImGui.TableSetupColumn("###KeepRuleOrderHandle", ImGuiTableColumnFlags.WidthFixed, 30f);
+        ImGui.TableSetupColumn("###KeepRuleEnabled", ImGuiTableColumnFlags.WidthFixed, 36f);
+        ImGui.TableSetupColumn("###KeepRuleName", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableSetupColumn("###KeepRuleParameters", ImGuiTableColumnFlags.WidthFixed, 160f);
+        ImGui.TableSetupColumn("###KeepRuleBudget", ImGuiTableColumnFlags.WidthFixed, 54f);
+        ImGui.TableSetupColumn("###KeepRulePadding", ImGuiTableColumnFlags.WidthFixed, 12f);
+
+        return true;
     }
 
     private static void DrawKeepRulesExplanation()
@@ -964,6 +994,31 @@ public class ConfigWindow : Window, IDisposable
     #endregion
 
     #region Race/Sex Filter
+
+    private void DrawRaceFilterEditorInline()
+    {
+        ImGui.Spacing();
+        ImGui.Indent(66f);
+
+        if (!ImGui.BeginTable("###RaceSexFilterInline", 2, ImGuiTableFlags.SizingStretchProp))
+        {
+            DrawRaceFilterEditor();
+            ImGui.Unindent(66f);
+            ImGui.Spacing();
+            return;
+        }
+
+        ImGui.TableSetupColumn("###RaceSexFilterInlineContent", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableSetupColumn("###RaceSexFilterInlinePadding", ImGuiTableColumnFlags.WidthFixed, 12f);
+        ImGui.TableNextRow();
+        ImGui.TableNextColumn();
+        DrawRaceFilterEditor();
+        ImGui.TableNextColumn();
+        ImGui.EndTable();
+
+        ImGui.Unindent(66f);
+        ImGui.Spacing();
+    }
 
     private void DrawRaceFilterEditor()
     {
