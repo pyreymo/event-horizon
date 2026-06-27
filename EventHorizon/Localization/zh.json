@@ -29,7 +29,7 @@
   "Config.Section.KeepRules": "保留规则",
   "Config.Section.AttachedObjects": "附属对象清理",
   "Config.ShowDtrBar": "启用服务器信息栏按钮",
-  "Config.EnableFadeTransitions": "启用全局渐隐渐显",
+  "Config.EnableFadeTransitions": "隐藏/显示玩家时淡入淡出",
   "Config.AttachedObjects.Help": "仅作用于仍然显示的玩家。",
   "Config.DisableCullingBelowPlayerCount": "其他玩家数低于",
   "Config.DisableCullingPlayerCountThresholdSuffix": "人时停用",

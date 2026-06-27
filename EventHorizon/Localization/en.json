@@ -29,7 +29,7 @@
   "Config.Section.KeepRules": "Keep rules",
   "Config.Section.AttachedObjects": "Attached object cleanup",
   "Config.ShowDtrBar": "Enable Server Info Bar button",
-  "Config.EnableFadeTransitions": "Enable global fade transitions",
+  "Config.EnableFadeTransitions": "Fade players in and out when visibility changes",
   "Config.AttachedObjects.Help": "For players that remain visible, additionally hide:",
   "Config.DisableCullingBelowPlayerCount": "Disable when other players are below",
   "Config.DisableCullingPlayerCountThresholdSuffix": "players",
