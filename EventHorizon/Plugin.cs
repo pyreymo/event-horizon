@@ -78,6 +78,7 @@ public sealed class Plugin : IDalamudPlugin
     private long nextDtrBarRefresh;
     public int HiddenPlayerCount => UpdateObjectArraysHook.HiddenPlayerCount;
     internal PlayerKeepBudgetStats KeepBudgetStats => UpdateObjectArraysHook.KeepBudgetStats;
+    internal PlayerPreviewSnapshot PlayerPreviewSnapshot => UpdateObjectArraysHook.PlayerPreviewSnapshot;
     public bool IsDutyCullingSuspended =>
         Configuration.HideAllOtherPlayers
         && Configuration.DisableInDuty

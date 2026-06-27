@@ -21,6 +21,7 @@ public class ConfigWindow : Window, IDisposable
     private readonly Plugin plugin;
     private readonly Configuration configuration;
     private readonly IDataManager dataManager;
+    private readonly PlayerPreviewRenderer playerPreviewRenderer = new();
 
     private Tab? pendingSelectedTab;
     private PlayerKeepRuleId? draggedKeepRule;
@@ -36,7 +37,7 @@ public class ConfigWindow : Window, IDisposable
         : base($"{Loc.Text("Config.Title")}###EventHorizonConfig")
     {
         Size = new Vector2(960, 740);
-        SizeCondition = ImGuiCond.Always;
+        SizeCondition = ImGuiCond.FirstUseEver;
 
         this.plugin = plugin;
         this.dataManager = dataManager;
@@ -186,37 +187,20 @@ public class ConfigWindow : Window, IDisposable
     private void DrawRightPanel()
     {
         DrawStatusSummaryCard();
-        DrawPreviewPlaceholder();
+        DrawPlayerPreview();
     }
 
-    private void DrawPreviewPlaceholder()
+    private void DrawPlayerPreview()
     {
         DrawCard(
             Loc.Text("Config.Preview.Title"),
             () =>
             {
-                var drawList = ImGui.GetWindowDrawList();
-                var start = ImGui.GetCursorScreenPos();
-                var side = Math.Max(1f, ImGui.GetContentRegionAvail().X - 18f);
-                var size = new Vector2(side, side);
-                var end = start + size;
-                var center = start + (size * 0.5f);
-                var radius = Math.Min(size.X, size.Y) * 0.26f;
-                var borderColor = ImGui.GetColorU32(ImGuiCol.Border);
-                var textColor = ImGui.GetColorU32(ImGuiCol.TextDisabled);
-
-                drawList.AddRect(start, end, borderColor, 4f);
-                drawList.AddCircle(center, radius, textColor, 48, 1.2f);
-                drawList.AddCircleFilled(center, 4f, textColor, 16);
-
-                for (var i = 0; i < 12; i++)
-                {
-                    var angle = i / 12f * MathF.Tau;
-                    var offset = new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * radius * 0.72f;
-                    drawList.AddCircleFilled(center + offset, 3f, textColor, 12);
-                }
-
-                ImGui.Dummy(size);
+                var side = Math.Max(
+                    PlayerPreviewConstants.MinimumRange,
+                    ImGui.GetContentRegionAvail().X - PlayerPreviewConstants.CardContentRightPadding
+                );
+                PlayerPreviewRenderer.Draw(plugin.PlayerPreviewSnapshot, side, GetKeepRuleLabel);
             }
         );
     }
@@ -260,7 +244,7 @@ public class ConfigWindow : Window, IDisposable
         ImGui.SetCursorScreenPos(new Vector2(cursor.X, centeredY));
     }
 
-    private void DrawCard(string title, System.Action content, System.Action? headerAction = null)
+    private static void DrawCard(string title, System.Action content, System.Action? headerAction = null)
     {
         AddVerticalSpace(8f);
         DrawFramedCard(
@@ -789,9 +773,21 @@ public class ConfigWindow : Window, IDisposable
     {
         ImGui.SetNextItemWidth(Math.Min(126f, ImGui.GetContentRegionAvail().X));
         var range = configuration.KeepNearbyPlayersRange;
-        if (ImGui.SliderFloat("###KeepNearbyPlayersRange", ref range, 1f, 50f, Loc.Text("Config.DistanceSliderFormat")))
+        if (
+            ImGui.SliderFloat(
+                "###KeepNearbyPlayersRange",
+                ref range,
+                PlayerPreviewConstants.NearbyRangeMin,
+                PlayerPreviewConstants.NearbyRangeMax,
+                Loc.Text("Config.DistanceSliderFormat")
+            )
+        )
         {
-            configuration.KeepNearbyPlayersRange = Math.Clamp(range, 1f, 50f);
+            configuration.KeepNearbyPlayersRange = Math.Clamp(
+                range,
+                PlayerPreviewConstants.NearbyRangeMin,
+                PlayerPreviewConstants.NearbyRangeMax
+            );
         }
 
         if (ImGui.IsItemDeactivatedAfterEdit())

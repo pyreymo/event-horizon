@@ -35,7 +35,8 @@ internal sealed class PlayerKeepPlan
 
     public bool ShouldHide(nint address)
     {
-        if (!keepDecisions.TryGetValue(address, out var keepDecision))
+        var keepDecision = GetDecision(address);
+        if (keepDecision.Kind == PlayerKeepDecisionKind.None)
         {
             return true;
         }
@@ -47,6 +48,16 @@ internal sealed class PlayerKeepPlan
                 visibleBudgetedPlayers?.Contains(address) == false,
             _ => true,
         };
+    }
+
+    public PlayerKeepDecision GetDecision(nint address) => keepDecisions.GetValueOrDefault(address, PlayerKeepDecision.None);
+
+    public bool IsCutByBudget(nint address)
+    {
+        var keepDecision = GetDecision(address);
+        return keepDecision.Kind == PlayerKeepDecisionKind.Keep
+            && keepDecision.BudgetPolicy == PlayerKeepBudgetPolicy.Counted
+            && visibleBudgetedPlayers?.Contains(address) == false;
     }
 
     private static HashSet<nint>? GetVisibleBudgetedPlayers(Configuration configuration, IReadOnlyList<PlayerKeepCandidate> candidates)
@@ -155,7 +166,8 @@ internal readonly record struct PlayerKeepDecision(
     PlayerKeepRuleId? RuleId,
     int Rank,
     PlayerKeepBudgetPolicy BudgetPolicy,
-    PlayerKeepTieBreaker TieBreaker
+    PlayerKeepTieBreaker TieBreaker,
+    PlayerKeepRuleMask MatchedRules
 )
 {
     public static readonly PlayerKeepDecision None = new(
@@ -163,13 +175,15 @@ internal readonly record struct PlayerKeepDecision(
         null,
         int.MaxValue,
         PlayerKeepBudgetPolicy.Exempt,
-        PlayerKeepTieBreaker.None
+        PlayerKeepTieBreaker.None,
+        PlayerKeepRuleMask.None
     );
 
     public static PlayerKeepDecision Keep(
         PlayerKeepRuleId ruleId,
         int rank,
         PlayerKeepBudgetPolicy budgetPolicy,
-        PlayerKeepTieBreaker tieBreaker
-    ) => new(PlayerKeepDecisionKind.Keep, ruleId, rank, budgetPolicy, tieBreaker);
+        PlayerKeepTieBreaker tieBreaker,
+        PlayerKeepRuleMask matchedRules
+    ) => new(PlayerKeepDecisionKind.Keep, ruleId, rank, budgetPolicy, tieBreaker, matchedRules);
 }

@@ -88,38 +88,46 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
         PlayerKeepRuleId? winningRule = null;
         int? rank = null;
         var tieBreaker = PlayerKeepTieBreaker.None;
+        var matchedRules = PlayerKeepRuleMask.None;
         if (ShouldKeepTargetOrFocusPlayer(gameObject))
         {
+            matchedRules |= PlayerKeepRuleMask.TargetFocus;
             KeepBetterRule(ref winningRule, ref rank, ref tieBreaker, PlayerKeepRuleId.TargetFocus);
         }
 
         if (ShouldKeepPartyOrAllianceMember(gameObject))
         {
+            matchedRules |= PlayerKeepRuleMask.PartyAlliance;
             KeepBetterRule(ref winningRule, ref rank, ref tieBreaker, PlayerKeepRuleId.PartyAlliance);
         }
 
         if (ShouldKeepFriend(gameObject))
         {
+            matchedRules |= PlayerKeepRuleMask.Friends;
             KeepBetterRule(ref winningRule, ref rank, ref tieBreaker, PlayerKeepRuleId.Friends);
         }
 
         if (ShouldKeepPlayerTargetingLocalPlayer(gameObject))
         {
+            matchedRules |= PlayerKeepRuleMask.TargetingMe;
             KeepBetterRule(ref winningRule, ref rank, ref tieBreaker, PlayerKeepRuleId.TargetingMe);
         }
 
         if (ShouldKeepRecentChatPlayer(gameObject))
         {
+            matchedRules |= PlayerKeepRuleMask.RecentChat;
             KeepBetterRule(ref winningRule, ref rank, ref tieBreaker, PlayerKeepRuleId.RecentChat);
         }
 
         if (ShouldKeepRecruitingPlayer(gameObject))
         {
+            matchedRules |= PlayerKeepRuleMask.Recruiting;
             KeepBetterRule(ref winningRule, ref rank, ref tieBreaker, PlayerKeepRuleId.Recruiting);
         }
 
         if (ShouldKeepNearbyPlayer(gameObject, out var nearbyDistanceSq))
         {
+            matchedRules |= PlayerKeepRuleMask.Nearby;
             KeepBetterRule(
                 ref winningRule,
                 ref rank,
@@ -131,6 +139,7 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
 
         if (ShouldKeepByRace(gameObject))
         {
+            matchedRules |= PlayerKeepRuleMask.Race;
             KeepBetterRule(ref winningRule, ref rank, ref tieBreaker, PlayerKeepRuleId.Race);
         }
 
@@ -139,7 +148,7 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
             return PlayerKeepDecision.None;
         }
 
-        return CreateKeepDecision(winningRule.Value, rank.Value, tieBreaker);
+        return CreateKeepDecision(winningRule.Value, rank.Value, tieBreaker, matchedRules);
     }
 
     private bool ShouldKeepFriend(GameObject* gameObject)
@@ -225,7 +234,11 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
             return false;
         }
 
-        var range = Math.Clamp(configuration.KeepNearbyPlayersRange, 1f, 50f);
+        var range = Math.Clamp(
+            configuration.KeepNearbyPlayersRange,
+            PlayerPreviewConstants.NearbyRangeMin,
+            PlayerPreviewConstants.NearbyRangeMax
+        );
         distanceSq = Vector3.DistanceSquared(localPlayer.Position, player->Position);
 
         if (nearbyKeptPlayers.Contains(playerId))
@@ -433,8 +446,12 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
 
     private static bool IsPlayerObject(GameObject* gameObject) => gameObject->ObjectKind == ObjectKind.Pc;
 
-    private PlayerKeepDecision CreateKeepDecision(PlayerKeepRuleId ruleId, int rank, PlayerKeepTieBreaker tieBreaker) =>
-        PlayerKeepDecision.Keep(ruleId, rank, PlayerKeepRuleBudgetDefaults.GetPolicy(configuration, ruleId), tieBreaker);
+    private PlayerKeepDecision CreateKeepDecision(
+        PlayerKeepRuleId ruleId,
+        int rank,
+        PlayerKeepTieBreaker tieBreaker,
+        PlayerKeepRuleMask matchedRules
+    ) => PlayerKeepDecision.Keep(ruleId, rank, PlayerKeepRuleBudgetDefaults.GetPolicy(configuration, ruleId), tieBreaker, matchedRules);
 
     private void KeepBetterRule(
         ref PlayerKeepRuleId? winningRule,

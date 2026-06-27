@@ -19,6 +19,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly HiddenObjectTracker hiddenObjectTracker;
     private readonly ObjectFadeController fadeController;
     private PlayerKeepBudgetStats keepBudgetStats;
+    private PlayerPreviewSnapshot playerPreviewSnapshot = PlayerPreviewSnapshot.Empty;
 
     public ObjectCuller(
         Configuration configuration,
@@ -80,6 +81,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         }
 
         var playerKeepPlan = PlayerKeepPlan.Build(configuration, GetPlayerKeepCandidates(manager));
+        var previewBuilder = PlayerPreviewBuilder.Begin(manager, configuration);
         keepBudgetStats = new(
             playerKeepPlan.BudgetExemptPlayerCount,
             playerKeepPlan.VisibleBudgetedPlayerCount,
@@ -100,6 +102,17 @@ internal sealed unsafe class ObjectCuller : IDisposable
             }
 
             var shouldHide = ShouldHidePlayerSlotObject(gameObject, index, playerKeepPlan);
+            if (!IsLocalPlayerReservedSlot(index) && IsPlayerRelatedEvenSlot(index))
+            {
+                var address = (nint)gameObject;
+                previewBuilder.Add(
+                    gameObject,
+                    index,
+                    playerKeepPlan.GetDecision(address),
+                    shouldHide,
+                    playerKeepPlan.IsCutByBudget(address)
+                );
+            }
 
             if (UpdateFade(gameObject, shouldHide))
             {
@@ -136,6 +149,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
         PruneMissingHiddenObjects(manager);
         PruneMissingFades(manager);
+        playerPreviewSnapshot = previewBuilder.Build();
     }
 
     public void Reset(GameObjectManager* manager)
@@ -216,6 +230,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         fadeController.Clear();
         playerKeepRules.Clear();
         keepBudgetStats = default;
+        playerPreviewSnapshot = PlayerPreviewSnapshot.Empty;
     }
 
     #endregion
@@ -350,6 +365,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
     public int GetHiddenPlayerCount() => hiddenObjectTracker.HiddenPlayerCount;
 
     public PlayerKeepBudgetStats GetKeepBudgetStats() => keepBudgetStats;
+
+    public PlayerPreviewSnapshot GetPlayerPreviewSnapshot() => playerPreviewSnapshot;
 
     public bool NeedsDynamicRefresh()
     {
