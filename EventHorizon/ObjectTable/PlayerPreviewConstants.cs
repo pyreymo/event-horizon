@@ -19,6 +19,9 @@ internal static class PlayerPreviewConstants
     public const int GameObjectNameLength = 64;
 
     public const float CardContentRightPadding = 18f;
+    public const float MinimumPreviewSide = 180f;
+    public const float FloatingWindowDefaultSide = 300f;
+    public const float FloatingWindowGearIconOffsetX = 1.5f;
     public const float PreviewOuterPadding = 14f;
     public const float BorderRounding = 4f;
     public const int RangeCircleSegments = 64;

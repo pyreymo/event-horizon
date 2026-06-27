@@ -1,7 +1,6 @@
 using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
-using Dalamud.Plugin.Services;
 using EventHorizon.Localization;
 using EventHorizon.ObjectTable;
 
@@ -9,16 +8,11 @@ namespace EventHorizon.Windows;
 
 internal sealed class PlayerPreviewRenderer
 {
-    private readonly IGameGui gameGui;
     private uint? selectedPlayerEntityId;
+    private int tooltipFrame = -1;
     private float viewRange = PlayerPreviewConstants.DefaultViewRange;
 
-    public PlayerPreviewRenderer(IGameGui gameGui)
-    {
-        this.gameGui = gameGui;
-    }
-
-    public void Draw(PlayerPreviewSnapshot snapshot, float side, Func<PlayerKeepRuleId, string> getRuleLabel)
+    public PlayerPreviewEntry? Draw(PlayerPreviewSnapshot snapshot, float side, Func<PlayerKeepRuleId, string> getRuleLabel)
     {
         var drawList = ImGui.GetWindowDrawList();
         var start = ImGui.GetCursorScreenPos();
@@ -84,18 +78,13 @@ internal sealed class PlayerPreviewRenderer
             }
         }
 
-        if (pointedPlayer.HasValue)
-        {
-            PlayerPreviewWorldArrowRenderer.Draw(pointedPlayer.Value, gameGui);
-        }
-
         if (selectedPlayer.HasValue)
         {
-            DrawTooltip(selectedPlayer.Value, getRuleLabel);
+            DrawTooltipOnce(selectedPlayer.Value, getRuleLabel);
         }
         else if (hoveredPlayer.HasValue)
         {
-            DrawTooltip(hoveredPlayer.Value, getRuleLabel);
+            DrawTooltipOnce(hoveredPlayer.Value, getRuleLabel);
         }
 
         if (snapshot.Players.Count == 0)
@@ -106,6 +95,7 @@ internal sealed class PlayerPreviewRenderer
         }
 
         ImGui.Dummy(size);
+        return pointedPlayer;
     }
 
     private void UpdateSelectedPlayer(
@@ -276,6 +266,18 @@ internal sealed class PlayerPreviewRenderer
         return player.BudgetPolicy == PlayerKeepBudgetPolicy.Exempt
             ? ImGui.GetColorU32(ImGuiCol.CheckMark)
             : ImGui.GetColorU32(ImGuiCol.PlotHistogram);
+    }
+
+    private void DrawTooltipOnce(PlayerPreviewEntry player, Func<PlayerKeepRuleId, string> getRuleLabel)
+    {
+        var frame = ImGui.GetFrameCount();
+        if (tooltipFrame == frame)
+        {
+            return;
+        }
+
+        tooltipFrame = frame;
+        DrawTooltip(player, getRuleLabel);
     }
 
     private static void DrawTooltip(PlayerPreviewEntry player, Func<PlayerKeepRuleId, string> getRuleLabel)

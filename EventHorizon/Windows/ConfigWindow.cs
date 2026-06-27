@@ -23,21 +23,27 @@ public class ConfigWindow : Window, IDisposable
     private readonly Plugin plugin;
     private readonly Configuration configuration;
     private readonly IDataManager dataManager;
-    private readonly PlayerPreviewRenderer playerPreviewRenderer;
+    private readonly PlayerPreviewPanel playerPreviewPanel;
+    private readonly System.Func<bool> isPlayerPreviewWindowOpen;
+    private readonly System.Action togglePlayerPreviewWindow;
 
     private Tab? pendingSelectedTab;
     private PlayerKeepRuleId? draggedKeepRule;
     private float cullingLeftColumnWidth = 690f;
-    private long nextPlayerPreviewRefresh;
     private bool keepRuleOrderChanged;
-    private bool playerPreviewEnabled = true;
     private bool showRaceSexEditor;
 
     private readonly record struct ImGuiItemState(bool Hovered, bool Active = false);
 
     #region Lifecycle
 
-    public ConfigWindow(Plugin plugin, IDataManager dataManager, IGameGui gameGui)
+    internal ConfigWindow(
+        Plugin plugin,
+        IDataManager dataManager,
+        PlayerPreviewPanel playerPreviewPanel,
+        System.Func<bool> isPlayerPreviewWindowOpen,
+        System.Action togglePlayerPreviewWindow
+    )
         : base($"{Loc.Text("Config.Title")}###EventHorizonConfig")
     {
         Size = new Vector2(960, 780);
@@ -45,8 +51,10 @@ public class ConfigWindow : Window, IDisposable
 
         this.plugin = plugin;
         this.dataManager = dataManager;
+        this.playerPreviewPanel = playerPreviewPanel;
+        this.isPlayerPreviewWindowOpen = isPlayerPreviewWindowOpen;
+        this.togglePlayerPreviewWindow = togglePlayerPreviewWindow;
         configuration = plugin.Configuration;
-        playerPreviewRenderer = new PlayerPreviewRenderer(gameGui);
     }
 
     public void Dispose() { }
@@ -197,44 +205,32 @@ public class ConfigWindow : Window, IDisposable
 
     private void DrawPlayerPreview()
     {
+        var floatButtonWidth = GetSmallButtonWidth(Loc.Text("Config.Preview.PopOut"));
         DrawCard(
             Loc.Text("Config.Preview.Title"),
-            () =>
-            {
-                if (!playerPreviewEnabled)
-                {
-                    DrawHelpText(Loc.Text("Config.Preview.Disabled"));
-                    return;
-                }
-
-                RefreshPlayerPreviewIfNeeded();
-                var side = Math.Max(
-                    PlayerPreviewConstants.MinimumRange,
-                    ImGui.GetContentRegionAvail().X - PlayerPreviewConstants.CardContentRightPadding
-                );
-                playerPreviewRenderer.Draw(plugin.PlayerPreviewSnapshot, side, GetKeepRuleLabel);
-                AddVerticalSpace(4f);
-                DrawHelpText(Loc.Text("Config.Preview.PerformanceNote"));
-            },
-            DrawPlayerPreviewToggle
+            () => playerPreviewPanel.DrawInlineContent(PlayerKeepRuleText.GetLabel),
+            DrawPlayerPreviewActions,
+            floatButtonWidth
         );
     }
 
-    private void DrawPlayerPreviewToggle()
+    private void DrawPlayerPreviewActions()
     {
-        ImGui.Checkbox(Loc.Text("Config.Preview.Toggle"), ref playerPreviewEnabled);
-    }
-
-    private void RefreshPlayerPreviewIfNeeded()
-    {
-        var now = Environment.TickCount64;
-        if (now < nextPlayerPreviewRefresh)
+        var previewWindowOpen = isPlayerPreviewWindowOpen();
+        if (previewWindowOpen)
         {
-            return;
+            ImGui.PushStyleColor(ImGuiCol.Button, ImGui.GetStyle().Colors[(int)ImGuiCol.ButtonActive]);
         }
 
-        plugin.RefreshPlayerPreview();
-        nextPlayerPreviewRefresh = now + PlayerPreviewConstants.FastRefreshIntervalMs;
+        if (ImGui.SmallButton(Loc.Text("Config.Preview.PopOut")))
+        {
+            togglePlayerPreviewWindow();
+        }
+
+        if (previewWindowOpen)
+        {
+            ImGui.PopStyleColor();
+        }
     }
 
     private void DrawBehaviorTab()
@@ -276,21 +272,21 @@ public class ConfigWindow : Window, IDisposable
         ImGui.SetCursorScreenPos(new Vector2(cursor.X, centeredY));
     }
 
-    private static void DrawCard(string title, System.Action content, System.Action? headerAction = null)
+    private static void DrawCard(string title, System.Action content, System.Action? headerAction = null, float? headerActionWidth = null)
     {
         AddVerticalSpace(8f);
         DrawFramedCard(
             $"###Card{title}",
             () =>
             {
-                DrawCardHeader(title, headerAction);
+                DrawCardHeader(title, headerAction, headerActionWidth);
                 DrawCardSeparator();
                 content();
             }
         );
     }
 
-    private static void DrawCardHeader(string title, System.Action? headerAction)
+    private static void DrawCardHeader(string title, System.Action? headerAction, float? headerActionWidth)
     {
         if (headerAction is null)
         {
@@ -298,6 +294,7 @@ public class ConfigWindow : Window, IDisposable
             return;
         }
 
+        var actionWidth = headerActionWidth ?? 150f;
         if (!ImGui.BeginTable($"###CardHeader{title}", 3, ImGuiTableFlags.SizingStretchProp))
         {
             ImGui.TextUnformatted(title);
@@ -307,16 +304,20 @@ public class ConfigWindow : Window, IDisposable
         }
 
         ImGui.TableSetupColumn("###CardHeaderTitle", ImGuiTableColumnFlags.WidthStretch);
-        ImGui.TableSetupColumn("###CardHeaderAction", ImGuiTableColumnFlags.WidthFixed, 150f);
+        ImGui.TableSetupColumn("###CardHeaderAction", ImGuiTableColumnFlags.WidthFixed, actionWidth);
         ImGui.TableSetupColumn("###CardHeaderPadding", ImGuiTableColumnFlags.WidthFixed, 12f);
         ImGui.TableNextRow();
         ImGui.TableNextColumn();
         ImGui.TextUnformatted(title);
         ImGui.TableNextColumn();
-        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + Math.Max(0f, ImGui.GetContentRegionAvail().X - 142f));
         headerAction();
         ImGui.TableNextColumn();
         ImGui.EndTable();
+    }
+
+    private static float GetSmallButtonWidth(string label)
+    {
+        return ImGui.CalcTextSize(label).X + (ImGui.GetStyle().FramePadding.X * 2f) + 2f;
     }
 
     private static void DrawFramedCard(string id, System.Action content)
@@ -822,9 +823,9 @@ public class ConfigWindow : Window, IDisposable
     private static void DrawKeepRuleLabel(PlayerKeepRuleId rule)
     {
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted(GetKeepRuleLabel(rule));
+        ImGui.TextUnformatted(PlayerKeepRuleText.GetLabel(rule));
 
-        var helpText = GetKeepRuleHelpText(rule);
+        var helpText = PlayerKeepRuleText.GetHelpText(rule);
         if (!string.IsNullOrEmpty(helpText))
         {
             DrawHelpMarker(helpText);
@@ -958,29 +959,6 @@ public class ConfigWindow : Window, IDisposable
         configuration.KeepRuleOrder = order;
         keepRuleOrderChanged = true;
     }
-
-    private static string GetKeepRuleLabel(PlayerKeepRuleId rule) =>
-        rule switch
-        {
-            PlayerKeepRuleId.TargetFocus => Loc.Text("Config.KeepTargetAndFocusPlayers"),
-            PlayerKeepRuleId.PartyAlliance => Loc.Text("Config.KeepPartyAndAllianceMembers"),
-            PlayerKeepRuleId.Friends => Loc.Text("Config.KeepFriends"),
-            PlayerKeepRuleId.TargetingMe => Loc.Text("Config.KeepPlayersTargetingMe"),
-            PlayerKeepRuleId.RecentChat => Loc.Text("Config.KeepRecentChatPlayers"),
-            PlayerKeepRuleId.Recruiting => Loc.Text("Config.KeepRecruitingPlayers"),
-            PlayerKeepRuleId.Nearby => Loc.Text("Config.KeepNearbyPlayers"),
-            PlayerKeepRuleId.Race => Loc.Text("Config.KeepRaceFilter"),
-            _ => rule.ToString(),
-        };
-
-    private static string GetKeepRuleHelpText(PlayerKeepRuleId rule) =>
-        rule switch
-        {
-            PlayerKeepRuleId.TargetFocus => Loc.Text("Config.KeepTargetAndFocusPlayers.Help"),
-            PlayerKeepRuleId.TargetingMe => Loc.Text("Config.KeepPlayersTargetingMe.Help"),
-            PlayerKeepRuleId.RecentChat => Loc.Text("Config.KeepRecentChatPlayers.Help"),
-            _ => string.Empty,
-        };
 
     private static void DrawHelpMarker(string text, bool sameLine = true)
     {

@@ -73,6 +73,7 @@ public sealed class Plugin : IDalamudPlugin
 
     public readonly WindowSystem WindowSystem = new("EventHorizon");
     private ConfigWindow ConfigWindow { get; init; }
+    private PlayerPreviewWindow PlayerPreviewWindow { get; init; }
     private UpdateObjectArraysHook UpdateObjectArraysHook { get; init; }
     private DtrBarIntegration DtrBarIntegration { get; init; }
     private CharacterAlphaController CharacterAlphaController { get; init; }
@@ -96,7 +97,9 @@ public sealed class Plugin : IDalamudPlugin
         Loc.Load(PluginInterface);
 
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
-        ConfigWindow = new ConfigWindow(this, DataManager, GameGui);
+        var playerPreviewPanel = new PlayerPreviewPanel(this, GameGui);
+        ConfigWindow = new ConfigWindow(this, DataManager, playerPreviewPanel, IsPlayerPreviewWindowOpen, TogglePlayerPreviewWindow);
+        PlayerPreviewWindow = new PlayerPreviewWindow(playerPreviewPanel, OpenMainUi);
         UpdateObjectArraysHook = new UpdateObjectArraysHook(
             GameInteropProvider,
             Configuration,
@@ -109,6 +112,7 @@ public sealed class Plugin : IDalamudPlugin
         DtrBarIntegration = new DtrBarIntegration(DtrBar, Configuration, GetDtrBarState, SetPlayerHidingEnabled, ToggleConfigUi);
 
         WindowSystem.AddWindow(ConfigWindow);
+        WindowSystem.AddWindow(PlayerPreviewWindow);
 
         CommandManager.AddHandler(PrimaryCommandName, new CommandInfo(OnCommand) { HelpMessage = Loc.Text("Command.Help.OpenSettings") });
         CommandManager.AddHandler(ShortCommandName, new CommandInfo(OnCommand) { HelpMessage = BuildCommandHelp(ShortCommandName) });
@@ -135,6 +139,7 @@ public sealed class Plugin : IDalamudPlugin
 
         WindowSystem.RemoveAllWindows();
         ConfigWindow.Dispose();
+        PlayerPreviewWindow.Dispose();
         DtrBarIntegration.Dispose();
         CharacterAlphaController.Dispose();
         UpdateObjectArraysHook.Dispose();
@@ -160,6 +165,9 @@ public sealed class Plugin : IDalamudPlugin
             case "toggle":
                 SetPlayerHidingEnabled(!Configuration.HideAllOtherPlayers);
                 break;
+            case "preview":
+                TogglePlayerPreviewWindow();
+                break;
             default:
                 ToggleConfigUi();
                 break;
@@ -174,11 +182,19 @@ public sealed class Plugin : IDalamudPlugin
             commandName,
             Loc.Text("Command.Help.Enable"),
             Loc.Text("Command.Help.Disable"),
-            Loc.Text("Command.Help.Toggle")
+            Loc.Text("Command.Help.Toggle"),
+            Loc.Text("Command.Help.Preview")
         );
     }
 
     public void ToggleConfigUi() => ConfigWindow.Toggle();
+
+    private bool IsPlayerPreviewWindowOpen() => PlayerPreviewWindow.IsOpen;
+
+    private void TogglePlayerPreviewWindow()
+    {
+        PlayerPreviewWindow.Toggle();
+    }
 
     private void OpenMainUi()
     {
