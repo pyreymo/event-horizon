@@ -279,6 +279,14 @@ public sealed class Plugin : IDalamudPlugin
         UpdateObjectArraysHook.RefreshPlayerPreview();
     }
 
+    internal void SetPreviewSelectedPlayer(uint? entityId)
+    {
+        if (UpdateObjectArraysHook.SetPreviewSelectedPlayer(entityId))
+        {
+            RefreshObjectCulling();
+        }
+    }
+
     private void SetPlayerHidingEnabled(bool enabled)
     {
         if (Configuration.HideAllOtherPlayers == enabled)

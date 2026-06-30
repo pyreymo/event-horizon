@@ -20,6 +20,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly ObjectFadeController fadeController;
     private PlayerKeepBudgetStats keepBudgetStats;
     private PlayerPreviewSnapshot playerPreviewSnapshot = PlayerPreviewSnapshot.Empty;
+    private uint? previewSelectedPlayerEntityId;
+    private long previewSelectionExpiresAt;
 
     public ObjectCuller(
         Configuration configuration,
@@ -81,6 +83,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         }
 
         var playerKeepPlan = PlayerKeepPlan.Build(configuration, GetPlayerKeepCandidates(manager));
+        var previewVisibleEntityId = GetActivePreviewSelectedPlayerEntityId();
         var previewBuilder = PlayerPreviewBuilder.Begin(manager, configuration);
         keepBudgetStats = new(
             playerKeepPlan.BudgetExemptPlayerCount,
@@ -101,7 +104,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
                 continue;
             }
 
-            var shouldHide = ShouldHidePlayerSlotObject(gameObject, index, playerKeepPlan);
+            var shouldHideByRules = ShouldHidePlayerSlotObject(gameObject, index, playerKeepPlan);
+            var shouldHide = shouldHideByRules && previewVisibleEntityId != gameObject->EntityId;
             if (!IsLocalPlayerReservedSlot(index) && IsPlayerRelatedEvenSlot(index))
             {
                 var address = (nint)gameObject;
@@ -216,6 +220,23 @@ internal sealed unsafe class ObjectCuller : IDisposable
         playerPreviewSnapshot = previewBuilder.Build();
     }
 
+    public bool SetPreviewSelectedPlayer(uint? entityId)
+    {
+        var previousEntityId = GetActivePreviewSelectedPlayerEntityId();
+        if (entityId.HasValue)
+        {
+            previewSelectedPlayerEntityId = entityId.Value;
+            previewSelectionExpiresAt = Environment.TickCount64 + PlayerPreviewConstants.SelectionVisibilityLeaseMs;
+        }
+        else
+        {
+            previewSelectedPlayerEntityId = null;
+            previewSelectionExpiresAt = 0;
+        }
+
+        return previousEntityId != GetActivePreviewSelectedPlayerEntityId();
+    }
+
     public void Dispose()
     {
         Reset(GameObjectManager.Instance());
@@ -267,6 +288,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
         playerKeepRules.Clear();
         keepBudgetStats = default;
         playerPreviewSnapshot = PlayerPreviewSnapshot.Empty;
+        previewSelectedPlayerEntityId = null;
+        previewSelectionExpiresAt = 0;
     }
 
     #endregion
@@ -355,6 +378,23 @@ internal sealed unsafe class ObjectCuller : IDisposable
         }
 
         return candidates;
+    }
+
+    private uint? GetActivePreviewSelectedPlayerEntityId()
+    {
+        if (!previewSelectedPlayerEntityId.HasValue)
+        {
+            return null;
+        }
+
+        if (Environment.TickCount64 <= previewSelectionExpiresAt)
+        {
+            return previewSelectedPlayerEntityId;
+        }
+
+        previewSelectedPlayerEntityId = null;
+        previewSelectionExpiresAt = 0;
+        return null;
     }
 
     #endregion

@@ -41,10 +41,12 @@ internal sealed class PlayerPreviewPanel(Plugin plugin, IGameGui gameGui)
 
     private void DrawPreview(float side, Func<PlayerKeepRuleId, string> getRuleLabel)
     {
-        var pointedPlayer = renderer.Draw(plugin.PlayerPreviewSnapshot, side, getRuleLabel);
-        if (pointedPlayer.HasValue)
+        var renderResult = renderer.Draw(plugin.PlayerPreviewSnapshot, side, getRuleLabel);
+        plugin.SetPreviewSelectedPlayer(renderResult.SelectedPlayerEntityId);
+
+        if (renderResult.PointedPlayer.HasValue)
         {
-            DrawWorldArrow(pointedPlayer.Value);
+            DrawWorldArrow(renderResult.PointedPlayer.Value);
         }
     }
 

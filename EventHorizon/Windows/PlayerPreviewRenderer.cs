@@ -12,7 +12,7 @@ internal sealed class PlayerPreviewRenderer
     private int tooltipFrame = -1;
     private float viewRange = PlayerPreviewConstants.DefaultViewRange;
 
-    public PlayerPreviewEntry? Draw(PlayerPreviewSnapshot snapshot, float side, Func<PlayerKeepRuleId, string> getRuleLabel)
+    public PlayerPreviewRenderResult Draw(PlayerPreviewSnapshot snapshot, float side, Func<PlayerKeepRuleId, string> getRuleLabel)
     {
         var drawList = ImGui.GetWindowDrawList();
         var start = ImGui.GetCursorScreenPos();
@@ -94,7 +94,7 @@ internal sealed class PlayerPreviewRenderer
         }
 
         ImGui.Dummy(size);
-        return pointedPlayer;
+        return new(pointedPlayer, selectedPlayer?.EntityId);
     }
 
     private void UpdateSelectedPlayer(
@@ -114,14 +114,14 @@ internal sealed class PlayerPreviewRenderer
             return;
         }
 
-        if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
-        {
-            selectedPlayerEntityId = null;
-            return;
-        }
-
         if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
+            if (hoveredPlayer.HasValue && IsSelected(hoveredPlayer.Value))
+            {
+                selectedPlayerEntityId = null;
+                return;
+            }
+
             selectedPlayerEntityId = hoveredPlayer?.EntityId;
         }
     }
@@ -311,3 +311,5 @@ internal sealed class PlayerPreviewRenderer
         ImGui.EndTooltip();
     }
 }
+
+internal readonly record struct PlayerPreviewRenderResult(PlayerPreviewEntry? PointedPlayer, uint? SelectedPlayerEntityId);

@@ -58,6 +58,11 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         objectCuller.RefreshPlayerPreview(GameObjectManager.Instance());
     }
 
+    public bool SetPreviewSelectedPlayer(uint? entityId)
+    {
+        return objectCuller.SetPreviewSelectedPlayer(entityId);
+    }
+
     public void RecordChatMessage(IChatMessage message)
     {
         objectCuller.RecordChatMessage(message);
