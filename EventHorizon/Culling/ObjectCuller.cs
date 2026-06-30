@@ -3,9 +3,13 @@ using System.Collections.Generic;
 using Dalamud.Game.Chat;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin.Services;
+using EventHorizon.Culling.Rules;
+using EventHorizon.Culling.Visibility;
+using EventHorizon.Preview;
+using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
-namespace EventHorizon.ObjectTable;
+namespace EventHorizon.Culling;
 
 internal sealed unsafe class ObjectCuller : IDisposable
 {

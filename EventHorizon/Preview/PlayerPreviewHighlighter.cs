@@ -1,7 +1,7 @@
 using System;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
-namespace EventHorizon.ObjectTable;
+namespace EventHorizon.Preview;
 
 internal sealed unsafe class PlayerPreviewHighlighter : IDisposable
 {

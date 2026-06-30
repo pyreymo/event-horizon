@@ -2,10 +2,12 @@ using System;
 using Dalamud.Game.Chat;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
-using EventHorizon.ObjectTable;
+using EventHorizon.Culling.Rules;
+using EventHorizon.Preview;
+using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
-namespace EventHorizon.Hooks;
+namespace EventHorizon.Culling.Hooks;
 
 internal sealed unsafe class UpdateObjectArraysHook : IDisposable
 {

@@ -4,9 +4,9 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Windowing;
 using EventHorizon.Localization;
-using EventHorizon.ObjectTable;
+using EventHorizon.UI.Config;
 
-namespace EventHorizon.Windows;
+namespace EventHorizon.Preview.UI;
 
 internal sealed class PlayerPreviewWindow : Window, IDisposable
 {

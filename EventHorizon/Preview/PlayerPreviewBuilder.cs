@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using System.Text;
+using EventHorizon.Culling.Rules;
+using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
-namespace EventHorizon.ObjectTable;
+namespace EventHorizon.Preview;
 
 internal sealed unsafe class PlayerPreviewBuilder
 {

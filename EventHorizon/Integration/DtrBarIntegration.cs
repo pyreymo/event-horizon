@@ -4,6 +4,7 @@ using Dalamud.Game.Gui.Dtr;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Plugin.Services;
 using EventHorizon.Localization;
+using EventHorizon.Settings;
 
 namespace EventHorizon.Integration;
 

@@ -8,10 +8,12 @@ using Dalamud.Game.Text;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Plugin.Services;
+using EventHorizon.Preview;
+using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
-namespace EventHorizon.ObjectTable;
+namespace EventHorizon.Culling.Rules;
 
 internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjectTable objectTable, ITargetManager targetManager)
 {

@@ -2,7 +2,7 @@ using System;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 using ObjectKind = FFXIVClientStructs.FFXIV.Client.Game.Object.ObjectKind;
 
-namespace EventHorizon.ObjectTable;
+namespace EventHorizon.Culling;
 
 internal static unsafe class ObjectTableStats
 {

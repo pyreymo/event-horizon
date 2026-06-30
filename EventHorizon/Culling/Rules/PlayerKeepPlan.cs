@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
+using EventHorizon.Settings;
 
-namespace EventHorizon.ObjectTable;
+namespace EventHorizon.Culling.Rules;
 
 internal sealed class PlayerKeepPlan
 {

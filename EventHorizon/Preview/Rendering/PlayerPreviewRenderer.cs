@@ -1,10 +1,10 @@
 using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using EventHorizon.Culling.Rules;
 using EventHorizon.Localization;
-using EventHorizon.ObjectTable;
 
-namespace EventHorizon.Windows;
+namespace EventHorizon.Preview.Rendering;
 
 internal sealed class PlayerPreviewRenderer
 {

@@ -1,8 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using EventHorizon.Culling.Rules;
 
-namespace EventHorizon.ObjectTable;
+namespace EventHorizon.Preview;
 
 internal sealed record PlayerPreviewSnapshot(
     int Version,
@@ -41,18 +42,4 @@ internal readonly record struct PlayerPreviewEntry(
 internal readonly record struct PlayerPreviewStats(int TotalPlayers, int VisiblePlayers, int HiddenPlayers, int BudgetLimit)
 {
     public static readonly PlayerPreviewStats Empty = new(0, 0, 0, 0);
-}
-
-[Flags]
-internal enum PlayerKeepRuleMask
-{
-    None = 0,
-    TargetFocus = 1 << 0,
-    PartyAlliance = 1 << 1,
-    Friends = 1 << 2,
-    TargetingMe = 1 << 3,
-    RecentChat = 1 << 4,
-    Recruiting = 1 << 5,
-    Nearby = 1 << 6,
-    Race = 1 << 7,
 }

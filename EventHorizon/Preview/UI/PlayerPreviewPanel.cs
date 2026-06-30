@@ -1,10 +1,11 @@
 using System;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Plugin.Services;
+using EventHorizon.Culling.Rules;
 using EventHorizon.Localization;
-using EventHorizon.ObjectTable;
+using EventHorizon.Preview.Rendering;
 
-namespace EventHorizon.Windows;
+namespace EventHorizon.Preview.UI;
 
 internal sealed class PlayerPreviewPanel(Plugin plugin, IGameGui gameGui)
 {

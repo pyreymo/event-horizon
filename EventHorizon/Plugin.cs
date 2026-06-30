@@ -7,12 +7,16 @@ using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
-using EventHorizon.Hooks;
+using EventHorizon.Culling;
+using EventHorizon.Culling.Hooks;
+using EventHorizon.Culling.Rules;
 using EventHorizon.Integration;
 using EventHorizon.Localization;
-using EventHorizon.ObjectTable;
+using EventHorizon.Preview;
+using EventHorizon.Preview.UI;
 using EventHorizon.Rendering;
-using EventHorizon.Windows;
+using EventHorizon.Settings;
+using EventHorizon.UI.Config;
 
 namespace EventHorizon;
 

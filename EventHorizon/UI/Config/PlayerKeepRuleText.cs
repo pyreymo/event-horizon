@@ -1,6 +1,7 @@
+using EventHorizon.Culling.Rules;
 using EventHorizon.Localization;
 
-namespace EventHorizon.Windows;
+namespace EventHorizon.UI.Config;
 
 internal static class PlayerKeepRuleText
 {

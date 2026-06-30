@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
-namespace EventHorizon.ObjectTable;
+namespace EventHorizon.Culling.Visibility;
 
 internal sealed unsafe class HiddenObjectTracker
 {

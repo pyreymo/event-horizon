@@ -1,6 +1,6 @@
 using System.Numerics;
 
-namespace EventHorizon.ObjectTable;
+namespace EventHorizon.Preview;
 
 internal static class PlayerPreviewConstants
 {

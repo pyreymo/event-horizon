@@ -2,10 +2,9 @@ using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Plugin.Services;
-using EventHorizon.ObjectTable;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
-namespace EventHorizon.Windows;
+namespace EventHorizon.Preview.Rendering;
 
 internal static unsafe class PlayerPreviewWorldArrowRenderer
 {

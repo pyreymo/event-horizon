@@ -1,4 +1,4 @@
-namespace EventHorizon.ObjectTable;
+namespace EventHorizon.Culling.Rules;
 
 internal static class RaceSexFilter
 {
