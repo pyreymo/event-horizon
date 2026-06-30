@@ -3,7 +3,7 @@
     "Author": "pyreymo",
     "Name": "Event Horizon",
     "InternalName": "EventHorizon",
-    "AssemblyVersion": "0.2.0.0",
+    "AssemblyVersion": "0.2.1.0",
     "Description": "Cull distant or irrelevant world objects around your character. Use /eventhorizon or /eh to open settings.",
     "ApplicableVersion": "any",
     "RepoUrl": "https://github.com/pyreymo/event-horizon",
@@ -20,9 +20,9 @@
     "Punchline": "Cull what doesn't orbit you.",
     "AcceptsFeedback": true,
     "IconUrl": "https://raw.githubusercontent.com/pyreymo/event-horizon/master/images/icon.png",
-    "DownloadLinkInstall": "https://github.com/pyreymo/event-horizon/releases/download/v0.2.0/EventHorizon.zip",
-    "DownloadLinkUpdate": "https://github.com/pyreymo/event-horizon/releases/download/v0.2.0/EventHorizon.zip",
-    "LastUpdate": 1782578259,
-    "Changelog": "- Reworked keep rules into one sortable order, with each rule configurable as budget-counted or budget-exempt.\n- Added a redesigned settings layout with status summaries and a live player preview for visibility state, matched rules, budget status, and nearby range.\n- Fixed keep-rule ranking so Nearby distance only breaks ties for the Nearby rule and does not affect unrelated rule matches.\n- Changed hiding other players' fashion accessories to be disabled by default."
+    "DownloadLinkInstall": "https://github.com/pyreymo/event-horizon/releases/download/v0.2.1/EventHorizon.zip",
+    "DownloadLinkUpdate": "https://github.com/pyreymo/event-horizon/releases/download/v0.2.1/EventHorizon.zip",
+    "LastUpdate": 1782817584,
+    "Changelog": "- Added a pop-out player preview window, available from the preview panel or `/eh preview`.\n- Added in-world preview helpers: hover or select a preview player to draw a direction arrow from your character, and selected preview players now get an orange world highlight.\n- Improved preview selection so the selected player remains visible while you inspect their keep-rule and budget state.\n- Refined the settings preview area and reorganized culling, preview, settings, and config UI code into clearer modules."
   }
 ]
