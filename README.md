@@ -78,6 +78,10 @@ The settings window includes a live preview of nearby players, showing who is vi
 
 Preview dots can be selected while tuning rules, which makes it easier to see why a specific player is being kept or hidden.
 
+The preview can also be popped out into a square floating window from the settings panel or with `/eh preview`.
+
+Hovering or selecting a preview dot draws an in-world direction arrow from your character to that player. Selected preview players are temporarily kept visible and receive an orange world highlight while you inspect their rule and budget state.
+
 ### Attached object cleanup
 
 For players who remain visible, Event Horizon can also hide their:
@@ -104,9 +108,21 @@ You can also preview the nearby-player keep range in the world.
 /eh on
 /eh off
 /eh toggle
+/eh preview
 ```
 
 `/eventhorizon` and `/eh` are interchangeable.
+
+`/eh preview` toggles the floating player preview window.
+
+## Project layout
+
+The plugin code is grouped by responsibility:
+
+- `EventHorizon/Culling` contains the object-table hook, visibility updates, fade handling, and keep-rule decisions.
+- `EventHorizon/Preview` contains preview snapshots, preview rendering, the floating preview window, world arrows, and selected-player highlights.
+- `EventHorizon/UI/Config` contains settings tabs and shared config-window layout helpers.
+- `EventHorizon/Settings` contains persisted plugin configuration.
 
 ## Building from source
 
