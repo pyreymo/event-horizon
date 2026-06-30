@@ -185,6 +185,11 @@ public class ConfigWindow : Window, IDisposable
     {
         ImGui.InvisibleButton("###CullingColumnSplitterHandle", new Vector2(8f, height));
 
+        if (ImGui.IsItemHovered() || ImGui.IsItemActive())
+        {
+            ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeEw);
+        }
+
         if (ImGui.IsItemActive())
         {
             cullingLeftColumnWidth = Math.Clamp(cullingLeftColumnWidth + ImGui.GetIO().MouseDelta.X, minLeftWidth, maxLeftWidth);
@@ -205,13 +210,25 @@ public class ConfigWindow : Window, IDisposable
 
     private void DrawPlayerPreview()
     {
-        var floatButtonWidth = GetSmallButtonWidth(Loc.Text("Config.Preview.PopOut"));
+        var title = Loc.Text("Config.Preview.Title");
+        if (isPlayerPreviewWindowOpen())
+        {
+            DrawCollapsedPlayerPreview(title);
+            return;
+        }
+
         DrawCard(
-            Loc.Text("Config.Preview.Title"),
+            title,
             () => playerPreviewPanel.DrawInlineContent(PlayerKeepRuleText.GetLabel),
             DrawPlayerPreviewActions,
-            floatButtonWidth
+            ImGui.GetFrameHeight()
         );
+    }
+
+    private void DrawCollapsedPlayerPreview(string title)
+    {
+        AddVerticalSpace(8f);
+        DrawFramedCard($"###Card{title}", () => DrawCardHeader(title, DrawPlayerPreviewActions, ImGui.GetFrameHeight()));
     }
 
     private void DrawPlayerPreviewActions()
@@ -222,9 +239,14 @@ public class ConfigWindow : Window, IDisposable
             ImGui.PushStyleColor(ImGuiCol.Button, ImGui.GetStyle().Colors[(int)ImGuiCol.ButtonActive]);
         }
 
-        if (ImGui.SmallButton(Loc.Text("Config.Preview.PopOut")))
+        if (ImGuiComponents.IconButton("###PlayerPreviewPopOut", FontAwesomeIcon.ArrowUpRightFromSquare))
         {
             togglePlayerPreviewWindow();
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(Loc.Text("Config.Preview.PopOut"));
         }
 
         if (previewWindowOpen)
@@ -313,11 +335,6 @@ public class ConfigWindow : Window, IDisposable
         headerAction();
         ImGui.TableNextColumn();
         ImGui.EndTable();
-    }
-
-    private static float GetSmallButtonWidth(string label)
-    {
-        return ImGui.CalcTextSize(label).X + (ImGui.GetStyle().FramePadding.X * 2f) + 2f;
     }
 
     private static void DrawFramedCard(string id, System.Action content)

@@ -23,7 +23,6 @@ internal static class PlayerPreviewConstants
     public const float FloatingWindowDefaultSide = 300f;
     public const float FloatingWindowGearIconOffsetX = 1.5f;
     public const float PreviewOuterPadding = 14f;
-    public const float BorderRounding = 4f;
     public const int RangeCircleSegments = 64;
     public const int DotCircleSegments = 16;
     public const float RangeCircleThickness = 1.2f;

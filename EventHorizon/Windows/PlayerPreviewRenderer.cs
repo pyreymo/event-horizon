@@ -24,7 +24,6 @@ internal sealed class PlayerPreviewRenderer
 
         UpdateZoom(start, end, ref effectiveViewRange);
 
-        drawList.AddRect(start, end, ImGui.GetColorU32(ImGuiCol.Border), PlayerPreviewConstants.BorderRounding);
         drawList.AddCircle(
             center,
             rangeRadius,
