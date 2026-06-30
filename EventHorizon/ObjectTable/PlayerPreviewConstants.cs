@@ -37,7 +37,7 @@ internal static class PlayerPreviewConstants
     public const float BudgetCutRingPadding = 2f;
     public const float SelectedPlayerRingPadding = 4f;
 
-    public static readonly Vector4 WorldArrowColor = new(1f, 0.5f, 0f, 1f);
+    public static readonly Vector4 WorldArrowColor = new(1f, 0.5f, 0f, 1f); // Orange
     public const float WorldArrowLineThickness = 2f;
     public const float WorldArrowHeadLength = 12f;
     public const float WorldArrowHeadHalfWidth = 5f;

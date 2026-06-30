@@ -75,6 +75,7 @@ public sealed class Plugin : IDalamudPlugin
     private ConfigWindow ConfigWindow { get; init; }
     private PlayerPreviewWindow PlayerPreviewWindow { get; init; }
     private UpdateObjectArraysHook UpdateObjectArraysHook { get; init; }
+    private PlayerPreviewHighlighter PlayerPreviewHighlighter { get; init; }
     private DtrBarIntegration DtrBarIntegration { get; init; }
     private CharacterAlphaController CharacterAlphaController { get; init; }
 
@@ -100,6 +101,7 @@ public sealed class Plugin : IDalamudPlugin
         var playerPreviewPanel = new PlayerPreviewPanel(this, GameGui);
         ConfigWindow = new ConfigWindow(this, DataManager, playerPreviewPanel, IsPlayerPreviewWindowOpen, TogglePlayerPreviewWindow);
         PlayerPreviewWindow = new PlayerPreviewWindow(playerPreviewPanel, OpenMainUi);
+        PlayerPreviewHighlighter = new PlayerPreviewHighlighter();
         UpdateObjectArraysHook = new UpdateObjectArraysHook(
             GameInteropProvider,
             Configuration,
@@ -140,6 +142,7 @@ public sealed class Plugin : IDalamudPlugin
         WindowSystem.RemoveAllWindows();
         ConfigWindow.Dispose();
         PlayerPreviewWindow.Dispose();
+        PlayerPreviewHighlighter.Dispose();
         DtrBarIntegration.Dispose();
         CharacterAlphaController.Dispose();
         UpdateObjectArraysHook.Dispose();
@@ -231,6 +234,7 @@ public sealed class Plugin : IDalamudPlugin
     private void OnFrameworkUpdate(IFramework framework)
     {
         RefreshDtrBarIfNeeded();
+        PlayerPreviewHighlighter.Update();
 
         if (!NeedsDynamicCullingRefresh())
         {
@@ -281,6 +285,7 @@ public sealed class Plugin : IDalamudPlugin
 
     internal void SetPreviewSelectedPlayer(uint? entityId)
     {
+        PlayerPreviewHighlighter.SetSelectedPlayer(entityId);
         if (UpdateObjectArraysHook.SetPreviewSelectedPlayer(entityId))
         {
             RefreshObjectCulling();
