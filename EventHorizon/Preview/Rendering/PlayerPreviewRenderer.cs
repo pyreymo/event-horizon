@@ -223,7 +223,7 @@ internal sealed class PlayerPreviewRenderer
         }
 
         var scale = rangeRadius / Math.Max(PlayerPreviewConstants.MinimumRange, viewRange);
-        return center + new Vector2(relativeXz.X, relativeXz.Y) * scale;
+        return center + (new Vector2(relativeXz.X, relativeXz.Y) * scale);
     }
 
     private static void DrawNearbyRangeCircle(

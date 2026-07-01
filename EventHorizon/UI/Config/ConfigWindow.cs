@@ -22,8 +22,8 @@ public partial class ConfigWindow : Window, IDisposable
     private readonly Configuration configuration;
     private readonly IDataManager dataManager;
     private readonly PlayerPreviewPanel playerPreviewPanel;
-    private readonly System.Func<bool> isPlayerPreviewWindowOpen;
-    private readonly System.Action togglePlayerPreviewWindow;
+    private readonly Func<bool> isPlayerPreviewWindowOpen;
+    private readonly Action togglePlayerPreviewWindow;
 
     private Tab? pendingSelectedTab;
     private PlayerKeepRuleId? draggedKeepRule;
@@ -39,8 +39,8 @@ public partial class ConfigWindow : Window, IDisposable
         Plugin plugin,
         IDataManager dataManager,
         PlayerPreviewPanel playerPreviewPanel,
-        System.Func<bool> isPlayerPreviewWindowOpen,
-        System.Action togglePlayerPreviewWindow
+        Func<bool> isPlayerPreviewWindowOpen,
+        Action togglePlayerPreviewWindow
     )
         : base($"{Loc.Text("Config.Title")}###EventHorizonConfig")
     {
@@ -55,7 +55,10 @@ public partial class ConfigWindow : Window, IDisposable
         configuration = plugin.Configuration;
     }
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+        GC.SuppressFinalize(this);
+    }
 
     public void Open(Tab tab)
     {
@@ -64,7 +67,6 @@ public partial class ConfigWindow : Window, IDisposable
     }
 
     #endregion
-
 
     #region Draw
 
@@ -124,6 +126,13 @@ public partial class ConfigWindow : Window, IDisposable
                 if (ImGui.Checkbox(Loc.Text("Config.ShowDtrBar"), ref showDtrBar))
                 {
                     configuration.ShowDtrBar = showDtrBar;
+                    SaveAndRefreshDtrBar();
+                }
+
+                var showFrameRateInDtrBar = configuration.ShowFrameRateInDtrBar;
+                if (ImGui.Checkbox(Loc.Text("Config.ShowFrameRateInDtrBar"), ref showFrameRateInDtrBar))
+                {
+                    configuration.ShowFrameRateInDtrBar = showFrameRateInDtrBar;
                     SaveAndRefreshDtrBar();
                 }
 

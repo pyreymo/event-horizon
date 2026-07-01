@@ -44,7 +44,7 @@ internal sealed class DtrBarIntegration : IDisposable
 
         var entry = EnsureEntry();
         var state = getState();
-        entry.Text = Loc.Text(GetTextKey(state));
+        entry.Text = GetEntryText(state);
         entry.Tooltip = BuildTooltip(state);
         entry.Shown = true;
     }
@@ -104,6 +104,19 @@ internal sealed class DtrBarIntegration : IDisposable
         }
 
         return state.PauseReasonKeys.Count > 0 ? "Dtr.Text.Paused" : "Dtr.Text.Enabled";
+    }
+
+    private unsafe string GetEntryText(DtrBarState state)
+    {
+        var text = Loc.Text(GetTextKey(state));
+        if (!configuration.ShowFrameRateInDtrBar)
+        {
+            return text;
+        }
+
+        var framework = FFXIVClientStructs.FFXIV.Client.System.Framework.Framework.Instance();
+        var frameRate = framework != null ? framework->FrameRate : 0f;
+        return string.Format(Loc.Text("Dtr.Text.WithFps"), text, frameRate);
     }
 
     private static SeString BuildTooltip(DtrBarState state)

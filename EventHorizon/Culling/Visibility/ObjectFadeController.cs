@@ -159,7 +159,7 @@ internal sealed unsafe class ObjectFadeController(HiddenObjectTracker hiddenObje
     private static float EaseOutCubic(float value)
     {
         var inverse = 1f - value;
-        return 1f - inverse * inverse * inverse;
+        return 1f - (inverse * inverse * inverse);
     }
 
     private static float EaseInCubic(float value)
@@ -230,6 +230,6 @@ internal sealed unsafe class ObjectFadeController(HiddenObjectTracker hiddenObje
         }
 
         public bool IsSameObject(GameObject* gameObject) =>
-            gameObject != null && (ulong)gameObject->GetGameObjectId() == GameObjectId && gameObject->EntityId == EntityId;
+            gameObject != null && ((ulong)gameObject->GetGameObjectId() == GameObjectId) && (gameObject->EntityId == EntityId);
     }
 }

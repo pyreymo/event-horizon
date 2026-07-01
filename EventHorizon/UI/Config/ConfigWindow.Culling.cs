@@ -5,7 +5,6 @@ using Dalamud.Interface;
 using Dalamud.Interface.Components;
 using EventHorizon.Culling;
 using EventHorizon.Localization;
-using EventHorizon.Preview;
 
 namespace EventHorizon.UI.Config;
 
@@ -196,12 +195,12 @@ public partial class ConfigWindow
                     DrawSummaryRow(Loc.Text("Config.StatusSummary.State"), Loc.Text("Config.StatusSummary.Running"));
                 }
 
+                DrawSummaryRow(Loc.Text("Config.StatusSummary.Fps"), GetFrameRateSummary());
+
                 DrawSummaryRow(
                     Loc.Text("Config.StatusSummary.VisibleHidden"),
                     string.Format(Loc.Text("Config.StatusSummary.VisibleHidden.Value"), keptOtherPlayerCount, hiddenPlayerCount)
                 );
-
-                DrawSummaryRow(Loc.Text("Config.StatusSummary.BudgetLimit"), GetBudgetLimitSummary());
             }
         );
     }
@@ -243,14 +242,11 @@ public partial class ConfigWindow
         ImGui.TextUnformatted(value);
     }
 
-    private string GetBudgetLimitSummary()
+    private static unsafe string GetFrameRateSummary()
     {
-        if (!configuration.LimitVisiblePlayerCount)
-        {
-            return Loc.Text("Config.StatusSummary.BudgetLimit.Disabled");
-        }
-
-        return string.Format(Loc.Text("Config.StatusSummary.BudgetLimit.Value"), configuration.VisiblePlayerCountLimit);
+        var framework = FFXIVClientStructs.FFXIV.Client.System.Framework.Framework.Instance();
+        var frameRate = framework != null ? framework->FrameRate : 0f;
+        return string.Format(Loc.Text("Config.StatusSummary.Fps.Value"), frameRate);
     }
 
     private string GetCullingSuspensionReason(int currentOtherPlayerCount)

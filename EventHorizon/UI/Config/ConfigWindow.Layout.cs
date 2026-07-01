@@ -20,7 +20,7 @@ public partial class ConfigWindow
         ImGui.SetCursorScreenPos(new Vector2(cursor.X, centeredY));
     }
 
-    private static void DrawCard(string title, System.Action content, System.Action? headerAction = null, float? headerActionWidth = null)
+    private static void DrawCard(string title, Action content, Action? headerAction = null, float? headerActionWidth = null)
     {
         AddVerticalSpace(8f);
         DrawFramedCard(
@@ -34,7 +34,7 @@ public partial class ConfigWindow
         );
     }
 
-    private static void DrawCardHeader(string title, System.Action? headerAction, float? headerActionWidth)
+    private static void DrawCardHeader(string title, Action? headerAction, float? headerActionWidth)
     {
         if (headerAction is null)
         {
@@ -63,7 +63,7 @@ public partial class ConfigWindow
         ImGui.EndTable();
     }
 
-    private static void DrawFramedCard(string id, System.Action content)
+    private static void DrawFramedCard(string id, Action content)
     {
         var drawList = ImGui.GetWindowDrawList();
         var start = ImGui.GetCursorScreenPos();
