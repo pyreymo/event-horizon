@@ -3,7 +3,7 @@
     "Author": "pyreymo",
     "Name": "Event Horizon",
     "InternalName": "EventHorizon",
-    "AssemblyVersion": "0.2.1.0",
+    "AssemblyVersion": "0.2.2.0",
     "Description": "Cull distant or irrelevant world objects around your character. Use /eventhorizon or /eh to open settings.",
     "ApplicableVersion": "any",
     "RepoUrl": "https://github.com/pyreymo/event-horizon",
@@ -20,9 +20,9 @@
     "Punchline": "Cull what doesn't orbit you.",
     "AcceptsFeedback": true,
     "IconUrl": "https://raw.githubusercontent.com/pyreymo/event-horizon/master/images/icon.png",
-    "DownloadLinkInstall": "https://github.com/pyreymo/event-horizon/releases/download/v0.2.1/EventHorizon.zip",
-    "DownloadLinkUpdate": "https://github.com/pyreymo/event-horizon/releases/download/v0.2.1/EventHorizon.zip",
-    "LastUpdate": 1782817584,
-    "Changelog": "- Added a pop-out player preview window, available from the preview panel or `/eh preview`.\n- Added in-world preview helpers: hover or select a preview player to draw a direction arrow from your character, and selected preview players now get an orange world highlight.\n- Improved preview selection so the selected player remains visible while you inspect their keep-rule and budget state.\n- Refined the settings preview area and reorganized culling, preview, settings, and config UI code into clearer modules."
+    "DownloadLinkInstall": "https://github.com/pyreymo/event-horizon/releases/download/v0.2.2/EventHorizon.zip",
+    "DownloadLinkUpdate": "https://github.com/pyreymo/event-horizon/releases/download/v0.2.2/EventHorizon.zip",
+    "LastUpdate": 1783068585,
+    "Changelog": "- Added an option to show FPS in the server info bar alongside EH: ON/OFF, making it easier to compare frame rate changes when toggling Event Horizon.\n- Added an optional dark background for the server info bar. Protect your eyes, one UI element at a time."
   }
 ]
