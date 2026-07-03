@@ -6,7 +6,7 @@ using Dalamud.Plugin.Services;
 using EventHorizon.Localization;
 using EventHorizon.Settings;
 
-namespace EventHorizon.Integration;
+namespace EventHorizon.Integration.Dtr;
 
 internal sealed class DtrBarIntegration : IDisposable
 {

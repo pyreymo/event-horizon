@@ -21,6 +21,11 @@ public class Configuration : IPluginConfiguration
     public bool HideOtherPlayerOrnaments { get; set; } = false;
     public bool ShowDtrBar { get; set; } = true;
     public bool ShowFrameRateInDtrBar { get; set; }
+    public bool EnableDtrBackground { get; set; } = true;
+    public float DtrBackgroundHorizontalPadding { get; set; } = 24f;
+    public float DtrBackgroundPaddingTop { get; set; } = 10f;
+    public float DtrBackgroundPaddingBottom { get; set; } = 1f;
+    public byte DtrBackgroundAlpha { get; set; } = 128;
     public bool EnableFadeTransitions { get; set; } = true;
     public bool KeepFriends { get; set; } = true;
     public bool KeepPartyAndAllianceMembers { get; set; } = true;

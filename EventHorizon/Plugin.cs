@@ -10,7 +10,7 @@ using Dalamud.Plugin.Services;
 using EventHorizon.Culling;
 using EventHorizon.Culling.Hooks;
 using EventHorizon.Culling.Rules;
-using EventHorizon.Integration;
+using EventHorizon.Integration.Dtr;
 using EventHorizon.Localization;
 using EventHorizon.Preview;
 using EventHorizon.Preview.UI;
@@ -64,6 +64,9 @@ public sealed class Plugin : IDalamudPlugin
     internal static IDataManager DataManager { get; private set; } = null!;
 
     [PluginService]
+    internal static IAddonLifecycle AddonLifecycle { get; private set; } = null!;
+
+    [PluginService]
     internal static IDtrBar DtrBar { get; private set; } = null!;
 
     [PluginService]
@@ -81,6 +84,7 @@ public sealed class Plugin : IDalamudPlugin
     private UpdateObjectArraysHook UpdateObjectArraysHook { get; init; }
     private PlayerPreviewHighlighter PlayerPreviewHighlighter { get; init; }
     private DtrBarIntegration DtrBarIntegration { get; init; }
+    private DtrBackgroundController DtrBackgroundController { get; init; }
     private CharacterAlphaController CharacterAlphaController { get; init; }
 
     private long nextDynamicCullingRefresh;
@@ -116,6 +120,7 @@ public sealed class Plugin : IDalamudPlugin
         );
         CharacterAlphaController = new CharacterAlphaController(ObjectTable);
         DtrBarIntegration = new DtrBarIntegration(DtrBar, Configuration, GetDtrBarState, SetPlayerHidingEnabled, ToggleConfigUi);
+        DtrBackgroundController = new DtrBackgroundController(AddonLifecycle, GameGui, Configuration);
 
         WindowSystem.AddWindow(ConfigWindow);
         WindowSystem.AddWindow(PlayerPreviewWindow);
@@ -148,6 +153,7 @@ public sealed class Plugin : IDalamudPlugin
         PlayerPreviewWindow.Dispose();
         PlayerPreviewHighlighter.Dispose();
         DtrBarIntegration.Dispose();
+        DtrBackgroundController.Dispose();
         CharacterAlphaController.Dispose();
         UpdateObjectArraysHook.Dispose();
 
@@ -214,6 +220,8 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     public void RefreshDtrBar() => DtrBarIntegration.Refresh();
+
+    public void RefreshDtrBackground() => DtrBackgroundController.Refresh();
 
     public bool TrySetLocalPlayerAlpha(float alpha) => CharacterAlphaController.TrySetLocalPlayerAlpha(alpha);
 

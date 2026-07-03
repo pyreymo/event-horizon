@@ -116,36 +116,6 @@ public partial class ConfigWindow : Window, IDisposable
         ImGui.EndTabBar();
     }
 
-    private void DrawBehaviorTab()
-    {
-        DrawCard(
-            Loc.Text("Config.Tab.Behavior"),
-            () =>
-            {
-                var showDtrBar = configuration.ShowDtrBar;
-                if (ImGui.Checkbox(Loc.Text("Config.ShowDtrBar"), ref showDtrBar))
-                {
-                    configuration.ShowDtrBar = showDtrBar;
-                    SaveAndRefreshDtrBar();
-                }
-
-                var showFrameRateInDtrBar = configuration.ShowFrameRateInDtrBar;
-                if (ImGui.Checkbox(Loc.Text("Config.ShowFrameRateInDtrBar"), ref showFrameRateInDtrBar))
-                {
-                    configuration.ShowFrameRateInDtrBar = showFrameRateInDtrBar;
-                    SaveAndRefreshDtrBar();
-                }
-
-                var enableFadeTransitions = configuration.EnableFadeTransitions;
-                if (ImGui.Checkbox(Loc.Text("Config.EnableFadeTransitions"), ref enableFadeTransitions))
-                {
-                    configuration.EnableFadeTransitions = enableFadeTransitions;
-                    SaveAndRefresh();
-                }
-            }
-        );
-    }
-
     #endregion
 
     #region Persistence
@@ -161,12 +131,6 @@ public partial class ConfigWindow : Window, IDisposable
     {
         configuration.Save();
         plugin.RefreshObjectCulling();
-        plugin.RefreshDtrBar();
-    }
-
-    private void SaveAndRefreshDtrBar()
-    {
-        configuration.Save();
         plugin.RefreshDtrBar();
     }
 
