@@ -78,7 +78,6 @@ internal sealed class DtrBarIntegration : IDisposable
         }
 
         entry = dtrBar.Get(Loc.Text("Config.Title"));
-        entry.MinimumWidth = 70;
         entry.OnClick = OnClick;
 
         return entry;
