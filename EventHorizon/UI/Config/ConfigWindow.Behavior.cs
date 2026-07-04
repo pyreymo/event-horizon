@@ -1,6 +1,7 @@
 using System;
 using Dalamud.Bindings.ImGui;
 using EventHorizon.Localization;
+using EventHorizon.Settings;
 
 namespace EventHorizon.UI.Config;
 
@@ -53,6 +54,32 @@ public partial class ConfigWindow
 
                 DrawHelpText(Loc.Text("Config.EnableDtrBackground.Help"));
 
+                var enableTargetingMeMarker = configuration.EnableTargetingMeMarker;
+                if (ImGui.Checkbox(Loc.Text("Config.EnableTargetingMeMarker"), ref enableTargetingMeMarker))
+                {
+                    configuration.EnableTargetingMeMarker = enableTargetingMeMarker;
+                    SaveAndRequestTargetingMeMarkerRefresh();
+                }
+
+                DrawHelpText(Loc.Text("Config.EnableTargetingMeMarker.Help"));
+
+                if (configuration.EnableTargetingMeMarker)
+                {
+                    var enableTargetingMeMarkerCurrentTargetTest = configuration.EnableTargetingMeMarkerCurrentTargetTest;
+                    if (
+                        ImGui.Checkbox(
+                            Loc.Text("Config.EnableTargetingMeMarkerCurrentTargetTest"),
+                            ref enableTargetingMeMarkerCurrentTargetTest
+                        )
+                    )
+                    {
+                        configuration.EnableTargetingMeMarkerCurrentTargetTest = enableTargetingMeMarkerCurrentTargetTest;
+                        SaveAndRequestTargetingMeMarkerRefresh();
+                    }
+
+                    DrawTargetingMeMarkerStyleControls();
+                }
+
                 if (!configuration.EnableDtrBackground)
                 {
                     return;
@@ -96,6 +123,89 @@ public partial class ConfigWindow
         );
     }
 
+    private void DrawTargetingMeMarkerStyleControls()
+    {
+        AddVerticalSpace(6f);
+
+        var visualStyle = configuration.TargetingMeMarkerVisualStyle;
+        if (ImGui.BeginCombo(Loc.Text("Config.TargetingMeMarkerVisualStyle"), GetTargetingMeMarkerVisualStyleText(visualStyle)))
+        {
+            DrawTargetingMeMarkerVisualStyleOption(TargetingMeMarkerVisualStyle.AlertEye, visualStyle);
+            ImGui.EndCombo();
+        }
+
+        DrawNativeTargetingMeMarkerStyleControls();
+
+        var offsetX = Math.Clamp(configuration.TargetingMeMarkerOffsetX, -500f, 500f);
+        if (ImGui.SliderFloat(Loc.Text("Config.TargetingMeMarkerOffsetX"), ref offsetX, -500f, 500f, "%.0f"))
+        {
+            configuration.TargetingMeMarkerOffsetX = offsetX;
+            SaveAndRequestTargetingMeMarkerRefresh();
+        }
+
+        var offsetY = Math.Clamp(configuration.TargetingMeMarkerOffsetY, -500f, 500f);
+        if (ImGui.SliderFloat(Loc.Text("Config.TargetingMeMarkerOffsetY"), ref offsetY, -500f, 500f, "%.0f"))
+        {
+            configuration.TargetingMeMarkerOffsetY = offsetY;
+            SaveAndRequestTargetingMeMarkerRefresh();
+        }
+
+        var opacity = configuration.TargetingMeMarkerOpacity;
+        var opacityValue = (int)opacity;
+        if (ImGui.SliderInt(Loc.Text("Config.TargetingMeMarkerOpacity"), ref opacityValue, 0, 255))
+        {
+            configuration.TargetingMeMarkerOpacity = (byte)opacityValue;
+            SaveAndRequestTargetingMeMarkerRefresh();
+        }
+
+        if (ImGui.Button(Loc.Text("Config.TargetingMeMarker.ResetStyle")))
+        {
+            configuration.TargetingMeMarkerOffsetX = Configuration.DefaultTargetingMeMarkerOffsetX;
+            configuration.TargetingMeMarkerOffsetY = Configuration.DefaultTargetingMeMarkerOffsetY;
+            configuration.TargetingMeMarkerScale = Configuration.DefaultTargetingMeMarkerScale;
+            configuration.TargetingMeMarkerOpacity = Configuration.DefaultTargetingMeMarkerOpacity;
+            configuration.TargetingMeMarkerGlowOpacity = Configuration.DefaultTargetingMeMarkerGlowOpacity;
+            configuration.TargetingMeMarkerVisualStyle = TargetingMeMarkerVisualStyle.AlertEye;
+            SaveAndRequestTargetingMeMarkerRefresh();
+        }
+    }
+
+    private void DrawTargetingMeMarkerVisualStyleOption(TargetingMeMarkerVisualStyle option, TargetingMeMarkerVisualStyle current)
+    {
+        if (ImGui.Selectable(GetTargetingMeMarkerVisualStyleText(option), option == current))
+        {
+            configuration.TargetingMeMarkerVisualStyle = option;
+            SaveAndRequestTargetingMeMarkerRefresh();
+        }
+    }
+
+    private static string GetTargetingMeMarkerVisualStyleText(TargetingMeMarkerVisualStyle visualStyle)
+    {
+        return visualStyle switch
+        {
+            TargetingMeMarkerVisualStyle.AlertEye => Loc.Text("Config.TargetingMeMarkerVisualStyle.AlertEye"),
+            _ => visualStyle.ToString(),
+        };
+    }
+
+    private void DrawNativeTargetingMeMarkerStyleControls()
+    {
+        var scale = Math.Clamp(configuration.TargetingMeMarkerScale, 0.1f, 2.0f);
+        if (ImGui.SliderFloat(Loc.Text("Config.TargetingMeMarkerScale"), ref scale, 0.1f, 2.0f, "%.2f"))
+        {
+            configuration.TargetingMeMarkerScale = scale;
+            SaveAndRequestTargetingMeMarkerRefresh();
+        }
+
+        var glowOpacity = configuration.TargetingMeMarkerGlowOpacity;
+        var glowOpacityValue = (int)glowOpacity;
+        if (ImGui.SliderInt(Loc.Text("Config.TargetingMeMarkerGlowOpacity"), ref glowOpacityValue, 0, 255))
+        {
+            configuration.TargetingMeMarkerGlowOpacity = (byte)glowOpacityValue;
+            SaveAndRequestTargetingMeMarkerRefresh();
+        }
+    }
+
     private void SaveAndRefreshDtrBar()
     {
         configuration.Save();
@@ -106,6 +216,12 @@ public partial class ConfigWindow
     {
         configuration.Save();
         plugin.RefreshDtrBackground();
+    }
+
+    private void SaveAndRequestTargetingMeMarkerRefresh()
+    {
+        configuration.Save();
+        plugin.RequestTargetingMeMarkerRefresh();
     }
 
     private void RefreshDtrBackground()

@@ -11,6 +11,7 @@ using EventHorizon.Culling;
 using EventHorizon.Culling.Hooks;
 using EventHorizon.Culling.Rules;
 using EventHorizon.Integration.Dtr;
+using EventHorizon.Integration.NamePlate;
 using EventHorizon.Localization;
 using EventHorizon.Preview;
 using EventHorizon.Preview.UI;
@@ -67,6 +68,12 @@ public sealed class Plugin : IDalamudPlugin
     internal static IAddonLifecycle AddonLifecycle { get; private set; } = null!;
 
     [PluginService]
+    internal static INamePlateGui NamePlateGui { get; private set; } = null!;
+
+    [PluginService]
+    internal static ITextureProvider TextureProvider { get; private set; } = null!;
+
+    [PluginService]
     internal static IDtrBar DtrBar { get; private set; } = null!;
 
     [PluginService]
@@ -76,7 +83,7 @@ public sealed class Plugin : IDalamudPlugin
 
     #region State
 
-    public Configuration Configuration { get; init; }
+    internal Configuration Configuration { get; init; }
 
     public readonly WindowSystem WindowSystem = new("EventHorizon");
     private ConfigWindow ConfigWindow { get; init; }
@@ -85,6 +92,7 @@ public sealed class Plugin : IDalamudPlugin
     private PlayerPreviewHighlighter PlayerPreviewHighlighter { get; init; }
     private DtrBarIntegration DtrBarIntegration { get; init; }
     private DtrBackgroundController DtrBackgroundController { get; init; }
+    private NamePlateTargetingMeMarkerController NamePlateTargetingMeMarkerController { get; init; }
     private CharacterAlphaController CharacterAlphaController { get; init; }
 
     private long nextDynamicCullingRefresh;
@@ -121,6 +129,17 @@ public sealed class Plugin : IDalamudPlugin
         CharacterAlphaController = new CharacterAlphaController(ObjectTable);
         DtrBarIntegration = new DtrBarIntegration(DtrBar, Configuration, GetDtrBarState, SetPlayerHidingEnabled, ToggleConfigUi);
         DtrBackgroundController = new DtrBackgroundController(AddonLifecycle, GameGui, Configuration);
+        NamePlateTargetingMeMarkerController = new NamePlateTargetingMeMarkerController(
+            AddonLifecycle,
+            GameGui,
+            NamePlateGui,
+            ObjectTable,
+            TargetManager,
+            Configuration,
+            Framework,
+            TextureProvider,
+            Log
+        );
 
         WindowSystem.AddWindow(ConfigWindow);
         WindowSystem.AddWindow(PlayerPreviewWindow);
@@ -154,6 +173,7 @@ public sealed class Plugin : IDalamudPlugin
         PlayerPreviewHighlighter.Dispose();
         DtrBarIntegration.Dispose();
         DtrBackgroundController.Dispose();
+        NamePlateTargetingMeMarkerController.Dispose();
         CharacterAlphaController.Dispose();
         UpdateObjectArraysHook.Dispose();
 
@@ -223,9 +243,7 @@ public sealed class Plugin : IDalamudPlugin
 
     public void RefreshDtrBackground() => DtrBackgroundController.Refresh();
 
-    public bool TrySetLocalPlayerAlpha(float alpha) => CharacterAlphaController.TrySetLocalPlayerAlpha(alpha);
-
-    public void ResetLocalPlayerAlpha() => CharacterAlphaController.ResetLocalPlayerAlpha();
+    public void RequestTargetingMeMarkerRefresh() => NamePlateTargetingMeMarkerController.RequestRefresh();
 
     private void OnDraw()
     {

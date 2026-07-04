@@ -7,8 +7,14 @@ using Newtonsoft.Json;
 namespace EventHorizon.Settings;
 
 [Serializable]
-public class Configuration : IPluginConfiguration
+internal class Configuration : IPluginConfiguration
 {
+    public const float DefaultTargetingMeMarkerOffsetX = 0;
+    public const float DefaultTargetingMeMarkerOffsetY = 0;
+    public const float DefaultTargetingMeMarkerScale = 1f;
+    public const byte DefaultTargetingMeMarkerOpacity = 255;
+    public const byte DefaultTargetingMeMarkerGlowOpacity = 255;
+
     public int Version { get; set; } = 0;
 
     public bool HideAllOtherPlayers { get; set; } = true;
@@ -22,6 +28,14 @@ public class Configuration : IPluginConfiguration
     public bool ShowDtrBar { get; set; } = true;
     public bool ShowFrameRateInDtrBar { get; set; } = true;
     public bool EnableDtrBackground { get; set; } = false;
+    public bool EnableTargetingMeMarker { get; set; } = false;
+    public bool EnableTargetingMeMarkerCurrentTargetTest { get; set; } = false;
+    public TargetingMeMarkerVisualStyle TargetingMeMarkerVisualStyle { get; set; } = TargetingMeMarkerVisualStyle.AlertEye;
+    public float TargetingMeMarkerOffsetX { get; set; } = DefaultTargetingMeMarkerOffsetX;
+    public float TargetingMeMarkerOffsetY { get; set; } = DefaultTargetingMeMarkerOffsetY;
+    public float TargetingMeMarkerScale { get; set; } = DefaultTargetingMeMarkerScale;
+    public byte TargetingMeMarkerOpacity { get; set; } = DefaultTargetingMeMarkerOpacity;
+    public byte TargetingMeMarkerGlowOpacity { get; set; } = DefaultTargetingMeMarkerGlowOpacity;
     public float DtrBackgroundHorizontalPadding { get; set; } = 24f;
     public float DtrBackgroundPaddingTop { get; set; } = 10f;
     public float DtrBackgroundPaddingBottom { get; set; } = 1f;

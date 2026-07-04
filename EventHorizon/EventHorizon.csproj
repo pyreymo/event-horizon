@@ -14,5 +14,6 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>true</Visible>
     </Content>
+    <EmbeddedResource Include="Assets\alert-eye.png" />
   </ItemGroup>
 </Project>
