@@ -54,6 +54,13 @@ public partial class ConfigWindow
 
                 DrawHelpText(Loc.Text("Config.EnableDtrBackground.Help"));
 
+                if (configuration.EnableDtrBackground)
+                {
+                    ImGui.Indent();
+                    DrawDtrBackgroundStyleControls();
+                    ImGui.Unindent();
+                }
+
                 var enableTargetingMeMarker = configuration.EnableTargetingMeMarker;
                 if (ImGui.Checkbox(Loc.Text("Config.EnableTargetingMeMarker"), ref enableTargetingMeMarker))
                 {
@@ -65,7 +72,9 @@ public partial class ConfigWindow
 
                 if (configuration.EnableTargetingMeMarker)
                 {
+                    ImGui.Indent();
                     var enableTargetingMeMarkerCurrentTargetTest = configuration.EnableTargetingMeMarkerCurrentTargetTest;
+
                     if (
                         ImGui.Checkbox(
                             Loc.Text("Config.EnableTargetingMeMarkerCurrentTargetTest"),
@@ -77,50 +86,49 @@ public partial class ConfigWindow
                         SaveAndRequestTargetingMeMarkerRefresh();
                     }
 
+                    DrawHelpText(Loc.Text("Config.EnableTargetingMeMarkerCurrentTargetTest.Help"));
+
                     DrawTargetingMeMarkerStyleControls();
+                    ImGui.Unindent();
                 }
-
-                if (!configuration.EnableDtrBackground)
-                {
-                    return;
-                }
-
-                AddVerticalSpace(6f);
-
-                var alpha = configuration.DtrBackgroundAlpha;
-                var alphaValue = (int)alpha;
-                if (ImGui.SliderInt(Loc.Text("Config.DtrBackgroundAlpha"), ref alphaValue, 0, 255))
-                {
-                    configuration.DtrBackgroundAlpha = (byte)alphaValue;
-                    RefreshDtrBackground();
-                }
-                SaveDtrBackgroundIfEditFinished();
-
-                var horizontalPadding = Math.Clamp(configuration.DtrBackgroundHorizontalPadding, 0f, 80f);
-                if (ImGui.SliderFloat(Loc.Text("Config.DtrBackgroundHorizontalPadding"), ref horizontalPadding, 0f, 80f, "%.0f"))
-                {
-                    configuration.DtrBackgroundHorizontalPadding = horizontalPadding;
-                    RefreshDtrBackground();
-                }
-                SaveDtrBackgroundIfEditFinished();
-
-                var top = configuration.DtrBackgroundPaddingTop;
-                if (ImGui.SliderFloat(Loc.Text("Config.DtrBackgroundPaddingTop"), ref top, 0f, 80f, "%.0f"))
-                {
-                    configuration.DtrBackgroundPaddingTop = top;
-                    RefreshDtrBackground();
-                }
-                SaveDtrBackgroundIfEditFinished();
-
-                var bottom = configuration.DtrBackgroundPaddingBottom;
-                if (ImGui.SliderFloat(Loc.Text("Config.DtrBackgroundPaddingBottom"), ref bottom, 0f, 80f, "%.0f"))
-                {
-                    configuration.DtrBackgroundPaddingBottom = bottom;
-                    RefreshDtrBackground();
-                }
-                SaveDtrBackgroundIfEditFinished();
             }
         );
+    }
+
+    private void DrawDtrBackgroundStyleControls()
+    {
+        var alpha = configuration.DtrBackgroundAlpha;
+        var alphaValue = (int)alpha;
+        if (ImGui.SliderInt(Loc.Text("Config.DtrBackgroundAlpha"), ref alphaValue, 0, 255))
+        {
+            configuration.DtrBackgroundAlpha = (byte)alphaValue;
+            RefreshDtrBackground();
+        }
+        SaveDtrBackgroundIfEditFinished();
+
+        var horizontalPadding = Math.Clamp(configuration.DtrBackgroundHorizontalPadding, 0f, 80f);
+        if (ImGui.SliderFloat(Loc.Text("Config.DtrBackgroundHorizontalPadding"), ref horizontalPadding, 0f, 80f, "%.0f"))
+        {
+            configuration.DtrBackgroundHorizontalPadding = horizontalPadding;
+            RefreshDtrBackground();
+        }
+        SaveDtrBackgroundIfEditFinished();
+
+        var top = configuration.DtrBackgroundPaddingTop;
+        if (ImGui.SliderFloat(Loc.Text("Config.DtrBackgroundPaddingTop"), ref top, 0f, 80f, "%.0f"))
+        {
+            configuration.DtrBackgroundPaddingTop = top;
+            RefreshDtrBackground();
+        }
+        SaveDtrBackgroundIfEditFinished();
+
+        var bottom = configuration.DtrBackgroundPaddingBottom;
+        if (ImGui.SliderFloat(Loc.Text("Config.DtrBackgroundPaddingBottom"), ref bottom, 0f, 80f, "%.0f"))
+        {
+            configuration.DtrBackgroundPaddingBottom = bottom;
+            RefreshDtrBackground();
+        }
+        SaveDtrBackgroundIfEditFinished();
     }
 
     private void DrawTargetingMeMarkerStyleControls()
@@ -155,17 +163,6 @@ public partial class ConfigWindow
         if (ImGui.SliderInt(Loc.Text("Config.TargetingMeMarkerOpacity"), ref opacityValue, 0, 255))
         {
             configuration.TargetingMeMarkerOpacity = (byte)opacityValue;
-            SaveAndRequestTargetingMeMarkerRefresh();
-        }
-
-        if (ImGui.Button(Loc.Text("Config.TargetingMeMarker.ResetStyle")))
-        {
-            configuration.TargetingMeMarkerOffsetX = Configuration.DefaultTargetingMeMarkerOffsetX;
-            configuration.TargetingMeMarkerOffsetY = Configuration.DefaultTargetingMeMarkerOffsetY;
-            configuration.TargetingMeMarkerScale = Configuration.DefaultTargetingMeMarkerScale;
-            configuration.TargetingMeMarkerOpacity = Configuration.DefaultTargetingMeMarkerOpacity;
-            configuration.TargetingMeMarkerGlowOpacity = Configuration.DefaultTargetingMeMarkerGlowOpacity;
-            configuration.TargetingMeMarkerVisualStyle = TargetingMeMarkerVisualStyle.AlertEye;
             SaveAndRequestTargetingMeMarkerRefresh();
         }
     }
