@@ -83,7 +83,7 @@ internal static unsafe class NativeNodeBoundsScanner
         }
     }
 
-    private static bool TryGetNodeBoundsRelativeToRoot(AtkResNode* root, AtkResNode* node, out DtrBounds bounds)
+    private static bool TryGetNodeBoundsRelativeToRoot(AtkResNode* root, AtkResNode* node, out NativeNodeBounds bounds)
     {
         bounds = default;
         if (root == null || node == null || node == root)
@@ -141,7 +141,7 @@ internal static unsafe class NativeNodeBoundsScanner
         height = drawHeight > 0 ? drawHeight : height;
     }
 
-    private static DtrBounds CreateBoundsFromScaledRect(float x, float y, float width, float height)
+    private static NativeNodeBounds CreateBoundsFromScaledRect(float x, float y, float width, float height)
     {
         var minX = MathF.Min(x, x + width);
         var minY = MathF.Min(y, y + height);
@@ -149,7 +149,7 @@ internal static unsafe class NativeNodeBoundsScanner
         var maxY = MathF.Max(y, y + height);
         var boundsX = MathF.Floor(minX);
         var boundsY = MathF.Floor(minY);
-        return new DtrBounds(boundsX, boundsY, (ushort)MathF.Ceiling(maxX - boundsX), (ushort)MathF.Ceiling(maxY - boundsY));
+        return new NativeNodeBounds(boundsX, boundsY, (ushort)MathF.Ceiling(maxX - boundsX), (ushort)MathF.Ceiling(maxY - boundsY));
     }
 
     private static AtkResNode* GetFirstSibling(AtkResNode* node)
@@ -177,7 +177,7 @@ internal struct NativeNodeBoundsCollector
     private float maxY;
     private bool hasBounds;
 
-    public void Add(DtrBounds bounds)
+    public void Add(NativeNodeBounds bounds)
     {
         if (!hasBounds)
         {
@@ -195,7 +195,7 @@ internal struct NativeNodeBoundsCollector
         maxY = MathF.Max(maxY, bounds.Y + bounds.Height);
     }
 
-    public readonly bool TryBuild(out DtrBounds bounds)
+    public readonly bool TryBuild(out NativeNodeBounds bounds)
     {
         if (!hasBounds || maxX <= minX || maxY <= minY)
         {
@@ -205,7 +205,9 @@ internal struct NativeNodeBoundsCollector
 
         var x = MathF.Floor(minX);
         var y = MathF.Floor(minY);
-        bounds = new DtrBounds(x, y, (ushort)MathF.Ceiling(maxX - x), (ushort)MathF.Ceiling(maxY - y));
+        bounds = new NativeNodeBounds(x, y, (ushort)MathF.Ceiling(maxX - x), (ushort)MathF.Ceiling(maxY - y));
         return true;
     }
 }
+
+internal readonly record struct NativeNodeBounds(float X, float Y, ushort Width, ushort Height);

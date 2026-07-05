@@ -5,6 +5,7 @@ using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.Gui.NamePlate;
 using Dalamud.Plugin.Services;
+using EventHorizon.Integration.NativeUi;
 using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Client.Graphics;
 using FFXIVClientStructs.FFXIV.Client.UI;
@@ -448,7 +449,7 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
                 return false;
             }
 
-            MarkDirty(uldManager, parent);
+            NativeAtkNodeTree.MarkDirty(uldManager, parent);
             return true;
         }
 
@@ -467,14 +468,14 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
             }
 
             var textNode = &nameText->AtkResNode;
-            var textTopCenter = ConvertLocalPoint(textNode, parent, textNode->Width / 2f, 0f);
+            var textTopCenter = NativeAtkGeometry.ConvertLocalPoint(textNode, parent, textNode->Width / 2f, 0f);
 
-            var inheritedScale = GetInheritedScale(parent);
+            var inheritedScale = NativeAtkGeometry.GetInheritedScale(parent);
             var root = MarkerRootNode;
 
             // No scale on this marker
-            root->ScaleX = DivideByScale(style.Scale, inheritedScale.ScaleX);
-            root->ScaleY = DivideByScale(style.Scale, inheritedScale.ScaleY);
+            root->ScaleX = NativeAtkGeometry.DivideByScale(style.Scale, inheritedScale.ScaleX);
+            root->ScaleY = NativeAtkGeometry.DivideByScale(style.Scale, inheritedScale.ScaleY);
 
             root->X = textTopCenter.X + style.OffsetX - (style.Marker.Width * root->ScaleX / 2f);
             root->Y = textTopCenter.Y + style.OffsetY - (style.Marker.Height * root->ScaleY / 2f);
@@ -531,8 +532,8 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
                 return;
             }
 
-            MarkImageDirty(GlowImageNode);
-            MarkImageDirty(OutlineImageNode);
+            NativeAtkNodeTree.MarkImageDirty(GlowImageNode);
+            NativeAtkNodeTree.MarkImageDirty(OutlineImageNode);
             MarkerRootNode->IsDirty = true;
             ApplyActualVisibility(textureReady);
             if (MarkerRootNode->ParentNode != null)
@@ -545,8 +546,8 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
         {
             return partsList != null
                 && (
-                    glowNode != nint.Zero && GlowImageNode->PartsList == partsList
-                    || outlineNode != nint.Zero && OutlineImageNode->PartsList == partsList
+                    (glowNode != nint.Zero && GlowImageNode->PartsList == partsList)
+                    || (outlineNode != nint.Zero && OutlineImageNode->PartsList == partsList)
                 );
         }
 
@@ -561,7 +562,7 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
             var parent = MarkerRootNode->ParentNode;
             var uldManager = TryGetUldManager(addon);
             DestroyMarkerTree();
-            MarkDirty(uldManager, parent);
+            NativeAtkNodeTree.MarkDirty(uldManager, parent);
             ClearReference();
         }
 
@@ -599,16 +600,16 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
             glowNode = (nint)glow;
             outlineNode = (nint)outline;
 
-            InitializeVisualDefaults(root);
-            InitializeVisualDefaults(&glow->AtkResNode);
-            InitializeVisualDefaults(&outline->AtkResNode);
+            NativeAtkNodeStyle.InitializeVisualDefaults(root);
+            NativeAtkNodeStyle.InitializeVisualDefaults(&glow->AtkResNode);
+            NativeAtkNodeStyle.InitializeVisualDefaults(&outline->AtkResNode);
             ConfigureRoot(root, nodeId);
             ConfigureImage(glow, nodeId + 1000, partsList);
             ConfigureImage(outline, nodeId + 2000, partsList);
 
-            InsertFirstChild(parent, root);
-            InsertLastChild(root, (AtkResNode*)glow);
-            InsertLastChild(root, (AtkResNode*)outline);
+            NativeAtkNodeTree.InsertFirstChild(parent, root);
+            NativeAtkNodeTree.InsertLastChild(root, (AtkResNode*)glow);
+            NativeAtkNodeTree.InsertLastChild(root, (AtkResNode*)outline);
 
             ApplyVisualStyle(style);
             root->ToggleVisibility(false);
@@ -636,7 +637,7 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
             root->Height = marker.Height;
             root->OriginX = 0;
             root->OriginY = 0;
-            ApplyAlpha(root, style.Opacity);
+            NativeAtkNodeStyle.ApplyAlpha(root, style.Opacity);
             root->IsDirty = true;
 
             ApplyImageStyle(GlowImageNode, marker.GlowPartId, marker.Width, marker.Height, style.GlowOpacity);
@@ -659,7 +660,7 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
                 var outline = OutlineImageNode;
                 outline->PartsList = null;
                 outline->PartId = 0;
-                DetachNode(&outline->AtkResNode);
+                NativeAtkNodeTree.Detach(&outline->AtkResNode);
                 outline->AtkResNode.Destroy(true);
                 outlineNode = nint.Zero;
             }
@@ -669,14 +670,14 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
                 var glow = GlowImageNode;
                 glow->PartsList = null;
                 glow->PartId = 0;
-                DetachNode(&glow->AtkResNode);
+                NativeAtkNodeTree.Detach(&glow->AtkResNode);
                 glow->AtkResNode.Destroy(true);
                 glowNode = nint.Zero;
             }
 
             if (markerRoot != nint.Zero)
             {
-                DetachNode(MarkerRootNode);
+                NativeAtkNodeTree.Detach(MarkerRootNode);
                 MarkerRootNode->Destroy(true);
                 markerRoot = nint.Zero;
             }
@@ -698,47 +699,6 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
             return &rootComponentNode->Component->UldManager;
         }
 
-        private static (float X, float Y) ConvertLocalPoint(AtkResNode* fromNode, AtkResNode* toAncestor, float x, float y)
-        {
-            const int MaxParents = 16;
-            var node = fromNode;
-            for (var index = 0; node != null && node != toAncestor && index < MaxParents; index++)
-            {
-                var scaleX = SafeScale(node->ScaleX);
-                var scaleY = SafeScale(node->ScaleY);
-                x = node->X + node->OriginX + ((x - node->OriginX) * scaleX);
-                y = node->Y + node->OriginY + ((y - node->OriginY) * scaleY);
-                node = node->ParentNode;
-            }
-
-            return (x, y);
-        }
-
-        private static (float ScaleX, float ScaleY) GetInheritedScale(AtkResNode* node)
-        {
-            const int MaxParents = 16;
-            var scaleX = 1f;
-            var scaleY = 1f;
-            for (var index = 0; node != null && index < MaxParents; index++)
-            {
-                scaleX *= SafeScale(node->ScaleX);
-                scaleY *= SafeScale(node->ScaleY);
-                node = node->ParentNode;
-            }
-
-            return (SafeScale(scaleX), SafeScale(scaleY));
-        }
-
-        private static float SafeScale(float scale)
-        {
-            return MathF.Abs(scale) < 0.001f ? 1f : scale;
-        }
-
-        private static float DivideByScale(float value, float scale)
-        {
-            return value / SafeScale(scale);
-        }
-
         private static void ApplyImageStyle(AtkImageNode* imageNode, ushort partId, ushort width, ushort height, byte opacity)
         {
             var node = &imageNode->AtkResNode;
@@ -750,29 +710,10 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
             node->ScaleY = 1f;
             node->OriginX = 0;
             node->OriginY = 0;
-            ApplyAlpha(node, opacity);
+            NativeAtkNodeStyle.ApplyAlpha(node, opacity);
             node->ToggleVisibility(true);
             node->IsDirty = true;
             imageNode->PartId = partId;
-        }
-
-        private static void InitializeVisualDefaults(AtkResNode* node)
-        {
-            node->Color = new ByteColor
-            {
-                R = 255,
-                G = 255,
-                B = 255,
-                A = 255,
-            };
-            node->AddRed = 0;
-            node->AddGreen = 0;
-            node->AddBlue = 0;
-            node->MultiplyRed = 100;
-            node->MultiplyGreen = 100;
-            node->MultiplyBlue = 100;
-            node->ScaleX = 1f;
-            node->ScaleY = 1f;
         }
 
         private static void ConfigureRoot(AtkResNode* root, uint rootNodeId)
@@ -803,136 +744,6 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
             {
                 node->Destroy(true);
             }
-        }
-
-        private static void MarkDirty(AtkUldManager* uldManager, AtkResNode* root)
-        {
-            if (root != null)
-            {
-                root->IsDirty = true;
-            }
-            if (uldManager != null)
-            {
-                uldManager->UpdateDrawNodeList();
-            }
-        }
-
-        private static void MarkImageDirty(AtkImageNode* imageNode)
-        {
-            if (imageNode == null)
-            {
-                return;
-            }
-
-            imageNode->AtkResNode.IsDirty = true;
-            if (imageNode->AtkResNode.ParentNode != null)
-            {
-                imageNode->AtkResNode.ParentNode->IsDirty = true;
-            }
-        }
-
-        private static void InsertFirstChild(AtkResNode* parent, AtkResNode* child)
-        {
-            var lastChild = parent->ChildNode;
-            AtkResNode* firstChild = null;
-            if (lastChild != null)
-            {
-                firstChild = lastChild;
-                var siblingCount = 0;
-                while (firstChild->PrevSiblingNode != null && firstChild->PrevSiblingNode->ParentNode == parent && siblingCount++ < 256)
-                {
-                    firstChild = firstChild->PrevSiblingNode;
-                }
-            }
-
-            child->ParentNode = parent;
-            child->PrevSiblingNode = null;
-            child->NextSiblingNode = firstChild;
-            child->ChildNode = null;
-            child->ChildCount = 0;
-
-            if (firstChild != null)
-            {
-                firstChild->PrevSiblingNode = child;
-            }
-            if (lastChild == null)
-            {
-                parent->ChildNode = child;
-            }
-
-            parent->ChildCount++;
-        }
-
-        private static void InsertLastChild(AtkResNode* parent, AtkResNode* child)
-        {
-            var lastChild = parent->ChildNode;
-            if (lastChild != null)
-            {
-                var siblingCount = 0;
-                while (lastChild->NextSiblingNode != null && lastChild->NextSiblingNode->ParentNode == parent && siblingCount++ < 256)
-                {
-                    lastChild = lastChild->NextSiblingNode;
-                }
-            }
-
-            child->ParentNode = parent;
-            child->PrevSiblingNode = lastChild;
-            child->NextSiblingNode = null;
-            child->ChildNode = null;
-            child->ChildCount = 0;
-
-            if (lastChild != null)
-            {
-                lastChild->NextSiblingNode = child;
-            }
-
-            parent->ChildNode = child;
-            parent->ChildCount++;
-        }
-
-        private static void DetachNode(AtkResNode* node)
-        {
-            if (node == null)
-            {
-                return;
-            }
-
-            var parent = node->ParentNode;
-            var previousSibling = node->PrevSiblingNode;
-            var nextSibling = node->NextSiblingNode;
-            var previousIsChild = previousSibling != null && previousSibling->ParentNode == parent;
-            var nextIsChild = nextSibling != null && nextSibling->ParentNode == parent;
-
-            if (previousIsChild)
-            {
-                previousSibling->NextSiblingNode = nextIsChild ? nextSibling : null;
-            }
-            if (nextIsChild)
-            {
-                nextSibling->PrevSiblingNode = previousIsChild ? previousSibling : null;
-            }
-            if (parent != null && parent->ChildNode == node)
-            {
-                parent->ChildNode =
-                    previousIsChild ? previousSibling
-                    : nextIsChild ? nextSibling
-                    : null;
-            }
-            if (parent != null && parent->ChildCount > 0)
-            {
-                parent->ChildCount--;
-            }
-
-            node->ParentNode = null;
-            node->PrevSiblingNode = null;
-            node->NextSiblingNode = null;
-        }
-
-        private static void ApplyAlpha(AtkResNode* node, byte alpha)
-        {
-            node->Color.A = alpha;
-            node->SetAlpha(alpha);
-            node->Alpha_2 = alpha;
         }
     }
 }

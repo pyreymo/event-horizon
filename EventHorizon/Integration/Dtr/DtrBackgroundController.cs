@@ -2,7 +2,6 @@ using System;
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Plugin.Services;
-using EventHorizon.Integration.NativeUi;
 using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
@@ -17,7 +16,7 @@ internal sealed class DtrBackgroundController : IDisposable
     private readonly IGameGui gameGui;
     private readonly Configuration configuration;
     private readonly ChatLogBackgroundSkinProvider skinProvider;
-    private readonly NativeNineGridBackgroundNode backgroundNode = new(BackgroundNodeId);
+    private readonly DtrBackgroundNode backgroundNode = new(BackgroundNodeId);
 
     public DtrBackgroundController(IAddonLifecycle addonLifecycle, IGameGui gameGui, Configuration configuration)
     {

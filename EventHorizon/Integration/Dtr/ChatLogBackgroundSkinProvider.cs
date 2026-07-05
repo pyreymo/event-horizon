@@ -1,13 +1,13 @@
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.UI;
 
-namespace EventHorizon.Integration.NativeUi;
+namespace EventHorizon.Integration.Dtr;
 
 internal sealed class ChatLogBackgroundSkinProvider(IGameGui gameGui)
 {
     private const string ChatLogAddonName = "ChatLog";
 
-    public unsafe bool TryGetChatLogBackgroundSkin(out BackgroundSkin skin)
+    public unsafe bool TryGetChatLogBackgroundSkin(out DtrBackgroundSkin skin)
     {
         var chatLogPointer = gameGui.GetAddonByName(ChatLogAddonName);
         if (chatLogPointer == nint.Zero)
@@ -23,7 +23,7 @@ internal sealed class ChatLogBackgroundSkinProvider(IGameGui gameGui)
             return false;
         }
 
-        skin = new BackgroundSkin(
+        skin = new DtrBackgroundSkin(
             source->PartsList,
             source->PartId,
             source->TopOffset,

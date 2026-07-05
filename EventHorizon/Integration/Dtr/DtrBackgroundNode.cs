@@ -1,10 +1,11 @@
 using System;
+using EventHorizon.Integration.NativeUi;
 using FFXIVClientStructs.FFXIV.Client.Graphics;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
-namespace EventHorizon.Integration.NativeUi;
+namespace EventHorizon.Integration.Dtr;
 
-internal sealed unsafe class NativeNineGridBackgroundNode(uint nodeId)
+internal sealed unsafe class DtrBackgroundNode(uint nodeId)
 {
     private nint node;
 
@@ -36,12 +37,12 @@ internal sealed unsafe class NativeNineGridBackgroundNode(uint nodeId)
         node = (nint)nineGridNode;
         nineGridNode->AtkResNode.NodeId = nodeId;
         nineGridNode->AtkResNode.Type = NodeType.NineGrid;
-        InsertLastChild(root, (AtkResNode*)nineGridNode);
-        MarkDirty(unit, root);
+        NativeAtkNodeTree.InsertLastChild(root, (AtkResNode*)nineGridNode);
+        NativeAtkNodeTree.MarkDirty(unit, root);
         return true;
     }
 
-    public bool Update(DtrBounds bounds, DtrBackgroundStyle style, BackgroundSkin skin)
+    public bool Update(NativeNodeBounds bounds, DtrBackgroundStyle style, DtrBackgroundSkin skin)
     {
         var nineGridNode = (AtkNineGridNode*)node;
         if (nineGridNode == null)
@@ -103,8 +104,8 @@ internal sealed unsafe class NativeNineGridBackgroundNode(uint nodeId)
 
         var resNode = ResourceNode;
         var root = resNode->ParentNode;
-        DetachNode(resNode);
-        MarkDirty(unit, root);
+        NativeAtkNodeTree.Detach(resNode);
+        NativeAtkNodeTree.MarkDirty(unit, root);
         resNode->Destroy(true);
         node = nint.Zero;
     }
@@ -116,75 +117,9 @@ internal sealed unsafe class NativeNineGridBackgroundNode(uint nodeId)
             return;
         }
 
-        DetachNode(ResourceNode);
-        InsertLastChild(root, ResourceNode);
-        MarkDirty(unit, root);
-    }
-
-    private static void MarkDirty(AtkUnitBase* unit, AtkResNode* root)
-    {
-        if (root != null)
-        {
-            root->IsDirty = true;
-        }
-
-        if (unit != null)
-        {
-            unit->UldManager.UpdateDrawNodeList();
-        }
-    }
-
-    private static void InsertLastChild(AtkResNode* parent, AtkResNode* node)
-    {
-        var lastChild = parent->ChildNode;
-        if (lastChild != null)
-        {
-            const int MaxSiblings = 256;
-            var siblingCount = 0;
-            while (lastChild->NextSiblingNode != null && siblingCount++ < MaxSiblings)
-            {
-                lastChild = lastChild->NextSiblingNode;
-            }
-        }
-
-        node->ParentNode = parent;
-        node->PrevSiblingNode = lastChild;
-        node->NextSiblingNode = null;
-        node->ChildNode = null;
-
-        if (lastChild != null)
-        {
-            lastChild->NextSiblingNode = node;
-        }
-
-        parent->ChildNode = node;
-    }
-
-    private static void DetachNode(AtkResNode* node)
-    {
-        if (node == null)
-        {
-            return;
-        }
-
-        if (node->PrevSiblingNode != null)
-        {
-            node->PrevSiblingNode->NextSiblingNode = node->NextSiblingNode;
-        }
-
-        if (node->NextSiblingNode != null)
-        {
-            node->NextSiblingNode->PrevSiblingNode = node->PrevSiblingNode;
-        }
-
-        if (node->ParentNode != null && node->ParentNode->ChildNode == node)
-        {
-            node->ParentNode->ChildNode = node->PrevSiblingNode != null ? node->PrevSiblingNode : node->NextSiblingNode;
-        }
-
-        node->ParentNode = null;
-        node->PrevSiblingNode = null;
-        node->NextSiblingNode = null;
+        NativeAtkNodeTree.Detach(ResourceNode);
+        NativeAtkNodeTree.InsertLastChild(root, ResourceNode);
+        NativeAtkNodeTree.MarkDirty(unit, root);
     }
 
     private bool IsCurrent(
@@ -196,7 +131,7 @@ internal sealed unsafe class NativeNineGridBackgroundNode(uint nodeId)
         NodeFlags nodeFlags,
         uint drawFlags,
         DtrBackgroundStyle style,
-        BackgroundSkin skin
+        DtrBackgroundSkin skin
     )
     {
         var resNode = &nineGridNode->AtkResNode;
@@ -226,7 +161,7 @@ internal sealed unsafe class NativeNineGridBackgroundNode(uint nodeId)
     }
 }
 
-internal readonly unsafe struct BackgroundSkin(
+internal readonly unsafe struct DtrBackgroundSkin(
     AtkUldPartsList* partsList,
     uint partId,
     short topOffset,
@@ -254,5 +189,3 @@ internal readonly record struct DtrBackgroundStyle(
     float PaddingBottom,
     byte Alpha
 );
-
-internal readonly record struct DtrBounds(float X, float Y, ushort Width, ushort Height);

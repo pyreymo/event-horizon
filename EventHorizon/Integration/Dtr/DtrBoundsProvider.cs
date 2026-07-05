@@ -5,7 +5,7 @@ namespace EventHorizon.Integration.Dtr;
 
 internal static unsafe class DtrBoundsProvider
 {
-    public static bool TryGetBounds(AtkUnitBase* unit, AtkResNode* background, out DtrBounds bounds)
+    public static bool TryGetBounds(AtkUnitBase* unit, AtkResNode* background, out NativeNodeBounds bounds)
     {
         if (unit == null || unit->RootNode == null)
         {
