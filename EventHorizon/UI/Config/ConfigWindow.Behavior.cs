@@ -1,4 +1,5 @@
 using System;
+using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using EventHorizon.Localization;
 using EventHorizon.Settings;
@@ -13,30 +14,40 @@ public partial class ConfigWindow
             Loc.Text("Config.Tab.Behavior"),
             () =>
             {
-                var showDtrBar = configuration.ShowDtrBar;
-                if (ImGui.Checkbox(Loc.Text("Config.ShowDtrBar"), ref showDtrBar))
-                {
-                    configuration.ShowDtrBar = showDtrBar;
-                    SaveAndRefreshDtrBar();
-                }
-
-                var showFrameRateInDtrBar = configuration.ShowFrameRateInDtrBar;
-                if (ImGui.Checkbox(Loc.Text("Config.ShowFrameRateInDtrBar"), ref showFrameRateInDtrBar))
-                {
-                    configuration.ShowFrameRateInDtrBar = showFrameRateInDtrBar;
-                    SaveAndRefreshDtrBar();
-                }
-
-                var enableFadeTransitions = configuration.EnableFadeTransitions;
-                if (ImGui.Checkbox(Loc.Text("Config.EnableFadeTransitions"), ref enableFadeTransitions))
-                {
-                    configuration.EnableFadeTransitions = enableFadeTransitions;
-                    SaveAndRefresh();
-                }
+                DrawDtrBarControls();
+                DrawBehaviorSeparator();
+                DrawFadeBehaviorControls();
             }
         );
 
         DrawExperimentalFeatures();
+    }
+
+    private void DrawDtrBarControls()
+    {
+        var showDtrBar = configuration.ShowDtrBar;
+        if (ImGui.Checkbox(Loc.Text("Config.ShowDtrBar"), ref showDtrBar))
+        {
+            configuration.ShowDtrBar = showDtrBar;
+            SaveAndRefreshDtrBar();
+        }
+
+        var showFrameRateInDtrBar = configuration.ShowFrameRateInDtrBar;
+        if (ImGui.Checkbox(Loc.Text("Config.ShowFrameRateInDtrBar"), ref showFrameRateInDtrBar))
+        {
+            configuration.ShowFrameRateInDtrBar = showFrameRateInDtrBar;
+            SaveAndRefreshDtrBar();
+        }
+    }
+
+    private void DrawFadeBehaviorControls()
+    {
+        var enableFadeTransitions = configuration.EnableFadeTransitions;
+        if (ImGui.Checkbox(Loc.Text("Config.EnableFadeTransitions"), ref enableFadeTransitions))
+        {
+            configuration.EnableFadeTransitions = enableFadeTransitions;
+            SaveAndRefresh();
+        }
     }
 
     private void DrawExperimentalFeatures()
@@ -45,54 +56,84 @@ public partial class ConfigWindow
             Loc.Text("Config.Section.Experimental"),
             () =>
             {
-                var enableDtrBackground = configuration.EnableDtrBackground;
-                if (ImGui.Checkbox(Loc.Text("Config.EnableDtrBackground"), ref enableDtrBackground))
-                {
-                    configuration.EnableDtrBackground = enableDtrBackground;
-                    SaveAndRefreshDtrBackground();
-                }
-
-                DrawHelpText(Loc.Text("Config.EnableDtrBackground.Help"));
-
-                if (configuration.EnableDtrBackground)
-                {
-                    ImGui.Indent();
-                    DrawDtrBackgroundStyleControls();
-                    ImGui.Unindent();
-                }
-
-                var enableTargetingMeMarker = configuration.EnableTargetingMeMarker;
-                if (ImGui.Checkbox(Loc.Text("Config.EnableTargetingMeMarker"), ref enableTargetingMeMarker))
-                {
-                    configuration.EnableTargetingMeMarker = enableTargetingMeMarker;
-                    SaveAndRequestTargetingMeMarkerRefresh();
-                }
-
-                DrawHelpText(Loc.Text("Config.EnableTargetingMeMarker.Help"));
-
-                if (configuration.EnableTargetingMeMarker)
-                {
-                    ImGui.Indent();
-                    var enableTargetingMeMarkerCurrentTargetTest = configuration.EnableTargetingMeMarkerCurrentTargetTest;
-
-                    if (
-                        ImGui.Checkbox(
-                            Loc.Text("Config.EnableTargetingMeMarkerCurrentTargetTest"),
-                            ref enableTargetingMeMarkerCurrentTargetTest
-                        )
-                    )
-                    {
-                        configuration.EnableTargetingMeMarkerCurrentTargetTest = enableTargetingMeMarkerCurrentTargetTest;
-                        SaveAndRequestTargetingMeMarkerRefresh();
-                    }
-
-                    DrawHelpText(Loc.Text("Config.EnableTargetingMeMarkerCurrentTargetTest.Help"));
-
-                    DrawTargetingMeMarkerStyleControls();
-                    ImGui.Unindent();
-                }
+                DrawExperimentalDtrBackgroundControls();
+                DrawBehaviorSeparator();
+                DrawExperimentalTargetingMeMarkerControls();
             }
         );
+    }
+
+    private void DrawExperimentalDtrBackgroundControls()
+    {
+        var enableDtrBackground = configuration.EnableDtrBackground;
+        if (ImGui.Checkbox(Loc.Text("Config.EnableDtrBackground"), ref enableDtrBackground))
+        {
+            configuration.EnableDtrBackground = enableDtrBackground;
+            SaveAndRefreshDtrBackground();
+        }
+
+        DrawHelpText(Loc.Text("Config.EnableDtrBackground.Help"));
+
+        if (!configuration.EnableDtrBackground)
+        {
+            return;
+        }
+
+        AddVerticalSpace(4f);
+        if (ImGui.CollapsingHeader(Loc.Text("Config.Section.DtrBackgroundStyle")))
+        {
+            ImGui.Indent();
+            DrawDtrBackgroundStyleControls();
+            ImGui.Unindent();
+        }
+    }
+
+    private void DrawExperimentalTargetingMeMarkerControls()
+    {
+        var enableTargetingMeMarker = configuration.EnableTargetingMeMarker;
+        if (ImGui.Checkbox(Loc.Text("Config.EnableTargetingMeMarker"), ref enableTargetingMeMarker))
+        {
+            configuration.EnableTargetingMeMarker = enableTargetingMeMarker;
+            SaveAndRequestTargetingMeMarkerRefresh();
+        }
+
+        DrawHelpText(Loc.Text("Config.EnableTargetingMeMarker.Help"));
+
+        if (!configuration.EnableTargetingMeMarker)
+        {
+            return;
+        }
+
+        ImGui.Indent();
+        DrawTargetingMeMarkerTestControls();
+        ImGui.Unindent();
+
+        AddVerticalSpace(4f);
+        if (ImGui.CollapsingHeader(Loc.Text("Config.Section.TargetingMeMarkerStyle")))
+        {
+            ImGui.Indent();
+            DrawTargetingMeMarkerStyleControls();
+            ImGui.Unindent();
+        }
+    }
+
+    private void DrawTargetingMeMarkerTestControls()
+    {
+        var enableTargetingMeMarkerCurrentTargetTest = configuration.EnableTargetingMeMarkerCurrentTargetTest;
+        if (ImGui.Checkbox(Loc.Text("Config.EnableTargetingMeMarkerCurrentTargetTest"), ref enableTargetingMeMarkerCurrentTargetTest))
+        {
+            configuration.EnableTargetingMeMarkerCurrentTargetTest = enableTargetingMeMarkerCurrentTargetTest;
+            SaveAndRequestTargetingMeMarkerRefresh();
+        }
+
+        DrawHelpText(Loc.Text("Config.EnableTargetingMeMarkerCurrentTargetTest.Help"));
+    }
+
+    private static void DrawBehaviorSeparator()
+    {
+        AddVerticalSpace(6f);
+        ImGui.Separator();
+        AddVerticalSpace(6f);
     }
 
     private void DrawDtrBackgroundStyleControls()
@@ -165,6 +206,8 @@ public partial class ConfigWindow
             configuration.TargetingMeMarkerOpacity = (byte)opacityValue;
             SaveAndRequestTargetingMeMarkerRefresh();
         }
+
+        DrawTargetingMeMarkerColorControls();
     }
 
     private void DrawTargetingMeMarkerVisualStyleOption(TargetingMeMarkerVisualStyle option, TargetingMeMarkerVisualStyle current)
@@ -201,6 +244,39 @@ public partial class ConfigWindow
             configuration.TargetingMeMarkerGlowOpacity = (byte)glowOpacityValue;
             SaveAndRequestTargetingMeMarkerRefresh();
         }
+    }
+
+    private void DrawTargetingMeMarkerColorControls()
+    {
+        var useCustomColor = configuration.UseCustomTargetingMeMarkerColor;
+        if (ImGui.Checkbox(Loc.Text("Config.UseCustomTargetingMeMarkerColor"), ref useCustomColor))
+        {
+            configuration.UseCustomTargetingMeMarkerColor = useCustomColor;
+            SaveAndRequestTargetingMeMarkerRefresh();
+        }
+
+        if (!configuration.UseCustomTargetingMeMarkerColor)
+        {
+            return;
+        }
+
+        var color = new Vector3(
+            configuration.TargetingMeMarkerColorRed / 255f,
+            configuration.TargetingMeMarkerColorGreen / 255f,
+            configuration.TargetingMeMarkerColorBlue / 255f
+        );
+        if (ImGui.ColorEdit3(Loc.Text("Config.TargetingMeMarkerColor"), ref color))
+        {
+            configuration.TargetingMeMarkerColorRed = ToColorByte(color.X);
+            configuration.TargetingMeMarkerColorGreen = ToColorByte(color.Y);
+            configuration.TargetingMeMarkerColorBlue = ToColorByte(color.Z);
+            SaveAndRequestTargetingMeMarkerRefresh();
+        }
+    }
+
+    private static byte ToColorByte(float value)
+    {
+        return (byte)Math.Clamp((int)MathF.Round(value * 255f), 0, 255);
     }
 
     private void SaveAndRefreshDtrBar()

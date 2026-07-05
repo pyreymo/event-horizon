@@ -226,7 +226,14 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
             var nameText = namePlateObject->NameText;
             if (nameText != null)
             {
-                slot.SetNamePlateColor(nameText->TextColor, nameText->EdgeColor);
+                if (appliedStyle.UseCustomColor)
+                {
+                    slot.SetMarkerColor(appliedStyle.Color);
+                }
+                else
+                {
+                    slot.SetNamePlateColor(nameText->TextColor, nameText->EdgeColor);
+                }
             }
         }
 
@@ -384,7 +391,9 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
         float OffsetY,
         float Scale,
         byte Opacity,
-        byte GlowOpacity
+        byte GlowOpacity,
+        bool UseCustomColor,
+        ByteColor Color
     )
     {
         public static TargetingMeMarkerStyle FromConfiguration(Configuration configuration, MarkerAssetDefinition marker)
@@ -395,7 +404,15 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
                 Math.Clamp(configuration.TargetingMeMarkerOffsetY, -500f, 500f),
                 Math.Clamp(configuration.TargetingMeMarkerScale, 0.01f, 5.0f),
                 configuration.TargetingMeMarkerOpacity,
-                configuration.TargetingMeMarkerGlowOpacity
+                configuration.TargetingMeMarkerGlowOpacity,
+                configuration.UseCustomTargetingMeMarkerColor,
+                new ByteColor
+                {
+                    R = configuration.TargetingMeMarkerColorRed,
+                    G = configuration.TargetingMeMarkerColorGreen,
+                    B = configuration.TargetingMeMarkerColorBlue,
+                    A = 255,
+                }
             );
         }
     }
@@ -507,21 +524,31 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
 
         public void SetNamePlateColor(ByteColor textColor, ByteColor edgeColor)
         {
+            SetMarkerColor(textColor, edgeColor);
+        }
+
+        public void SetMarkerColor(ByteColor color)
+        {
+            SetMarkerColor(color, color);
+        }
+
+        private void SetMarkerColor(ByteColor glowColor, ByteColor outlineColor)
+        {
             if (!HasMarker)
             {
                 return;
             }
 
             var glow = &GlowImageNode->AtkResNode;
-            glow->AddRed = (short)(textColor.R - 160);
-            glow->AddGreen = (short)(textColor.G - 160);
-            glow->AddBlue = (short)(textColor.B - 160);
+            glow->AddRed = (short)(glowColor.R - 160);
+            glow->AddGreen = (short)(glowColor.G - 160);
+            glow->AddBlue = (short)(glowColor.B - 160);
             glow->IsDirty = true;
 
             var outline = &OutlineImageNode->AtkResNode;
-            outline->AddRed = edgeColor.R;
-            outline->AddGreen = edgeColor.G;
-            outline->AddBlue = edgeColor.B;
+            outline->AddRed = outlineColor.R;
+            outline->AddGreen = outlineColor.G;
+            outline->AddBlue = outlineColor.B;
             outline->IsDirty = true;
         }
 

@@ -14,6 +14,9 @@ internal class Configuration : IPluginConfiguration
     public const float DefaultTargetingMeMarkerScale = 1f;
     public const byte DefaultTargetingMeMarkerOpacity = 255;
     public const byte DefaultTargetingMeMarkerGlowOpacity = 255;
+    public const byte DefaultTargetingMeMarkerColorRed = 255;
+    public const byte DefaultTargetingMeMarkerColorGreen = 120;
+    public const byte DefaultTargetingMeMarkerColorBlue = 40;
 
     public int Version { get; set; } = 0;
 
@@ -36,6 +39,10 @@ internal class Configuration : IPluginConfiguration
     public float TargetingMeMarkerScale { get; set; } = DefaultTargetingMeMarkerScale;
     public byte TargetingMeMarkerOpacity { get; set; } = DefaultTargetingMeMarkerOpacity;
     public byte TargetingMeMarkerGlowOpacity { get; set; } = DefaultTargetingMeMarkerGlowOpacity;
+    public bool UseCustomTargetingMeMarkerColor { get; set; } = false;
+    public byte TargetingMeMarkerColorRed { get; set; } = DefaultTargetingMeMarkerColorRed;
+    public byte TargetingMeMarkerColorGreen { get; set; } = DefaultTargetingMeMarkerColorGreen;
+    public byte TargetingMeMarkerColorBlue { get; set; } = DefaultTargetingMeMarkerColorBlue;
     public float DtrBackgroundHorizontalPadding { get; set; } = 24f;
     public float DtrBackgroundPaddingTop { get; set; } = 10f;
     public float DtrBackgroundPaddingBottom { get; set; } = 1f;
