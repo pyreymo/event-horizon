@@ -136,5 +136,30 @@ public partial class ConfigWindow
         ImGui.PopTextWrapPos();
     }
 
+    private static bool DrawAutoFitText(string text)
+    {
+        var availableWidth = Math.Max(1f, ImGui.GetContentRegionAvail().X);
+        ImGui.PushTextWrapPos(ImGui.GetCursorScreenPos().X + availableWidth);
+        ImGui.TextUnformatted(text);
+        ImGui.PopTextWrapPos();
+
+        return ImGui.IsItemClicked();
+    }
+
+    private static bool DrawAutoFitCheckbox(string id, string label, ref bool value)
+    {
+        ImGui.PushID(id);
+        var changed = ImGui.Checkbox("##Value", ref value);
+        ImGui.SameLine();
+        if (DrawAutoFitText(label))
+        {
+            value = !value;
+            changed = true;
+        }
+
+        ImGui.PopID();
+        return changed;
+    }
+
     #endregion
 }

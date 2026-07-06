@@ -135,5 +135,8 @@
     "Config.DtrBackgroundPaddingBottom": "Bottom padding",
 
     "Config.Section.Experimental": "Experimental features",
+    "Config.Section.Debug": "Debug",
+    "Config.Debug.ScrollChatUpFiveLines": "Scroll chat up 5 lines",
+    "Config.Debug.ScrollChatDownFiveLines": "Scroll chat down 5 lines",
     "Config.EnableHiddenPlayerGroundMarker": "Show an effect at hidden players' feet (experimental)"
 }

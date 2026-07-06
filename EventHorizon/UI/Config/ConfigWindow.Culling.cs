@@ -152,7 +152,7 @@ public partial class ConfigWindow
     private void DrawDutyRule()
     {
         var disableInDuty = configuration.DisableInDuty;
-        if (ImGui.Checkbox(Loc.Text("Config.DisableInDuty"), ref disableInDuty))
+        if (DrawAutoFitCheckbox("DisableInDuty", Loc.Text("Config.DisableInDuty"), ref disableInDuty))
         {
             configuration.DisableInDuty = disableInDuty;
             SaveAndRefresh();
@@ -273,7 +273,13 @@ public partial class ConfigWindow
     private void DrawLowPlayerCountRule()
     {
         var disableCullingBelowPlayerCount = configuration.DisableCullingBelowPlayerCount;
-        if (ImGui.Checkbox(Loc.Text("Config.DisableCullingBelowPlayerCount"), ref disableCullingBelowPlayerCount))
+        if (
+            DrawAutoFitCheckbox(
+                "DisableCullingBelowPlayerCount",
+                Loc.Text("Config.DisableCullingBelowPlayerCount"),
+                ref disableCullingBelowPlayerCount
+            )
+        )
         {
             configuration.DisableCullingBelowPlayerCount = disableCullingBelowPlayerCount;
             SaveAndRefresh();
@@ -298,24 +304,25 @@ public partial class ConfigWindow
         }
 
         ImGui.SameLine();
-        ImGui.TextUnformatted(Loc.Text("Config.DisableCullingPlayerCountThresholdSuffix"));
+        DrawAutoFitText(Loc.Text("Config.DisableCullingPlayerCountThresholdSuffix"));
     }
 
     private void DrawVisiblePlayerLimitRule()
     {
-        if (!ImGui.BeginTable("###VisiblePlayerLimitRule", 2, ImGuiTableFlags.SizingStretchProp))
+        var label = Loc.Text("Config.LimitVisiblePlayerCount");
+        if (!ImGui.BeginTable("###VisiblePlayerLimitRule", 2, ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.NoSavedSettings))
         {
             DrawVisiblePlayerLimitRuleFallback();
             return;
         }
 
-        ImGui.TableSetupColumn("###VisibleLimitEnabled", ImGuiTableColumnFlags.WidthFixed, 180f);
+        ImGui.TableSetupColumn("###VisibleLimitEnabled", ImGuiTableColumnFlags.WidthFixed);
         ImGui.TableSetupColumn("###VisibleLimitSlider", ImGuiTableColumnFlags.WidthStretch);
         ImGui.TableNextRow();
 
         ImGui.TableNextColumn();
         var limitVisiblePlayerCount = configuration.LimitVisiblePlayerCount;
-        if (ImGui.Checkbox(Loc.Text("Config.LimitVisiblePlayerCount"), ref limitVisiblePlayerCount))
+        if (DrawAutoFitCheckbox("LimitVisiblePlayerCount", label, ref limitVisiblePlayerCount))
         {
             configuration.LimitVisiblePlayerCount = limitVisiblePlayerCount;
             SaveAndRefresh();
@@ -333,7 +340,7 @@ public partial class ConfigWindow
     private void DrawVisiblePlayerLimitRuleFallback()
     {
         var limitVisiblePlayerCount = configuration.LimitVisiblePlayerCount;
-        if (ImGui.Checkbox(Loc.Text("Config.LimitVisiblePlayerCount"), ref limitVisiblePlayerCount))
+        if (DrawAutoFitCheckbox("LimitVisiblePlayerCountFallback", Loc.Text("Config.LimitVisiblePlayerCount"), ref limitVisiblePlayerCount))
         {
             configuration.LimitVisiblePlayerCount = limitVisiblePlayerCount;
             SaveAndRefresh();
@@ -374,7 +381,7 @@ public partial class ConfigWindow
     private void DrawOtherPlayerCompanionRule()
     {
         var hideOtherPlayerCompanions = configuration.HideOtherPlayerCompanions;
-        if (ImGui.Checkbox(Loc.Text("Config.HideOtherPlayerCompanions"), ref hideOtherPlayerCompanions))
+        if (DrawAutoFitCheckbox("HideOtherPlayerCompanions", Loc.Text("Config.HideOtherPlayerCompanions"), ref hideOtherPlayerCompanions))
         {
             configuration.HideOtherPlayerCompanions = hideOtherPlayerCompanions;
             SaveAndRefresh();
@@ -384,7 +391,7 @@ public partial class ConfigWindow
     private void DrawOtherPlayerOrnamentRule()
     {
         var hideOtherPlayerOrnaments = configuration.HideOtherPlayerOrnaments;
-        if (ImGui.Checkbox(Loc.Text("Config.HideOtherPlayerOrnaments"), ref hideOtherPlayerOrnaments))
+        if (DrawAutoFitCheckbox("HideOtherPlayerOrnaments", Loc.Text("Config.HideOtherPlayerOrnaments"), ref hideOtherPlayerOrnaments))
         {
             configuration.HideOtherPlayerOrnaments = hideOtherPlayerOrnaments;
             SaveAndRefresh();

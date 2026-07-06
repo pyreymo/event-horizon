@@ -242,7 +242,7 @@ public partial class ConfigWindow
     private static void DrawKeepRuleLabel(PlayerKeepRuleId rule)
     {
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted(PlayerKeepRuleText.GetLabel(rule));
+        DrawAutoFitText(PlayerKeepRuleText.GetLabel(rule));
 
         var helpText = PlayerKeepRuleText.GetHelpText(rule);
         if (!string.IsNullOrEmpty(helpText))

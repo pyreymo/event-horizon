@@ -12,12 +12,13 @@ public partial class ConfigWindow
         DrawCard(Loc.Text("Config.Section.DtrBar"), DrawDtrBarControls);
         DrawCard(Loc.Text("Config.Section.PlayerDisplay"), DrawPlayerDisplayControls);
         DrawCard(Loc.Text("Config.Section.TargetingMeMarker"), DrawTargetingMeMarkerControls);
+        DrawCard(Loc.Text("Config.Section.Debug"), DrawDebugControls);
     }
 
     private void DrawDtrBarControls()
     {
         var showDtrBar = configuration.ShowDtrBar;
-        if (ImGui.Checkbox(Loc.Text("Config.ShowDtrBar"), ref showDtrBar))
+        if (DrawAutoFitCheckbox("ShowDtrBar", Loc.Text("Config.ShowDtrBar"), ref showDtrBar))
         {
             configuration.ShowDtrBar = showDtrBar;
             SaveAndRefreshDtrBar();
@@ -31,7 +32,7 @@ public partial class ConfigWindow
         ImGui.Indent();
 
         var showFrameRateInDtrBar = configuration.ShowFrameRateInDtrBar;
-        if (ImGui.Checkbox(Loc.Text("Config.ShowFrameRateInDtrBar"), ref showFrameRateInDtrBar))
+        if (DrawAutoFitCheckbox("ShowFrameRateInDtrBar", Loc.Text("Config.ShowFrameRateInDtrBar"), ref showFrameRateInDtrBar))
         {
             configuration.ShowFrameRateInDtrBar = showFrameRateInDtrBar;
             SaveAndRefreshDtrBar();
@@ -45,7 +46,7 @@ public partial class ConfigWindow
     private void DrawDtrBackgroundControls()
     {
         var enableDtrBackground = configuration.EnableDtrBackground;
-        if (ImGui.Checkbox(Loc.Text("Config.EnableDtrBackground"), ref enableDtrBackground))
+        if (DrawAutoFitCheckbox("EnableDtrBackground", Loc.Text("Config.EnableDtrBackground"), ref enableDtrBackground))
         {
             configuration.EnableDtrBackground = enableDtrBackground;
             SaveAndRefreshDtrBackground();
@@ -67,14 +68,20 @@ public partial class ConfigWindow
     private void DrawPlayerDisplayControls()
     {
         var enableFadeTransitions = configuration.EnableFadeTransitions;
-        if (ImGui.Checkbox(Loc.Text("Config.EnableFadeTransitions"), ref enableFadeTransitions))
+        if (DrawAutoFitCheckbox("EnableFadeTransitions", Loc.Text("Config.EnableFadeTransitions"), ref enableFadeTransitions))
         {
             configuration.EnableFadeTransitions = enableFadeTransitions;
             SaveAndRefresh();
         }
 
         var enableHiddenPlayerGroundMarker = configuration.EnableHiddenPlayerGroundMarker;
-        if (ImGui.Checkbox(Loc.Text("Config.EnableHiddenPlayerGroundMarker"), ref enableHiddenPlayerGroundMarker))
+        if (
+            DrawAutoFitCheckbox(
+                "EnableHiddenPlayerGroundMarker",
+                Loc.Text("Config.EnableHiddenPlayerGroundMarker"),
+                ref enableHiddenPlayerGroundMarker
+            )
+        )
         {
             configuration.EnableHiddenPlayerGroundMarker = enableHiddenPlayerGroundMarker;
             SaveAndRefreshWithoutRuleReset();
@@ -84,7 +91,7 @@ public partial class ConfigWindow
     private void DrawTargetingMeMarkerControls()
     {
         var enableTargetingMeMarker = configuration.EnableTargetingMeMarker;
-        if (ImGui.Checkbox(Loc.Text("Config.EnableTargetingMeMarker"), ref enableTargetingMeMarker))
+        if (DrawAutoFitCheckbox("EnableTargetingMeMarker", Loc.Text("Config.EnableTargetingMeMarker"), ref enableTargetingMeMarker))
         {
             configuration.EnableTargetingMeMarker = enableTargetingMeMarker;
             SaveAndRequestTargetingMeMarkerRefresh();
@@ -107,17 +114,45 @@ public partial class ConfigWindow
     private void DrawTargetingMeMarkerTestControls()
     {
         var enableTargetingMeMarkerCurrentTargetTest = configuration.EnableTargetingMeMarkerCurrentTargetTest;
-        if (ImGui.Checkbox(Loc.Text("Config.EnableTargetingMeMarkerCurrentTargetTest"), ref enableTargetingMeMarkerCurrentTargetTest))
+        if (
+            DrawAutoFitCheckbox(
+                "EnableTargetingMeMarkerCurrentTargetTest",
+                Loc.Text("Config.EnableTargetingMeMarkerCurrentTargetTest"),
+                ref enableTargetingMeMarkerCurrentTargetTest
+            )
+        )
         {
             configuration.EnableTargetingMeMarkerCurrentTargetTest = enableTargetingMeMarkerCurrentTargetTest;
             SaveAndRequestTargetingMeMarkerRefresh();
         }
     }
 
+    private void DrawDebugControls()
+    {
+        var buttonWidth = Math.Max(1f, (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X) * 0.5f);
+        if (ImGui.Button(Loc.Text("Config.Debug.ScrollChatUpFiveLines"), new Vector2(buttonWidth, 0f)))
+        {
+            plugin.ScrollChatLogLines(-5);
+        }
+
+        ImGui.SameLine();
+
+        if (ImGui.Button(Loc.Text("Config.Debug.ScrollChatDownFiveLines"), new Vector2(buttonWidth, 0f)))
+        {
+            plugin.ScrollChatLogLines(5);
+        }
+    }
+
     private void DrawTargetingMeNamePlateMarkerSection()
     {
         var enableNamePlateMarker = configuration.EnableTargetingMeNamePlateMarker;
-        if (ImGui.Checkbox(Loc.Text("Config.EnableTargetingMeNamePlateMarker"), ref enableNamePlateMarker))
+        if (
+            DrawAutoFitCheckbox(
+                "EnableTargetingMeNamePlateMarker",
+                Loc.Text("Config.EnableTargetingMeNamePlateMarker"),
+                ref enableNamePlateMarker
+            )
+        )
         {
             configuration.EnableTargetingMeNamePlateMarker = enableNamePlateMarker;
             SaveAndRequestTargetingMeMarkerRefresh();
@@ -144,7 +179,7 @@ public partial class ConfigWindow
     private void DrawTargetingMeVfxMarkerSection()
     {
         var enableVfxMarker = configuration.EnableTargetingMeVfxMarker;
-        if (ImGui.Checkbox(Loc.Text("Config.EnableTargetingMeVfxMarker"), ref enableVfxMarker))
+        if (DrawAutoFitCheckbox("EnableTargetingMeVfxMarker", Loc.Text("Config.EnableTargetingMeVfxMarker"), ref enableVfxMarker))
         {
             configuration.EnableTargetingMeVfxMarker = enableVfxMarker;
             SaveAndRequestTargetingMeMarkerRefresh();
@@ -158,7 +193,13 @@ public partial class ConfigWindow
         ImGui.Indent();
 
         var disableInDuty = configuration.DisableTargetingMeMarkerVfxInDuty;
-        if (ImGui.Checkbox(Loc.Text("Config.DisableTargetingMeMarkerVfxInDuty"), ref disableInDuty))
+        if (
+            DrawAutoFitCheckbox(
+                "DisableTargetingMeMarkerVfxInDuty",
+                Loc.Text("Config.DisableTargetingMeMarkerVfxInDuty"),
+                ref disableInDuty
+            )
+        )
         {
             configuration.DisableTargetingMeMarkerVfxInDuty = disableInDuty;
             SaveAndRequestTargetingMeMarkerRefresh();
@@ -323,14 +364,12 @@ public partial class ConfigWindow
 
     private static bool BeginBehaviorControlTable(string id)
     {
-        if (!ImGui.BeginTable(id, 2, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.NoSavedSettings))
+        if (!ImGui.BeginTable(id, 2, ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.NoSavedSettings))
         {
             return false;
         }
 
-        var availableWidth = ImGui.GetContentRegionAvail().X;
-        var labelWidth = Math.Clamp(availableWidth * 0.38f, 140f, 220f);
-        ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthFixed, labelWidth);
+        ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthFixed);
         ImGui.TableSetupColumn("Control", ImGuiTableColumnFlags.WidthStretch);
         return true;
     }
@@ -367,7 +406,7 @@ public partial class ConfigWindow
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted(label);
+        DrawAutoFitText(label);
         ImGui.TableSetColumnIndex(1);
     }
 

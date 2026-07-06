@@ -47,7 +47,7 @@
     "Config.Preview.Title": "预览",
     "Config.Preview.FloatingTitle": "玩家预览",
     "Config.Preview.PopOut": "浮窗",
-    "Config.Preview.PerformanceNote": "预览可见时会加快信息刷新速度。",
+    "Config.Preview.PerformanceNote": "预览图像可见时，会加快玩家信息刷新速度。",
     "Config.Preview.Empty": "暂无玩家数据",
     "Config.Preview.Tooltip.Distance": "距离：{0:F1} 米",
     "Config.Preview.Tooltip.Visible": "状态：显示",
@@ -135,5 +135,8 @@
     "Config.DtrBackgroundPaddingBottom": "底部留白",
 
     "Config.Section.Experimental": "实验功能",
+    "Config.Section.Debug": "调试",
+    "Config.Debug.ScrollChatUpFiveLines": "聊天上滚 5 行",
+    "Config.Debug.ScrollChatDownFiveLines": "聊天下滚 5 行",
     "Config.EnableHiddenPlayerGroundMarker": "在隐藏玩家脚下显示特效（实验性）"
 }
