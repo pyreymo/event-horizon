@@ -3,6 +3,7 @@ using Dalamud.Game.Chat;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using EventHorizon.Culling.Rules;
+using EventHorizon.Integration.Vfx;
 using EventHorizon.Preview;
 using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
@@ -33,10 +34,12 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         IPlayerState playerState,
         ICondition condition,
         IObjectTable objectTable,
-        ITargetManager targetManager
+        ITargetManager targetManager,
+        IGameGui gameGui,
+        StaticVfxController staticVfxController
     )
     {
-        objectCuller = new ObjectCuller(configuration, playerState, condition, objectTable, targetManager);
+        objectCuller = new ObjectCuller(configuration, playerState, condition, objectTable, targetManager, gameGui, staticVfxController);
         hook = gameInteropProvider.HookFromSignature<UpdateObjectArraysDelegate>(Signature, Detour);
     }
 

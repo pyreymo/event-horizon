@@ -2,5 +2,6 @@ namespace EventHorizon.Settings;
 
 internal enum TargetingMeMarkerVisualStyle
 {
-    AlertEye = 1,
+    GazeMarker = 1,
+    Vfx = 2,
 }

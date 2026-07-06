@@ -12,6 +12,7 @@ using EventHorizon.Culling.Hooks;
 using EventHorizon.Culling.Rules;
 using EventHorizon.Integration.Dtr;
 using EventHorizon.Integration.NamePlate;
+using EventHorizon.Integration.Vfx;
 using EventHorizon.Localization;
 using EventHorizon.Preview;
 using EventHorizon.Preview.UI;
@@ -39,6 +40,9 @@ public sealed class Plugin : IDalamudPlugin
 
     [PluginService]
     internal static IGameInteropProvider GameInteropProvider { get; private set; } = null!;
+
+    [PluginService]
+    internal static ISigScanner SigScanner { get; private set; } = null!;
 
     [PluginService]
     internal static IPlayerState PlayerState { get; private set; } = null!;
@@ -90,6 +94,9 @@ public sealed class Plugin : IDalamudPlugin
     private PlayerPreviewWindow PlayerPreviewWindow { get; init; }
     private UpdateObjectArraysHook UpdateObjectArraysHook { get; init; }
     private PlayerPreviewHighlighter PlayerPreviewHighlighter { get; init; }
+    private ActorVfxController ActorVfxController { get; init; }
+    private StaticVfxResourceRedirector StaticVfxResourceRedirector { get; init; }
+    private StaticVfxController StaticVfxController { get; init; }
     private DtrBarIntegration DtrBarIntegration { get; init; }
     private DtrBackgroundController DtrBackgroundController { get; init; }
     private NamePlateTargetingMeMarkerController NamePlateTargetingMeMarkerController { get; init; }
@@ -118,13 +125,18 @@ public sealed class Plugin : IDalamudPlugin
         ConfigWindow = new ConfigWindow(this, DataManager, playerPreviewPanel, IsPlayerPreviewWindowOpen, TogglePlayerPreviewWindow);
         PlayerPreviewWindow = new PlayerPreviewWindow(playerPreviewPanel, OpenMainUi);
         PlayerPreviewHighlighter = new PlayerPreviewHighlighter();
+        ActorVfxController = new ActorVfxController(GameInteropProvider, SigScanner, Log);
+        StaticVfxResourceRedirector = new StaticVfxResourceRedirector(PluginInterface, GameInteropProvider, Log);
+        StaticVfxController = new StaticVfxController(GameInteropProvider, SigScanner, Log);
         UpdateObjectArraysHook = new UpdateObjectArraysHook(
             GameInteropProvider,
             Configuration,
             PlayerState,
             Condition,
             ObjectTable,
-            TargetManager
+            TargetManager,
+            GameGui,
+            StaticVfxController
         );
         CharacterAlphaController = new CharacterAlphaController(ObjectTable);
         DtrBarIntegration = new DtrBarIntegration(DtrBar, Configuration, GetDtrBarState, SetPlayerHidingEnabled, ToggleConfigUi);
@@ -135,9 +147,11 @@ public sealed class Plugin : IDalamudPlugin
             NamePlateGui,
             ObjectTable,
             TargetManager,
+            Condition,
             Configuration,
             Framework,
             TextureProvider,
+            ActorVfxController,
             Log
         );
 
@@ -176,6 +190,9 @@ public sealed class Plugin : IDalamudPlugin
         NamePlateTargetingMeMarkerController.Dispose();
         CharacterAlphaController.Dispose();
         UpdateObjectArraysHook.Dispose();
+        StaticVfxController.Dispose();
+        StaticVfxResourceRedirector.Dispose();
+        ActorVfxController.Dispose();
 
         CommandManager.RemoveHandler(PrimaryCommandName);
         CommandManager.RemoveHandler(ShortCommandName);

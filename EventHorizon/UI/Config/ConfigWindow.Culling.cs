@@ -21,13 +21,12 @@ public partial class ConfigWindow
 
         var availableWidth = ImGui.GetContentRegionAvail().X;
         var splitterWidth = 8f;
-        var rightPaddingWidth = 12f;
         var minLeftWidth = 420f;
         var minRightWidth = 260f;
-        var maxLeftWidth = Math.Max(minLeftWidth, availableWidth - splitterWidth - rightPaddingWidth - minRightWidth);
+        var maxLeftWidth = Math.Max(minLeftWidth, availableWidth - splitterWidth - minRightWidth);
         cullingLeftColumnWidth = Math.Clamp(cullingLeftColumnWidth, minLeftWidth, maxLeftWidth);
 
-        if (!ImGui.BeginTable("###CullingContentColumns", 4, ImGuiTableFlags.SizingStretchProp))
+        if (!ImGui.BeginTable("###CullingContentColumns", 3, ImGuiTableFlags.SizingStretchProp))
         {
             return;
         }
@@ -35,7 +34,6 @@ public partial class ConfigWindow
         ImGui.TableSetupColumn("###CullingMainColumn", ImGuiTableColumnFlags.WidthFixed, cullingLeftColumnWidth);
         ImGui.TableSetupColumn("###CullingColumnSplitter", ImGuiTableColumnFlags.WidthFixed, splitterWidth);
         ImGui.TableSetupColumn("###CullingInfoColumn", ImGuiTableColumnFlags.WidthStretch);
-        ImGui.TableSetupColumn("###CullingRightPaddingColumn", ImGuiTableColumnFlags.WidthFixed, rightPaddingWidth);
         ImGui.TableNextRow();
         ImGui.TableNextColumn();
         var contentStartY = ImGui.GetCursorScreenPos().Y;
@@ -56,8 +54,6 @@ public partial class ConfigWindow
             Loc.Text("Config.Section.AttachedObjects"),
             () =>
             {
-                DrawHelpText(Loc.Text("Config.AttachedObjects.Help"));
-                ImGui.Spacing();
                 DrawOtherPlayerCompanionRule();
                 DrawOtherPlayerOrnamentRule();
             }
@@ -68,7 +64,6 @@ public partial class ConfigWindow
         ImGui.TableNextColumn();
         DrawRightPanel();
         var rightContentEndY = ImGui.GetCursorScreenPos().Y;
-        ImGui.TableNextColumn();
 
         var splitterHeight = Math.Max(160f, Math.Max(leftContentEndY, rightContentEndY) - contentStartY);
         ImGui.TableSetColumnIndex(1);
@@ -308,7 +303,7 @@ public partial class ConfigWindow
 
     private void DrawVisiblePlayerLimitRule()
     {
-        if (!ImGui.BeginTable("###VisiblePlayerLimitRule", 3, ImGuiTableFlags.SizingStretchProp))
+        if (!ImGui.BeginTable("###VisiblePlayerLimitRule", 2, ImGuiTableFlags.SizingStretchProp))
         {
             DrawVisiblePlayerLimitRuleFallback();
             return;
@@ -316,7 +311,6 @@ public partial class ConfigWindow
 
         ImGui.TableSetupColumn("###VisibleLimitEnabled", ImGuiTableColumnFlags.WidthFixed, 180f);
         ImGui.TableSetupColumn("###VisibleLimitSlider", ImGuiTableColumnFlags.WidthStretch);
-        ImGui.TableSetupColumn("###VisibleLimitPadding", ImGuiTableColumnFlags.WidthFixed, 12f);
         ImGui.TableNextRow();
 
         ImGui.TableNextColumn();
@@ -329,7 +323,6 @@ public partial class ConfigWindow
 
         ImGui.TableNextColumn();
         DrawVisiblePlayerLimitSlider(Math.Max(1f, ImGui.GetContentRegionAvail().X - 6f));
-        ImGui.TableNextColumn();
 
         ImGui.EndTable();
 

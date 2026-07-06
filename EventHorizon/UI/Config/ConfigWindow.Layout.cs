@@ -43,7 +43,7 @@ public partial class ConfigWindow
         }
 
         var actionWidth = headerActionWidth ?? 150f;
-        if (!ImGui.BeginTable($"###CardHeader{title}", 3, ImGuiTableFlags.SizingStretchProp))
+        if (!ImGui.BeginTable($"###CardHeader{title}", 2, ImGuiTableFlags.SizingStretchProp))
         {
             ImGui.TextUnformatted(title);
             ImGui.SameLine();
@@ -53,13 +53,11 @@ public partial class ConfigWindow
 
         ImGui.TableSetupColumn("###CardHeaderTitle", ImGuiTableColumnFlags.WidthStretch);
         ImGui.TableSetupColumn("###CardHeaderAction", ImGuiTableColumnFlags.WidthFixed, actionWidth);
-        ImGui.TableSetupColumn("###CardHeaderPadding", ImGuiTableColumnFlags.WidthFixed, 12f);
         ImGui.TableNextRow();
         ImGui.TableNextColumn();
         ImGui.TextUnformatted(title);
         ImGui.TableNextColumn();
         headerAction();
-        ImGui.TableNextColumn();
         ImGui.EndTable();
     }
 
@@ -67,9 +65,11 @@ public partial class ConfigWindow
     {
         var drawList = ImGui.GetWindowDrawList();
         var start = ImGui.GetCursorScreenPos();
-        var width = Math.Max(1f, ImGui.GetContentRegionAvail().X - 6f);
+
+        var cardWidth = Math.Max(1f, ImGui.GetContentRegionAvail().X - 6f);
         var padding = new Vector2(12f, 10f);
         var rightPadding = 18f;
+        var contentWidth = Math.Max(1f, cardWidth - padding.X - rightPadding);
 
         drawList.ChannelsSplit(2);
         drawList.ChannelsSetCurrent(1);
@@ -77,15 +77,35 @@ public partial class ConfigWindow
         ImGui.PushID(id);
         ImGui.SetCursorScreenPos(start + padding);
         ImGui.BeginGroup();
-        ImGui.PushTextWrapPos(start.X + width - rightPadding);
-        content();
-        ImGui.PopTextWrapPos();
+
+        if (
+            ImGui.BeginTable(
+                "##CardContent",
+                1,
+                ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.NoSavedSettings,
+                new Vector2(contentWidth, 0f)
+            )
+        )
+        {
+            ImGui.TableSetupColumn("##Content", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+
+            var contentRight = ImGui.GetCursorScreenPos().X + ImGui.GetContentRegionAvail().X;
+            ImGui.PushTextWrapPos(contentRight);
+            content();
+            ImGui.PopTextWrapPos();
+
+            ImGui.EndTable();
+        }
+
         ImGui.EndGroup();
         ImGui.PopID();
 
         var contentMax = ImGui.GetItemRectMax();
-        var height = Math.Max(ImGui.GetTextLineHeightWithSpacing() + (padding.Y * 2f), contentMax.Y - start.Y + padding.Y);
-        var end = new Vector2(start.X + width, start.Y + height);
+        var minimumHeight = ImGui.GetTextLineHeightWithSpacing() + (padding.Y * 2f);
+        var height = Math.Max(minimumHeight, contentMax.Y - start.Y + padding.Y);
+        var end = new Vector2(start.X + cardWidth, start.Y + height);
 
         drawList.ChannelsSetCurrent(0);
         drawList.AddRectFilled(start, end, ImGui.GetColorU32(ImGuiCol.ChildBg), 6f);
@@ -99,10 +119,13 @@ public partial class ConfigWindow
     {
         var drawList = ImGui.GetWindowDrawList();
         var start = ImGui.GetCursorScreenPos();
-        var width = Math.Max(1f, ImGui.GetContentRegionAvail().X - 18f);
-        var gapHeight = 9f;
+        var width = Math.Max(1f, ImGui.GetContentRegionAvail().X);
+
+        var gapHeight = Math.Max(1f, ImGui.GetStyle().ItemSpacing.Y);
         var y = start.Y + (gapHeight * 0.5f);
+
         drawList.AddLine(new Vector2(start.X, y), new Vector2(start.X + width, y), ImGui.GetColorU32(ImGuiCol.Separator));
+
         ImGui.Dummy(new Vector2(width, gapHeight));
     }
 

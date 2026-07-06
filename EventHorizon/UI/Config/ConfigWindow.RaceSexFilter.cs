@@ -14,21 +14,7 @@ public partial class ConfigWindow
         ImGui.Spacing();
         ImGui.Indent(66f);
 
-        if (!ImGui.BeginTable("###RaceSexFilterInline", 2, ImGuiTableFlags.SizingStretchProp))
-        {
-            DrawRaceFilterEditor();
-            ImGui.Unindent(66f);
-            ImGui.Spacing();
-            return;
-        }
-
-        ImGui.TableSetupColumn("###RaceSexFilterInlineContent", ImGuiTableColumnFlags.WidthStretch);
-        ImGui.TableSetupColumn("###RaceSexFilterInlinePadding", ImGuiTableColumnFlags.WidthFixed, 12f);
-        ImGui.TableNextRow();
-        ImGui.TableNextColumn();
         DrawRaceFilterEditor();
-        ImGui.TableNextColumn();
-        ImGui.EndTable();
 
         ImGui.Unindent(66f);
         ImGui.Spacing();
@@ -59,7 +45,7 @@ public partial class ConfigWindow
         if (
             !ImGui.BeginTable(
                 "###RaceSexFilterTable",
-                4,
+                3,
                 ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV
             )
         )
@@ -70,7 +56,6 @@ public partial class ConfigWindow
         ImGui.TableSetupColumn(Loc.Text("Config.RaceFilter.Race"));
         ImGui.TableSetupColumn(Loc.Text("Config.RaceFilter.Male"));
         ImGui.TableSetupColumn(Loc.Text("Config.RaceFilter.Female"));
-        ImGui.TableSetupColumn("###RaceFilterPadding", ImGuiTableColumnFlags.WidthFixed, 12f);
         ImGui.TableNextRow(ImGuiTableRowFlags.Headers);
         ImGui.TableNextColumn();
         ImGui.TextUnformatted(Loc.Text("Config.RaceFilter.Race"));
@@ -78,7 +63,6 @@ public partial class ConfigWindow
         DrawSexColumnHeader(RaceSexFilter.MaleSex, Loc.Text("Config.RaceFilter.Male"));
         ImGui.TableNextColumn();
         DrawSexColumnHeader(RaceSexFilter.FemaleSex, Loc.Text("Config.RaceFilter.Female"));
-        ImGui.TableNextColumn();
 
         for (var race = RaceSexFilter.MinRace; race <= RaceSexFilter.MaxRace; race++)
         {
@@ -88,7 +72,6 @@ public partial class ConfigWindow
 
             DrawRaceSexFilterCell(race, RaceSexFilter.MaleSex);
             DrawRaceSexFilterCell(race, RaceSexFilter.FemaleSex);
-            ImGui.TableNextColumn();
         }
 
         ImGui.EndTable();

@@ -16,7 +16,7 @@ public partial class ConfigWindow
     private void DrawKeepRules()
     {
         var tableMinX = ImGui.GetCursorScreenPos().X;
-        var tableMaxX = tableMinX + ImGui.GetContentRegionAvail().X - 12f;
+        var tableMaxX = tableMinX + ImGui.GetContentRegionAvail().X;
         var tableSegment = 0;
         var rules = PlayerKeepRuleOrder.GetEffectiveOrder(configuration);
         var tableOpen = true;
@@ -72,7 +72,7 @@ public partial class ConfigWindow
 
     private static bool BeginKeepRuleTable(int segment)
     {
-        if (!ImGui.BeginTable($"###KeepRuleOrderTable{segment}", 6, ImGuiTableFlags.SizingStretchProp))
+        if (!ImGui.BeginTable($"###KeepRuleOrderTable{segment}", 5, ImGuiTableFlags.SizingStretchProp))
         {
             return false;
         }
@@ -82,7 +82,6 @@ public partial class ConfigWindow
         ImGui.TableSetupColumn("###KeepRuleName", ImGuiTableColumnFlags.WidthStretch);
         ImGui.TableSetupColumn("###KeepRuleParameters", ImGuiTableColumnFlags.WidthFixed, 160f);
         ImGui.TableSetupColumn("###KeepRuleBudget", ImGuiTableColumnFlags.WidthFixed, 54f);
-        ImGui.TableSetupColumn("###KeepRulePadding", ImGuiTableColumnFlags.WidthFixed, 12f);
 
         return true;
     }
@@ -106,32 +105,32 @@ public partial class ConfigWindow
         var rowMin = new Vector2(rowMinX, rowY);
         var rowMax = new Vector2(rowMaxX, rowY + rowHeight);
         var rowHovered = IsMouseInRect(rowMin, rowMax);
-        DrawKeepRuleCellBackground(rowHovered);
+        var isDraggedRow = draggedKeepRule == rule;
+        var isDropTarget = draggedKeepRule.HasValue && draggedKeepRule.Value != rule && rowHovered;
+        DrawKeepRuleCellBackground(rowHovered, isDraggedRow, isDropTarget);
 
         CenterCursorYInRow(rowY, rowHeight, ImGui.GetFrameHeight());
         var handleState = DrawKeepRuleHandle(rule);
 
         ImGui.TableNextColumn();
-        DrawKeepRuleCellBackground(rowHovered);
+        DrawKeepRuleCellBackground(rowHovered, isDraggedRow, isDropTarget);
         CenterCursorYInRow(rowY, rowHeight, ImGui.GetFrameHeight());
         DrawKeepRuleEnabledCheckbox(rule);
 
         ImGui.TableNextColumn();
-        DrawKeepRuleCellBackground(rowHovered);
+        DrawKeepRuleCellBackground(rowHovered, isDraggedRow, isDropTarget);
         CenterCursorYInRow(rowY, rowHeight, ImGui.GetFrameHeight());
         DrawKeepRuleLabel(rule);
 
         ImGui.TableNextColumn();
-        DrawKeepRuleCellBackground(rowHovered);
+        DrawKeepRuleCellBackground(rowHovered, isDraggedRow, isDropTarget);
         CenterCursorYInRow(rowY, rowHeight, ImGui.GetFrameHeight());
         DrawKeepRuleParameters(rule);
 
         ImGui.TableNextColumn();
-        DrawKeepRuleCellBackground(rowHovered);
+        DrawKeepRuleCellBackground(rowHovered, isDraggedRow, isDropTarget);
         CenterCursorYInRow(rowY, rowHeight, ImGui.GetFrameHeight());
         DrawBudgetChip(rule);
-
-        ImGui.TableNextColumn();
 
         if (handleState.Active && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
         {
@@ -142,11 +141,32 @@ public partial class ConfigWindow
         {
             MoveKeepRuleTo(draggedKeepRule.Value, rule);
         }
+
+        DrawKeepRuleRowOutline(rowMin, rowMax, isDraggedRow, isDropTarget);
     }
 
-    private static void DrawKeepRuleCellBackground(bool hovered)
+    private static void DrawKeepRuleCellBackground(bool hovered, bool dragged, bool dropTarget)
     {
-        ImGui.TableSetBgColor(ImGuiTableBgTarget.CellBg, ImGui.GetColorU32(hovered ? ImGuiCol.HeaderHovered : ImGuiCol.TableRowBg));
+        var color =
+            dropTarget ? ImGuiCol.HeaderActive
+            : dragged ? ImGuiCol.ButtonActive
+            : hovered ? ImGuiCol.HeaderHovered
+            : ImGuiCol.TableRowBg;
+
+        ImGui.TableSetBgColor(ImGuiTableBgTarget.CellBg, ImGui.GetColorU32(color));
+    }
+
+    private static void DrawKeepRuleRowOutline(Vector2 min, Vector2 max, bool dragged, bool dropTarget)
+    {
+        if (!dragged && !dropTarget)
+        {
+            return;
+        }
+
+        var drawList = ImGui.GetWindowDrawList();
+        var color = ImGui.GetStyle().Colors[(int)(dropTarget ? ImGuiCol.Text : ImGuiCol.ButtonActive)];
+
+        drawList.AddRect(min, max, ImGui.GetColorU32(color), 4f, ImDrawFlags.None, dropTarget ? 2f : 1.5f);
     }
 
     private static bool IsMouseInRect(Vector2 min, Vector2 max)
@@ -162,15 +182,22 @@ public partial class ConfigWindow
 
         var hovered = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
         var active = ImGui.IsItemActive();
-        DrawHandleLines(ImGui.GetItemRectMin(), ImGui.GetItemRectMax(), hovered || active);
+        var min = ImGui.GetItemRectMin();
+        var max = ImGui.GetItemRectMax();
+        if (hovered || active)
+        {
+            ImGui.SetMouseCursor(active ? ImGuiMouseCursor.ResizeNs : ImGuiMouseCursor.Hand);
+        }
+
+        DrawHandleLines(min, max, hovered, active);
 
         return new ImGuiItemState(hovered, active);
     }
 
-    private static void DrawHandleLines(Vector2 min, Vector2 max, bool highlighted)
+    private static void DrawHandleLines(Vector2 min, Vector2 max, bool hovered, bool active)
     {
         var drawList = ImGui.GetWindowDrawList();
-        var color = ImGui.GetColorU32(highlighted ? ImGuiCol.Text : ImGuiCol.TextDisabled);
+        var color = ImGui.GetColorU32(hovered ? ImGuiCol.Text : ImGuiCol.TextDisabled);
         var width = 11f;
         var left = min.X + ((max.X - min.X - width) * 0.5f);
         var centerY = (min.Y + max.Y) * 0.5f;

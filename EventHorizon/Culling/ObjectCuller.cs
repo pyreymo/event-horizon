@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using Dalamud.Game.Chat;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin.Services;
 using EventHorizon.Culling.Rules;
 using EventHorizon.Culling.Visibility;
+using EventHorizon.Integration.Vfx;
 using EventHorizon.Preview;
 using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
@@ -15,10 +17,13 @@ internal sealed unsafe class ObjectCuller : IDisposable
 {
     private const VisibilityFlags PluginCustomProbe = (VisibilityFlags)0x1000;
     private const VisibilityFlags InvisibleFlag = PluginCustomProbe | VisibilityFlags.Nameplate | VisibilityFlags.Model;
+    private const string HiddenPlayerVfxPath = StaticVfxResourceRedirector.HiddenPlayerGroundMarkerPath;
 
     private readonly Configuration configuration;
     private readonly IPlayerState playerState;
     private readonly ICondition condition;
+    private readonly IGameGui gameGui;
+    private readonly StaticVfxController staticVfxController;
     private readonly PlayerKeepRules playerKeepRules;
     private readonly HiddenObjectTracker hiddenObjectTracker;
     private readonly ObjectFadeController fadeController;
@@ -32,12 +37,16 @@ internal sealed unsafe class ObjectCuller : IDisposable
         IPlayerState playerState,
         ICondition condition,
         IObjectTable objectTable,
-        ITargetManager targetManager
+        ITargetManager targetManager,
+        IGameGui gameGui,
+        StaticVfxController staticVfxController
     )
     {
         this.configuration = configuration;
         this.playerState = playerState;
         this.condition = condition;
+        this.gameGui = gameGui;
+        this.staticVfxController = staticVfxController;
         playerKeepRules = new(configuration, objectTable, targetManager);
         hiddenObjectTracker = new();
         fadeController = new(hiddenObjectTracker, InvisibleFlag);
@@ -157,6 +166,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
         PruneMissingHiddenObjects(manager);
         PruneMissingFades(manager);
+        UpdateHiddenPlayerVfx(manager);
         playerPreviewSnapshot = previewBuilder.Build();
     }
 
@@ -176,6 +186,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private void RestoreHiddenObjects(GameObjectManager* manager)
     {
         hiddenObjectTracker.RestoreAll(manager);
+        ClearHiddenPlayerVfx();
     }
 
     public void ClearRuleState()
@@ -289,6 +300,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
     {
         hiddenObjectTracker.Clear();
         fadeController.Clear();
+        ClearHiddenPlayerVfx();
         playerKeepRules.Clear();
         keepBudgetStats = default;
         playerPreviewSnapshot = PlayerPreviewSnapshot.Empty;
@@ -440,6 +452,58 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private bool IsHiddenByThisPlugin(GameObject* gameObject)
     {
         return hiddenObjectTracker.IsHidden(gameObject);
+    }
+
+    private void UpdateHiddenPlayerVfx(GameObjectManager* manager)
+    {
+        if (!configuration.EnableHiddenPlayerGroundMarker || manager == null)
+        {
+            ClearHiddenPlayerVfx();
+            return;
+        }
+
+        var hiddenPlayerAddresses = new List<nint>();
+        var visibleHiddenPlayerIds = new HashSet<ulong>();
+
+        hiddenObjectTracker.CollectHiddenPlayerAddresses(manager, hiddenPlayerAddresses);
+
+        foreach (var address in hiddenPlayerAddresses)
+        {
+            var gameObject = (GameObject*)address;
+            if (!TryGetScreenVisiblePosition(gameObject, out var position))
+            {
+                continue;
+            }
+
+            var gameObjectId = (ulong)gameObject->GetGameObjectId();
+            visibleHiddenPlayerIds.Add(gameObjectId);
+            staticVfxController.ShowOrUpdate(gameObjectId, HiddenPlayerVfxPath, position, gameObject->Rotation);
+        }
+
+        staticVfxController.PruneExcept(visibleHiddenPlayerIds);
+    }
+
+    private bool TryGetScreenVisiblePosition(GameObject* gameObject, out Vector3 screenVisiblePosition)
+    {
+        screenVisiblePosition = default;
+        if (gameObject == null || gameObject->VirtualTable == null)
+        {
+            return false;
+        }
+
+        var position = gameObject->GetPosition();
+        if (position == null)
+        {
+            return false;
+        }
+
+        screenVisiblePosition = (Vector3)(*position);
+        return gameGui.WorldToScreen(screenVisiblePosition, out _, out var inView) && inView;
+    }
+
+    private void ClearHiddenPlayerVfx()
+    {
+        staticVfxController.Clear();
     }
 
     public int GetHiddenPlayerCount() => hiddenObjectTracker.HiddenPlayerCount;

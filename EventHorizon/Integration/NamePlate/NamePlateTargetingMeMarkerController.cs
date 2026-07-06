@@ -2,10 +2,12 @@ using System;
 using System.Collections.Generic;
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
+using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.Gui.NamePlate;
 using Dalamud.Plugin.Services;
 using EventHorizon.Integration.NativeUi;
+using EventHorizon.Integration.Vfx;
 using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Client.Graphics;
 using FFXIVClientStructs.FFXIV.Client.UI;
@@ -18,15 +20,16 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
     private const string NamePlateAddonName = "NamePlate";
     private const int NamePlateSlotCount = 50;
     private const uint MarkerNodeIdBase = 930000;
+    private const string TargetingMeVfxPath = "vfx/common/eff/m0904_stlppos01_0a1.avfx";
 
     // Marker-specific data belongs here. To add another embedded PNG:
     // 1. include it as an EmbeddedResource, 2. add another definition,
     // 3. create one EmbeddedMarkerTextureResources instance and select it.
     // Do not duplicate the loading or unmanaged-resource lifecycle code.
-    private static readonly MarkerAssetDefinition AlertEyeMarker = new(
-        name: "Alert Eye",
-        resourceSuffix: ".Assets.alert-eye.png",
-        debugName: "EventHorizon alert-eye.png",
+    private static readonly MarkerAssetDefinition GazeMarker = new(
+        name: "Gaze Marker",
+        resourceSuffix: ".Assets.gaze-marker.png",
+        debugName: "EventHorizon gaze-marker.png",
         partsListId: MarkerNodeIdBase + 10_000,
         glowPartId: 0,
         outlinePartId: 1,
@@ -40,10 +43,12 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
     private readonly INamePlateGui namePlateGui;
     private readonly IObjectTable objectTable;
     private readonly ITargetManager targetManager;
+    private readonly ICondition condition;
     private readonly Configuration configuration;
     private readonly IFramework framework;
     private readonly NamePlateMarkerSlot[] slots = new NamePlateMarkerSlot[NamePlateSlotCount];
     private readonly EmbeddedMarkerTextureResources markerResources;
+    private readonly ActorVfxController actorVfxController;
 
     private TargetingMeMarkerStyle appliedStyle;
     private int styleRevision;
@@ -57,9 +62,11 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
         INamePlateGui namePlateGui,
         IObjectTable objectTable,
         ITargetManager targetManager,
+        ICondition condition,
         Configuration configuration,
         IFramework framework,
         ITextureProvider textureProvider,
+        ActorVfxController actorVfxController,
         IPluginLog log
     )
     {
@@ -68,9 +75,11 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
         this.namePlateGui = namePlateGui;
         this.objectTable = objectTable;
         this.targetManager = targetManager;
+        this.condition = condition;
         this.configuration = configuration;
         this.framework = framework;
-        markerResources = new EmbeddedMarkerTextureResources(textureProvider, log, AlertEyeMarker);
+        this.actorVfxController = actorVfxController;
+        markerResources = new EmbeddedMarkerTextureResources(textureProvider, log, GazeMarker);
 
         for (var index = 0; index < slots.Length; index++)
         {
@@ -107,6 +116,7 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
         addonLifecycle.UnregisterListener(AddonEvent.PreFinalize, NamePlateAddonName, OnNamePlatePreFinalize);
 
         RemoveAllMarkerNodes();
+        actorVfxController.ClearScope(ActorVfxScope.TargetingMeMarker);
         ReleaseMarkerResources();
     }
 
@@ -121,6 +131,11 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
         {
             refreshPending = false;
             RefreshOnFrameworkThread();
+        }
+
+        if (ShouldSuppressTargetingMeVfx() || ShouldClearTargetingMeVfx())
+        {
+            actorVfxController.ClearScope(ActorVfxScope.TargetingMeMarker);
         }
 
         markerResources.UpdateLoadState();
@@ -143,13 +158,16 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
         }
 
         RefreshStyleRevision();
-        if (!configuration.EnableTargetingMeMarker)
+        if (!ShouldUseNamePlateMarker())
         {
             RemoveAllMarkerNodes();
             ReleaseMarkerResources();
+            ClearTargetingMeVfxIfDisabled();
             namePlateGui.RequestRedraw();
             return;
         }
+
+        ClearTargetingMeVfxIfDisabled();
 
         var addonPointer = gameGui.GetAddonByName(NamePlateAddonName);
         if (addonPointer != nint.Zero)
@@ -173,6 +191,7 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
         if (!disposed)
         {
             RemoveMarkerNodes((AddonNamePlate*)args.Addon.Address);
+            actorVfxController.ClearScope(ActorVfxScope.TargetingMeMarker);
         }
     }
 
@@ -186,11 +205,33 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
         if (!configuration.EnableTargetingMeMarker)
         {
             HideAllMarkers();
+            actorVfxController.ClearScope(ActorVfxScope.TargetingMeMarker);
             return;
         }
 
         RefreshStyleRevision();
+        if (ShouldUseNamePlateMarker())
+        {
+            UpdateTargetingMeNamePlateMarkers(handlers);
+        }
+        else
+        {
+            RemoveAllMarkerNodes();
+            ReleaseMarkerResources();
+        }
 
+        if (ShouldUseTargetingMeVfx())
+        {
+            UpdateTargetingMeVfx(handlers);
+        }
+        else
+        {
+            actorVfxController.ClearScope(ActorVfxScope.TargetingMeMarker);
+        }
+    }
+
+    private void UpdateTargetingMeNamePlateMarkers(IReadOnlyList<INamePlateUpdateHandler> handlers)
+    {
         var addonPointer = gameGui.GetAddonByName(NamePlateAddonName);
         var addon = addonPointer == nint.Zero ? null : (AddonNamePlate*)addonPointer.Address;
         if (addon == null || !EnsureMarkers(addon))
@@ -241,6 +282,35 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
         {
             slots[index].HideIfUnseen(textureReady);
         }
+    }
+
+    private void UpdateTargetingMeVfx(IReadOnlyList<INamePlateUpdateHandler> handlers)
+    {
+        if (objectTable.LocalPlayer is null)
+        {
+            actorVfxController.ClearScope(ActorVfxScope.TargetingMeMarker);
+            return;
+        }
+
+        if (ShouldSuppressTargetingMeVfx())
+        {
+            actorVfxController.ClearScope(ActorVfxScope.TargetingMeMarker);
+            return;
+        }
+
+        var activePlayerIds = new HashSet<ulong>();
+        foreach (var handler in handlers)
+        {
+            var player = handler.PlayerCharacter;
+            if (player is not null && IsTargetingLocalPlayer(player))
+            {
+                var gameObjectId = player.GameObjectId;
+                activePlayerIds.Add(gameObjectId);
+                actorVfxController.Show(ActorVfxScope.TargetingMeMarker, gameObjectId, player.Address, TargetingMeVfxPath);
+            }
+        }
+
+        actorVfxController.PruneScopeExcept(ActorVfxScope.TargetingMeMarker, activePlayerIds);
     }
 
     private bool IsTargetingLocalPlayer(IPlayerCharacter? player)
@@ -302,6 +372,36 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
             appliedStyle = style;
             styleRevision++;
             lastTextureReady = false;
+        }
+    }
+
+    private bool ShouldUseNamePlateMarker()
+    {
+        return configuration.EnableTargetingMeMarker && configuration.EnableTargetingMeNamePlateMarker;
+    }
+
+    private bool ShouldUseTargetingMeVfx()
+    {
+        return configuration.EnableTargetingMeMarker && configuration.EnableTargetingMeVfxMarker;
+    }
+
+    private bool ShouldSuppressTargetingMeVfx()
+    {
+        return ShouldUseTargetingMeVfx()
+            && configuration.DisableTargetingMeMarkerVfxInDuty
+            && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]);
+    }
+
+    private bool ShouldClearTargetingMeVfx()
+    {
+        return ShouldUseTargetingMeVfx() && (objectTable.LocalPlayer is null || gameGui.GetAddonByName(NamePlateAddonName) == nint.Zero);
+    }
+
+    private void ClearTargetingMeVfxIfDisabled()
+    {
+        if (!ShouldUseTargetingMeVfx())
+        {
+            actorVfxController.ClearScope(ActorVfxScope.TargetingMeMarker);
         }
     }
 

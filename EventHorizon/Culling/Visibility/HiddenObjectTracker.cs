@@ -107,6 +107,28 @@ internal sealed unsafe class HiddenObjectTracker
         return gameObject != null && hiddenObjects.TryGetValue((nint)gameObject, out var record) && record.IsSameObject(gameObject);
     }
 
+    public void CollectHiddenPlayerAddresses(GameObjectManager* manager, List<nint> addresses)
+    {
+        if (manager == null)
+        {
+            return;
+        }
+
+        foreach (var (address, record) in hiddenObjects)
+        {
+            if (record.ObjectKind != ObjectKind.Pc)
+            {
+                continue;
+            }
+
+            var gameObject = FindObject(manager, address, record);
+            if (gameObject != null)
+            {
+                addresses.Add((nint)gameObject);
+            }
+        }
+    }
+
     private static GameObject* FindObject(GameObjectManager* manager, nint address, HiddenObjectRecord record)
     {
         if (manager == null || address == nint.Zero)
