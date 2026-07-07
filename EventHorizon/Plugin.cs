@@ -30,7 +30,6 @@ public sealed class Plugin : IDalamudPlugin
     private const string ShortCommandName = "/eh";
     private const int DynamicCullingRefreshIntervalMs = 200;
     private const int DtrBarRefreshIntervalMs = 1_000;
-    private const int PlayerPreviewActiveLeaseMs = 500;
     private const double SlowFrameworkUpdateLogThresholdMs = 2.0;
     private const int SlowFrameworkUpdateLogCooldownMs = 1_000;
 
@@ -110,7 +109,6 @@ public sealed class Plugin : IDalamudPlugin
     private long nextDynamicCullingRefresh;
     private long nextDtrBarRefresh;
     private long nextSlowFrameworkUpdateLog;
-    private long playerPreviewActiveUntil;
     public int HiddenPlayerCount => UpdateObjectArraysHook.HiddenPlayerCount;
     internal PlayerKeepBudgetStats KeepBudgetStats => UpdateObjectArraysHook.KeepBudgetStats;
     internal PlayerPreviewSnapshot PlayerPreviewSnapshot => UpdateObjectArraysHook.PlayerPreviewSnapshot;
@@ -346,11 +344,6 @@ public sealed class Plugin : IDalamudPlugin
         return UpdateObjectArraysHook.NeedsDynamicRefresh;
     }
 
-    private bool IsPlayerPreviewActive()
-    {
-        return Environment.TickCount64 <= playerPreviewActiveUntil;
-    }
-
     private void LogSlowFrameworkUpdate(
         long start,
         long dtrTicks,
@@ -397,18 +390,35 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         return string.Format(
-            "total={0:F3} guard={1:F3} keep={2:F3} plan={3:F3} reconcile={4:F3} preview={5:F3} actions={6} pendingShow={7} pendingHide={8} previewActive={9} tick[{10}]",
+            "total={0:F3} guard={1:F3} keep={2:F3} plan={3:F3} reconcile={4:F3} preview={5:F3} previewTrace[{6}] actions={7} pendingShow={8} pendingHide={9} previewActive={10} tick[{11}]",
             ToMilliseconds(trace.TotalTicks),
             ToMilliseconds(trace.GuardTicks),
             ToMilliseconds(trace.KeepPlanTicks),
             ToMilliseconds(trace.VisibilityPlanTicks),
             ToMilliseconds(trace.ReconcileTicks),
             ToMilliseconds(trace.PreviewTicks),
+            FormatPreviewTrace(trace.Preview),
             trace.ActionCount,
             trace.PendingShowCount,
             trace.PendingHideCount,
             trace.RefreshPlayerPreview,
             FormatTickTrace(trace.Tick)
+        );
+    }
+
+    private static string FormatPreviewTrace(CullingPreviewPerformanceTrace trace)
+    {
+        if (!trace.HasValue)
+        {
+            return "n/a";
+        }
+
+        return string.Format(
+            "begin={0:F3} add={1:F3} build={2:F3} entries={3}",
+            ToMilliseconds(trace.BeginTicks),
+            ToMilliseconds(trace.AddTicks),
+            ToMilliseconds(trace.BuildTicks),
+            trace.EntryCount
         );
     }
 
@@ -423,15 +433,41 @@ public sealed class Plugin : IDalamudPlugin
             trace.PlayerActionsTicks + trace.NonPlayerTicks + trace.PruneHiddenTicks + trace.PruneFadesTicks + trace.HiddenVfxTicks;
         var unaccountedTicks = Math.Max(0, trace.TotalTicks - accountedTicks);
         return string.Format(
-            "total={0:F3} playerActions={1:F3} nonPlayer={2:F3} pruneHidden={3:F3} pruneFades={4:F3} hiddenVfx={5:F3} unaccounted={6:F3} actions={7}",
+            "total={0:F3} playerActions={1:F3} nonPlayer={2:F3} pruneHidden={3:F3} pruneFades={4:F3} hiddenVfx={5:F3} hiddenVfxTrace[{6}] unaccounted={7:F3} actions={8}",
             ToMilliseconds(trace.TotalTicks),
             ToMilliseconds(trace.PlayerActionsTicks),
             ToMilliseconds(trace.NonPlayerTicks),
             ToMilliseconds(trace.PruneHiddenTicks),
             ToMilliseconds(trace.PruneFadesTicks),
             ToMilliseconds(trace.HiddenVfxTicks),
+            FormatHiddenVfxTrace(trace.HiddenVfx),
             ToMilliseconds(unaccountedTicks),
             trace.ActionCount
+        );
+    }
+
+    private static string FormatHiddenVfxTrace(CullingHiddenVfxPerformanceTrace trace)
+    {
+        if (!trace.HasValue)
+        {
+            return "n/a";
+        }
+
+        return string.Format(
+            "collect={0:F3} project={1:F3} show={2:F3} prune={3:F3} clear={4:F3} hidden={5} visible={6} active={7} created={8} updated={9} skipped={10} removed={11} deferred={12}",
+            ToMilliseconds(trace.CollectTicks),
+            ToMilliseconds(trace.ProjectTicks),
+            ToMilliseconds(trace.ShowTicks),
+            ToMilliseconds(trace.PruneTicks),
+            ToMilliseconds(trace.ClearTicks),
+            trace.HiddenCount,
+            trace.VisibleCount,
+            trace.ActiveCount,
+            trace.ShowCreatedCount,
+            trace.ShowUpdatedCount,
+            trace.ShowSkippedCount,
+            trace.ShowRemovedCount,
+            trace.ShowDeferredCount
         );
     }
 
@@ -442,17 +478,12 @@ public sealed class Plugin : IDalamudPlugin
 
     public void RefreshObjectCulling(bool resetRuleState = false)
     {
-        UpdateObjectArraysHook.Refresh(resetRuleState, IsPlayerPreviewActive());
+        UpdateObjectArraysHook.Refresh(resetRuleState);
     }
 
     internal void RefreshPlayerPreview()
     {
         UpdateObjectArraysHook.RefreshPlayerPreview();
-    }
-
-    internal void MarkPlayerPreviewActive()
-    {
-        playerPreviewActiveUntil = Environment.TickCount64 + PlayerPreviewActiveLeaseMs;
     }
 
     internal void SetPreviewSelectedPlayer(uint? entityId)

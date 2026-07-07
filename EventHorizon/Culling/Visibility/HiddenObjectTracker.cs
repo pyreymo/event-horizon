@@ -101,6 +101,12 @@ internal sealed unsafe class HiddenObjectTracker
         {
             if (!record.IsLiveAtRecordedIndex(manager, address))
             {
+                var movedObject = FindLiveObjectByAddress(manager, address, record);
+                if (movedObject != null)
+                {
+                    movedObject->RenderFlags &= ~record.AddedFlags;
+                }
+
                 staleAddresses.Add(address);
             }
         }
@@ -135,15 +141,14 @@ internal sealed unsafe class HiddenObjectTracker
             return;
         }
 
-        for (var i = 0; i < manager->Objects.IndexSorted.Length; i++)
+        foreach (var (address, record) in hiddenObjects)
         {
-            var gameObject = manager->Objects.IndexSorted[i].Value;
-            if (!TryGetLiveRecord(gameObject, out var record) || record.ObjectKind != ObjectKind.Pc)
+            if (record.ObjectKind != ObjectKind.Pc || !record.IsLiveAtRecordedIndex(manager, address))
             {
                 continue;
             }
 
-            addresses.Add((nint)gameObject);
+            addresses.Add(address);
         }
     }
 
@@ -156,6 +161,25 @@ internal sealed unsafe class HiddenObjectTracker
         }
 
         return hiddenObjects.TryGetValue((nint)gameObject, out record) && record.IsSameObject(gameObject);
+    }
+
+    private static GameObject* FindLiveObjectByAddress(GameObjectManager* manager, nint address, HiddenObjectRecord record)
+    {
+        if (manager == null || address == nint.Zero)
+        {
+            return null;
+        }
+
+        for (var i = 0; i < manager->Objects.IndexSorted.Length; i++)
+        {
+            var gameObject = manager->Objects.IndexSorted[i].Value;
+            if ((nint)gameObject == address && record.IsSameObject(gameObject))
+            {
+                return gameObject;
+            }
+        }
+
+        return null;
     }
 
     private readonly record struct HiddenObjectRecord(

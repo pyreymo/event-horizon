@@ -206,13 +206,16 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
         }
 
         nextSlowFrameworkUpdateLog = now + SlowFrameworkUpdateLogCooldownMs;
+        var accountedTicks = refreshTicks + vfxClearTicks + textureLoadTicks + textureReadyTicks;
+        var unaccountedTicks = Math.Max(0, totalTicks - accountedTicks);
         log.Information(
-            "[Perf] Slow NamePlateTargetingMeMarkerController.OnFrameworkUpdate total={TotalMs:F3}ms refresh={RefreshMs:F3}ms vfxClear={VfxClearMs:F3}ms textureLoad={TextureLoadMs:F3}ms textureReady={TextureReadyMs:F3}ms refreshPending={RefreshPending} textureChanged={TextureChanged} markerEnabled={MarkerEnabled} namePlate={NamePlateEnabled} vfx={VfxEnabled}",
+            "[Perf] Slow NamePlateTargetingMeMarkerController.OnFrameworkUpdate total={TotalMs:F3}ms refresh={RefreshMs:F3}ms vfxClear={VfxClearMs:F3}ms textureLoad={TextureLoadMs:F3}ms textureReady={TextureReadyMs:F3}ms unaccounted={UnaccountedMs:F3}ms refreshPending={RefreshPending} textureChanged={TextureChanged} markerEnabled={MarkerEnabled} namePlate={NamePlateEnabled} vfx={VfxEnabled}",
             ToMilliseconds(totalTicks),
             ToMilliseconds(refreshTicks),
             ToMilliseconds(vfxClearTicks),
             ToMilliseconds(textureLoadTicks),
             ToMilliseconds(textureReadyTicks),
+            ToMilliseconds(unaccountedTicks),
             wasRefreshPending,
             textureChanged,
             configuration.EnableTargetingMeMarker,

@@ -42,7 +42,16 @@ internal sealed unsafe class PlayerPreviewBuilder
         );
     }
 
-    public void Add(GameObject* gameObject, int objectIndex, PlayerKeepDecision keepDecision, bool shouldHide, bool cutByBudget)
+    public int Count => players.Count;
+
+    public void Add(
+        GameObject* gameObject,
+        int objectIndex,
+        string name,
+        PlayerKeepDecision keepDecision,
+        bool shouldHide,
+        bool cutByBudget
+    )
     {
         if (gameObject == null)
         {
@@ -64,7 +73,7 @@ internal sealed unsafe class PlayerPreviewBuilder
             new PlayerPreviewEntry(
                 gameObject->EntityId,
                 objectIndex,
-                GetObjectName(gameObject),
+                name,
                 relativeXz,
                 distance,
                 !shouldHide,
@@ -136,7 +145,7 @@ internal sealed unsafe class PlayerPreviewBuilder
         return (relativeXz, relativeXz.Length());
     }
 
-    private static string GetObjectName(GameObject* gameObject)
+    public static string GetObjectName(GameObject* gameObject)
     {
         var bytes = new ReadOnlySpan<byte>(
             (byte*)gameObject + PlayerPreviewConstants.GameObjectNameOffset,

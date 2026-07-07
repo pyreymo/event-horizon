@@ -17,8 +17,8 @@ namespace EventHorizon.Culling;
 internal sealed unsafe class ObjectCuller : IDisposable
 {
     private const int MaxMaintainedPlayerActionsPerFrame = 24;
-    private const int HiddenPlayerVfxUpdatesPerFrame = 4;
-    private const int HiddenPlayerVfxPruneIntervalMs = 500;
+    private const int MaxHiddenPlayerVfxCreatesPerFrame = 8;
+    private const int MaxPlayerRelatedObjectIndex = 199;
     private const VisibilityFlags PluginCustomProbe = (VisibilityFlags)0x1000;
     private const VisibilityFlags InvisibleFlag = PluginCustomProbe | VisibilityFlags.Nameplate | VisibilityFlags.Model;
     private const string HiddenPlayerVfxPath = StaticVfxResourceRedirector.HiddenPlayerGroundMarkerPath;
@@ -36,16 +36,17 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly PlayerVisibilityReconciler playerVisibilityReconciler = new();
     private readonly ShowTransitionBudget showTransitionBudget = new();
     private readonly List<PlayerVisibilityIntent> playerVisibilityIntents = [];
+    private readonly Dictionary<ulong, string> playerPreviewNames = [];
     private readonly List<nint> hiddenPlayerVfxAddresses = [];
-    private readonly HashSet<ulong> currentHiddenPlayerVfxIds = [];
+    private readonly List<HiddenPlayerVfxCandidate> hiddenPlayerVfxCandidates = [];
+    private readonly HashSet<ulong> liveHiddenPlayerVfxIds = [];
+    private readonly HashSet<uint> hiddenPlayerOwnerEntityIds = [];
     private PlayerKeepBudgetStats keepBudgetStats;
     private PlayerPreviewSnapshot playerPreviewSnapshot = PlayerPreviewSnapshot.Empty;
     private uint? previewSelectedPlayerEntityId;
     private long previewSelectionExpiresAt;
-    private long nextHiddenPlayerVfxPrune;
     private int nextPlayerVisibilityPlanRevision;
     private int nextMaintainedVisibilityActionIndex;
-    private int nextHiddenPlayerVfxIndex;
     private PlayerVisibilityPlan? latestPlayerVisibilityPlan;
     private PlayerVisibilityReconciliation? latestPlayerVisibilityReconciliation;
 
@@ -195,13 +196,24 @@ internal sealed unsafe class ObjectCuller : IDisposable
         latestPlayerVisibilityReconciliation = playerVisibilityReconciliation;
         var reconcileTicks = Stopwatch.GetTimestamp() - phaseStart;
 
-        phaseStart = Stopwatch.GetTimestamp();
-        var previewBuilder = refreshPlayerPreview ? PlayerPreviewBuilder.Begin(manager, configuration) : null;
+        long previewBeginTicks = 0;
+        long previewAddTicks = 0;
+        long previewBuildTicks = 0;
+        var previewBuilder = default(PlayerPreviewBuilder);
+        if (refreshPlayerPreview)
+        {
+            phaseStart = Stopwatch.GetTimestamp();
+            previewBuilder = PlayerPreviewBuilder.Begin(manager, configuration);
+            previewBeginTicks = Stopwatch.GetTimestamp() - phaseStart;
+        }
+
         if (previewBuilder != null)
         {
+            phaseStart = Stopwatch.GetTimestamp();
             AddPlayerPreviewEntries(manager, playerVisibilityPlan, previewBuilder);
+            previewAddTicks = Stopwatch.GetTimestamp() - phaseStart;
         }
-        var previewTicks = Stopwatch.GetTimestamp() - phaseStart;
+        var previewTicks = previewBeginTicks + previewAddTicks;
 
         TickVisibility(manager);
         var tickTrace = LastTickTrace.Tick;
@@ -209,7 +221,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
         {
             phaseStart = Stopwatch.GetTimestamp();
             playerPreviewSnapshot = previewBuilder.Build();
-            previewTicks += Stopwatch.GetTimestamp() - phaseStart;
+            previewBuildTicks = Stopwatch.GetTimestamp() - phaseStart;
+            previewTicks += previewBuildTicks;
         }
 
         LastUpdateTrace = new CullingPerformanceTrace(
@@ -224,7 +237,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
             VisibilityPlanTicks: visibilityPlanTicks,
             ReconcileTicks: reconcileTicks,
             PreviewTicks: previewTicks,
-            Tick: tickTrace
+            Tick: tickTrace,
+            Preview: new CullingPreviewPerformanceTrace(previewBuilder?.Count ?? 0, previewBeginTicks, previewAddTicks, previewBuildTicks)
         );
     }
 
@@ -515,7 +529,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         PruneMissingFades(manager);
         var pruneFadesTicks = Stopwatch.GetTimestamp() - phaseStart;
         phaseStart = Stopwatch.GetTimestamp();
-        UpdateHiddenPlayerVfx(manager);
+        var hiddenVfxTrace = UpdateHiddenPlayerVfx(manager);
         var hiddenVfxTicks = Stopwatch.GetTimestamp() - phaseStart;
         LastTickTrace = new CullingPerformanceTrace(
             IsRefresh: false,
@@ -536,14 +550,18 @@ internal sealed unsafe class ObjectCuller : IDisposable
                 nonPlayerTicks,
                 pruneHiddenTicks,
                 pruneFadesTicks,
-                hiddenVfxTicks
+                hiddenVfxTicks,
+                hiddenVfxTrace
             )
         );
     }
 
     private void ApplyNonPlayerVisibility(GameObjectManager* manager)
     {
-        for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
+        CollectHiddenPlayerOwnerEntityIds(manager);
+
+        var maxIndex = Math.Min(MaxPlayerRelatedObjectIndex, manager->Objects.IndexSorted.Length - 1);
+        for (var index = 0; index <= maxIndex; index++)
         {
             var gameObject = manager->Objects.IndexSorted[index].Value;
             if (gameObject == null || gameObject->ObjectKind == ObjectKind.Pc)
@@ -551,13 +569,34 @@ internal sealed unsafe class ObjectCuller : IDisposable
                 continue;
             }
 
-            if (ShouldHideNonPlayerSlotObject(manager, gameObject, index))
+            if (ShouldHideNonPlayerSlotObject(gameObject, index))
             {
                 Hide(gameObject, index);
             }
             else
             {
                 RestoreIfHidden(gameObject);
+            }
+        }
+
+        hiddenPlayerOwnerEntityIds.Clear();
+    }
+
+    private void CollectHiddenPlayerOwnerEntityIds(GameObjectManager* manager)
+    {
+        hiddenPlayerOwnerEntityIds.Clear();
+        var maxIndex = Math.Min(MaxPlayerRelatedObjectIndex, manager->Objects.IndexSorted.Length - 1);
+        for (var index = 0; index <= maxIndex; index++)
+        {
+            if (!IsPlayerRelatedEvenSlot(index))
+            {
+                continue;
+            }
+
+            var gameObject = manager->Objects.IndexSorted[index].Value;
+            if (gameObject != null && gameObject->ObjectKind == ObjectKind.Pc && hiddenObjectTracker.IsHidden(gameObject))
+            {
+                hiddenPlayerOwnerEntityIds.Add(gameObject->EntityId);
             }
         }
     }
@@ -643,7 +682,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         }
     }
 
-    private static void AddPlayerPreviewEntries(
+    private void AddPlayerPreviewEntries(
         GameObjectManager* manager,
         PlayerVisibilityPlan playerVisibilityPlan,
         PlayerPreviewBuilder previewBuilder
@@ -659,9 +698,38 @@ internal sealed unsafe class ObjectCuller : IDisposable
             var gameObject = FindPlayerObject(manager, intent.Identity, intent.ObjectIndex);
             if (gameObject != null)
             {
-                previewBuilder.Add(gameObject, intent.ObjectIndex, intent.Decision, !intent.DesiredVisible, intent.CutByBudget);
+                previewBuilder.Add(
+                    gameObject,
+                    intent.ObjectIndex,
+                    GetCachedPlayerPreviewName(gameObject),
+                    intent.Decision,
+                    !intent.DesiredVisible,
+                    intent.CutByBudget
+                );
             }
         }
+    }
+
+    private string GetCachedPlayerPreviewName(GameObject* gameObject)
+    {
+        var gameObjectId = (ulong)gameObject->GetGameObjectId();
+        if (gameObjectId != 0 && playerPreviewNames.TryGetValue(gameObjectId, out var name))
+        {
+            return name;
+        }
+
+        name = PlayerPreviewBuilder.GetObjectName(gameObject);
+        if (gameObjectId != 0 && !IsFallbackPreviewName(name))
+        {
+            playerPreviewNames[gameObjectId] = name;
+        }
+
+        return name;
+    }
+
+    private static bool IsFallbackPreviewName(string name)
+    {
+        return name.Length == 9 && name[0] == '#';
     }
 
     private bool UpdateFade(GameObject* gameObject, bool shouldHide, int objectIndex)
@@ -696,13 +764,12 @@ internal sealed unsafe class ObjectCuller : IDisposable
         showTransitionBudget.Reset();
         ClearHiddenPlayerVfx();
         playerKeepRules.Clear();
+        playerPreviewNames.Clear();
         keepBudgetStats = default;
         playerPreviewSnapshot = PlayerPreviewSnapshot.Empty;
         previewSelectedPlayerEntityId = null;
         previewSelectionExpiresAt = 0;
         nextMaintainedVisibilityActionIndex = 0;
-        nextHiddenPlayerVfxIndex = 0;
-        nextHiddenPlayerVfxPrune = 0;
         latestPlayerVisibilityPlan = null;
         latestPlayerVisibilityReconciliation = null;
     }
@@ -727,7 +794,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         return configuration.DisableInDuty && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]);
     }
 
-    private bool ShouldHideNonPlayerSlotObject(GameObjectManager* manager, GameObject* gameObject, int index)
+    private bool ShouldHideNonPlayerSlotObject(GameObject* gameObject, int index)
     {
         if (IsLocalPlayerReservedSlot(index))
         {
@@ -736,13 +803,9 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
         if (IsPlayerRelatedEvenSlot(index))
         {
-            if (gameObject->ObjectKind != ObjectKind.BattleNpc)
-            {
-                return false;
-            }
-
-            var owner = FindPlayerOwner(manager, gameObject);
-            return owner != null && IsHiddenByThisPlugin(owner);
+            return gameObject->ObjectKind == ObjectKind.BattleNpc
+                && gameObject->OwnerId != 0
+                && hiddenPlayerOwnerEntityIds.Contains(gameObject->OwnerId);
         }
 
         if (IsPlayerRelatedOddSlot(index))
@@ -806,37 +869,13 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
     #region Object Helpers
 
-    private static bool IsPlayerRelatedSlot(int index) => index is >= 0 and <= 199;
+    private static bool IsPlayerRelatedSlot(int index) => index is >= 0 && index <= MaxPlayerRelatedObjectIndex;
 
     private static bool IsPlayerRelatedEvenSlot(int index) => IsPlayerRelatedSlot(index) && index % 2 == 0;
 
     private static bool IsPlayerRelatedOddSlot(int index) => IsPlayerRelatedSlot(index) && index % 2 == 1;
 
     private static bool IsLocalPlayerReservedSlot(int index) => index is 0 or 1;
-
-    private static GameObject* FindPlayerOwner(GameObjectManager* manager, GameObject* gameObject)
-    {
-        if (manager == null || gameObject == null || gameObject->OwnerId == 0)
-        {
-            return null;
-        }
-
-        for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
-        {
-            if (!IsPlayerRelatedEvenSlot(index))
-            {
-                continue;
-            }
-
-            var owner = manager->Objects.IndexSorted[index].Value;
-            if (owner != null && owner->ObjectKind == ObjectKind.Pc && owner->EntityId == gameObject->OwnerId)
-            {
-                return owner;
-            }
-        }
-
-        return null;
-    }
 
     private static GameObject* FindPlayerObject(GameObjectManager* manager, PlayerObjectIdentity identity, int expectedIndex)
     {
@@ -866,100 +905,161 @@ internal sealed unsafe class ObjectCuller : IDisposable
         return null;
     }
 
-    private bool IsHiddenByThisPlugin(GameObject* gameObject)
-    {
-        return hiddenObjectTracker.IsHidden(gameObject);
-    }
-
-    private void UpdateHiddenPlayerVfx(GameObjectManager* manager)
+    private CullingHiddenVfxPerformanceTrace UpdateHiddenPlayerVfx(GameObjectManager* manager)
     {
         if (!configuration.EnableHiddenPlayerGroundMarker || manager == null)
         {
+            var clearStart = Stopwatch.GetTimestamp();
             ClearHiddenPlayerVfx();
-            nextHiddenPlayerVfxIndex = 0;
-            nextHiddenPlayerVfxPrune = 0;
-            return;
+            return new CullingHiddenVfxPerformanceTrace(
+                0,
+                0,
+                staticVfxController.ActiveCount,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                Stopwatch.GetTimestamp() - clearStart
+            );
         }
 
+        var phaseStart = Stopwatch.GetTimestamp();
         hiddenPlayerVfxAddresses.Clear();
+        hiddenPlayerVfxCandidates.Clear();
+        liveHiddenPlayerVfxIds.Clear();
         hiddenObjectTracker.CollectHiddenPlayerAddresses(manager, hiddenPlayerVfxAddresses);
-        if (hiddenPlayerVfxAddresses.Count == 0)
-        {
-            ClearHiddenPlayerVfx();
-            nextHiddenPlayerVfxIndex = 0;
-            return;
-        }
+        var collectTicks = Stopwatch.GetTimestamp() - phaseStart;
 
-        if (nextHiddenPlayerVfxIndex >= hiddenPlayerVfxAddresses.Count)
-        {
-            nextHiddenPlayerVfxIndex = 0;
-        }
-
-        var updatesThisFrame = Math.Min(HiddenPlayerVfxUpdatesPerFrame, hiddenPlayerVfxAddresses.Count);
-        for (var offset = 0; offset < updatesThisFrame; offset++)
-        {
-            var index = (nextHiddenPlayerVfxIndex + offset) % hiddenPlayerVfxAddresses.Count;
-            var gameObject = (GameObject*)hiddenPlayerVfxAddresses[index];
-            var gameObjectId = (ulong)gameObject->GetGameObjectId();
-            if (!TryGetScreenVisiblePosition(gameObject, out var position))
-            {
-                staticVfxController.Hide(gameObjectId);
-                continue;
-            }
-
-            staticVfxController.ShowOrUpdate(gameObjectId, HiddenPlayerVfxPath, position, gameObject->Rotation);
-        }
-
-        nextHiddenPlayerVfxIndex = (nextHiddenPlayerVfxIndex + updatesThisFrame) % hiddenPlayerVfxAddresses.Count;
-        PruneHiddenPlayerVfxIfNeeded();
-        hiddenPlayerVfxAddresses.Clear();
-    }
-
-    private void PruneHiddenPlayerVfxIfNeeded()
-    {
-        var now = Environment.TickCount64;
-        if (now < nextHiddenPlayerVfxPrune)
-        {
-            return;
-        }
-
-        currentHiddenPlayerVfxIds.Clear();
+        phaseStart = Stopwatch.GetTimestamp();
         foreach (var address in hiddenPlayerVfxAddresses)
         {
             var gameObject = (GameObject*)address;
-            if (gameObject != null)
+            if (!TryGetObjectPosition(gameObject, out var position))
             {
-                currentHiddenPlayerVfxIds.Add((ulong)gameObject->GetGameObjectId());
+                continue;
+            }
+
+            var gameObjectId = (ulong)gameObject->GetGameObjectId();
+            liveHiddenPlayerVfxIds.Add(gameObjectId);
+
+            var isActive = staticVfxController.IsActive(gameObjectId, HiddenPlayerVfxPath);
+            if (!isActive && !IsScreenVisiblePosition(position))
+            {
+                continue;
+            }
+
+            hiddenPlayerVfxCandidates.Add(new(gameObjectId, position, gameObject->Rotation, isActive));
+        }
+        var projectTicks = Stopwatch.GetTimestamp() - phaseStart;
+
+        phaseStart = Stopwatch.GetTimestamp();
+        var showCreatedCount = 0;
+        var showUpdatedCount = 0;
+        var showSkippedCount = 0;
+        var showRemovedCount = 0;
+        var showDeferredCount = 0;
+        var createAttempts = 0;
+        foreach (var candidate in hiddenPlayerVfxCandidates)
+        {
+            if (!candidate.IsActive && createAttempts >= MaxHiddenPlayerVfxCreatesPerFrame)
+            {
+                showDeferredCount++;
+                continue;
+            }
+
+            if (!candidate.IsActive)
+            {
+                createAttempts++;
+            }
+
+            var result = staticVfxController.ShowOrUpdate(
+                candidate.GameObjectId,
+                HiddenPlayerVfxPath,
+                candidate.Position,
+                candidate.Rotation
+            );
+            if (result.Created)
+            {
+                showCreatedCount++;
+            }
+
+            if (result.Updated)
+            {
+                showUpdatedCount++;
+            }
+
+            if (result.Skipped)
+            {
+                showSkippedCount++;
+            }
+
+            if (result.Removed)
+            {
+                showRemovedCount++;
             }
         }
+        var showTicks = Stopwatch.GetTimestamp() - phaseStart;
 
-        staticVfxController.PruneExcept(currentHiddenPlayerVfxIds);
-        currentHiddenPlayerVfxIds.Clear();
-        nextHiddenPlayerVfxPrune = now + HiddenPlayerVfxPruneIntervalMs;
+        phaseStart = Stopwatch.GetTimestamp();
+        staticVfxController.PruneExcept(liveHiddenPlayerVfxIds);
+        var pruneTicks = Stopwatch.GetTimestamp() - phaseStart;
+        var activeCount = staticVfxController.ActiveCount;
+        var hiddenCount = hiddenPlayerVfxAddresses.Count;
+        var visibleCount = hiddenPlayerVfxCandidates.Count;
+        hiddenPlayerVfxAddresses.Clear();
+        hiddenPlayerVfxCandidates.Clear();
+        liveHiddenPlayerVfxIds.Clear();
+        return new CullingHiddenVfxPerformanceTrace(
+            hiddenCount,
+            visibleCount,
+            activeCount,
+            showCreatedCount,
+            showUpdatedCount,
+            showSkippedCount,
+            showRemovedCount,
+            showDeferredCount,
+            collectTicks,
+            projectTicks,
+            showTicks,
+            pruneTicks,
+            0
+        );
     }
 
-    private bool TryGetScreenVisiblePosition(GameObject* gameObject, out Vector3 screenVisiblePosition)
+    private static bool TryGetObjectPosition(GameObject* gameObject, out Vector3 position)
     {
-        screenVisiblePosition = default;
+        position = default;
         if (gameObject == null || gameObject->VirtualTable == null)
         {
             return false;
         }
 
-        var position = gameObject->GetPosition();
-        if (position == null)
+        var positionPtr = gameObject->GetPosition();
+        if (positionPtr == null)
         {
             return false;
         }
 
-        screenVisiblePosition = (Vector3)(*position);
-        return gameGui.WorldToScreen(screenVisiblePosition, out _, out var inView) && inView;
+        position = (Vector3)(*positionPtr);
+        return true;
+    }
+
+    private bool IsScreenVisiblePosition(Vector3 position)
+    {
+        return gameGui.WorldToScreen(position, out _, out var inView) && inView;
     }
 
     private void ClearHiddenPlayerVfx()
     {
         staticVfxController.Clear();
     }
+
+    private readonly record struct HiddenPlayerVfxCandidate(ulong GameObjectId, Vector3 Position, float Rotation, bool IsActive);
 
     private static CullingPerformanceTrace CreateTrace(
         bool isRefresh,
