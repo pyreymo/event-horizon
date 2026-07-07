@@ -38,6 +38,8 @@ internal enum PlayerKeepRuleMask
 
 internal static class PlayerKeepRuleBudgetDefaults
 {
+    private const int RuleCount = 8;
+
     public static Dictionary<PlayerKeepRuleId, PlayerKeepBudgetPolicy> Create() =>
         new()
         {
@@ -58,8 +60,45 @@ internal static class PlayerKeepRuleBudgetDefaults
             return policy;
         }
 
-        var defaultPolicies = Create();
-        return defaultPolicies[ruleId];
+        return GetDefaultPolicy(ruleId);
+    }
+
+    public static void FillPolicies(Configuration configuration, PlayerKeepBudgetPolicy[] policies)
+    {
+        if (policies.Length < RuleCount)
+        {
+            return;
+        }
+
+        for (var index = 0; index < RuleCount; index++)
+        {
+            policies[index] = GetDefaultPolicy((PlayerKeepRuleId)index);
+        }
+
+        if (configuration.KeepRuleBudgetPolicies == null)
+        {
+            return;
+        }
+
+        foreach (var (ruleId, policy) in configuration.KeepRuleBudgetPolicies)
+        {
+            var index = (int)ruleId;
+            if ((uint)index < policies.Length)
+            {
+                policies[index] = policy;
+            }
+        }
+    }
+
+    private static PlayerKeepBudgetPolicy GetDefaultPolicy(PlayerKeepRuleId ruleId)
+    {
+        return ruleId switch
+        {
+            PlayerKeepRuleId.TargetFocus => PlayerKeepBudgetPolicy.Exempt,
+            PlayerKeepRuleId.PartyAlliance => PlayerKeepBudgetPolicy.Exempt,
+            PlayerKeepRuleId.Friends => PlayerKeepBudgetPolicy.Exempt,
+            _ => PlayerKeepBudgetPolicy.Counted,
+        };
     }
 
     public static void SetPolicy(Configuration configuration, PlayerKeepRuleId ruleId, PlayerKeepBudgetPolicy policy)
@@ -71,6 +110,7 @@ internal static class PlayerKeepRuleBudgetDefaults
 
 internal static class PlayerKeepRuleOrder
 {
+    private const int RuleCount = 8;
     private static readonly PlayerKeepRuleId[] DefaultOrder =
     [
         PlayerKeepRuleId.TargetFocus,
@@ -127,6 +167,46 @@ internal static class PlayerKeepRuleOrder
         }
 
         return effectiveOrder.Count;
+    }
+
+    public static void FillRanks(Configuration configuration, int[] ranks)
+    {
+        if (ranks.Length < RuleCount)
+        {
+            return;
+        }
+
+        Array.Fill(ranks, RuleCount);
+        var nextRank = 0;
+        var configuredOrder = configuration.KeepRuleOrder;
+        if (configuredOrder != null)
+        {
+            foreach (var rule in configuredOrder)
+            {
+                AddRank(ranks, rule, ref nextRank);
+            }
+        }
+
+        foreach (var rule in DefaultOrder)
+        {
+            AddRank(ranks, rule, ref nextRank);
+        }
+    }
+
+    private static void AddRank(int[] ranks, PlayerKeepRuleId rule, ref int nextRank)
+    {
+        if (Array.IndexOf(DefaultOrder, rule) < 0)
+        {
+            return;
+        }
+
+        var index = (int)rule;
+        if ((uint)index >= ranks.Length || ranks[index] != RuleCount)
+        {
+            return;
+        }
+
+        ranks[index] = nextRank++;
     }
 
     public static void Reset(Configuration configuration)

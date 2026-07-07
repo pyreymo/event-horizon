@@ -8,18 +8,10 @@ namespace EventHorizon.Culling.Visibility;
 
 internal sealed unsafe class PlayerVisibilityPlan
 {
-    private readonly Dictionary<nint, PlayerVisibilityIntent> intentsByAddress;
-
-    private PlayerVisibilityPlan(
-        int revision,
-        IReadOnlyList<PlayerVisibilityIntent> intents,
-        Dictionary<nint, PlayerVisibilityIntent> intentsByAddress,
-        PlayerKeepBudgetStats budgetStats
-    )
+    private PlayerVisibilityPlan(int revision, IReadOnlyList<PlayerVisibilityIntent> intents, PlayerKeepBudgetStats budgetStats)
     {
         Revision = revision;
         Intents = intents;
-        this.intentsByAddress = intentsByAddress;
         BudgetStats = budgetStats;
     }
 
@@ -32,11 +24,11 @@ internal sealed unsafe class PlayerVisibilityPlan
         Configuration configuration,
         GameObjectManager* manager,
         PlayerKeepPlan keepPlan,
-        uint? previewVisibleEntityId
+        uint? previewVisibleEntityId,
+        List<PlayerVisibilityIntent> intents
     )
     {
-        var intents = new List<PlayerVisibilityIntent>();
-        var intentsByAddress = new Dictionary<nint, PlayerVisibilityIntent>();
+        intents.Clear();
 
         for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
         {
@@ -62,24 +54,17 @@ internal sealed unsafe class PlayerVisibilityPlan
                 keepPlan.IsCutByBudget(address)
             );
             intents.Add(intent);
-            intentsByAddress[address] = intent;
         }
 
         return new PlayerVisibilityPlan(
             revision,
             intents,
-            intentsByAddress,
             new PlayerKeepBudgetStats(
                 keepPlan.BudgetExemptPlayerCount,
                 keepPlan.VisibleBudgetedPlayerCount,
                 Math.Clamp(configuration.VisiblePlayerCountLimit, 1, 100)
             )
         );
-    }
-
-    public PlayerVisibilityIntent GetIntent(nint address)
-    {
-        return intentsByAddress.GetValueOrDefault(address);
     }
 
     private static bool ShouldHidePlayerSlotObject(GameObject* gameObject, int index, PlayerKeepPlan keepPlan)

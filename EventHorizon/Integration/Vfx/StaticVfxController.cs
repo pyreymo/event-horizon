@@ -14,6 +14,8 @@ namespace EventHorizon.Integration.Vfx;
 
 internal sealed unsafe class StaticVfxController : IDisposable
 {
+    private const float PositionEpsilonSq = 0.0001f;
+    private const float RotationEpsilon = 0.001f;
     private const string StaticVfxPoolName = "Client.System.Scheduler.Instance.VfxObject";
     private const string StaticVfxRunSig = "E8 ?? ?? ?? ?? B0 02 EB 02";
     private const string StaticVfxRemoveSig =
@@ -58,6 +60,11 @@ internal sealed unsafe class StaticVfxController : IDisposable
 
     public int ActiveCount => activeVfx.Count;
 
+    public void Hide(ulong gameObjectId)
+    {
+        Remove(gameObjectId);
+    }
+
     public void ShowOrUpdate(ulong gameObjectId, string path, SystemVector3 position, float rotation = 0f)
     {
         if (disposed || gameObjectId == 0 || string.IsNullOrEmpty(path))
@@ -67,7 +74,13 @@ internal sealed unsafe class StaticVfxController : IDisposable
 
         if (activeVfx.TryGetValue(gameObjectId, out var active) && active.Path == path && active.VfxAddress != nint.Zero)
         {
+            if (active.IsSameTransform(position, rotation))
+            {
+                return;
+            }
+
             UpdateTransform((VfxObject*)active.VfxAddress, position, rotation);
+            activeVfx[gameObjectId] = active with { Position = position, Rotation = rotation };
             return;
         }
 
@@ -149,7 +162,7 @@ internal sealed unsafe class StaticVfxController : IDisposable
                 return;
             }
 
-            activeVfx[gameObjectId] = new ActiveStaticVfx((nint)vfx, path);
+            activeVfx[gameObjectId] = new ActiveStaticVfx((nint)vfx, path, position, rotation);
             run(vfx, 0f, 0xFFFFFFFF);
             UpdateTransform(vfx, position, rotation);
         }
@@ -223,5 +236,12 @@ internal sealed unsafe class StaticVfxController : IDisposable
         }
     }
 
-    private readonly record struct ActiveStaticVfx(nint VfxAddress, string Path);
+    private readonly record struct ActiveStaticVfx(nint VfxAddress, string Path, SystemVector3 Position, float Rotation)
+    {
+        public bool IsSameTransform(SystemVector3 position, float rotation)
+        {
+            return SystemVector3.DistanceSquared(Position, position) <= PositionEpsilonSq
+                && Math.Abs(Rotation - rotation) <= RotationEpsilon;
+        }
+    }
 }

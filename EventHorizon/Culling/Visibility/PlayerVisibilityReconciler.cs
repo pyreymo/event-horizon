@@ -5,11 +5,18 @@ namespace EventHorizon.Culling.Visibility;
 
 internal sealed class PlayerVisibilityReconciler
 {
-    public static PlayerVisibilityReconciliation Reconcile(PlayerVisibilityPlan plan, HiddenObjectTracker hiddenObjectTracker)
+    private readonly List<PlayerVisibilityIntent> toShow = [];
+    private readonly List<PlayerVisibilityIntent> toHide = [];
+    private readonly List<PlayerVisibilityIntent> unchanged = [];
+    private readonly List<PlayerVisibilityAction> actions = [];
+
+    public PlayerVisibilityReconciliation Reconcile(PlayerVisibilityPlan plan, HiddenObjectTracker hiddenObjectTracker)
     {
-        var toShow = new List<PlayerVisibilityIntent>();
-        var toHide = new List<PlayerVisibilityIntent>();
-        var unchanged = new List<PlayerVisibilityIntent>();
+        toShow.Clear();
+        toHide.Clear();
+        unchanged.Clear();
+        actions.Clear();
+
         var appliedVisibleCount = 0;
         var desiredVisibleCount = 0;
 
@@ -43,7 +50,6 @@ internal sealed class PlayerVisibilityReconciler
         toShow.Sort(CompareShowPriority);
         toHide.Sort(CompareHidePriority);
 
-        var actions = new List<PlayerVisibilityAction>();
         AddTransitions(actions, toShow, toHide);
         AddMaintainedVisibility(actions, unchanged);
 

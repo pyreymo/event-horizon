@@ -14,10 +14,17 @@ internal sealed unsafe class ObjectFadeController(HiddenObjectTracker hiddenObje
     private readonly HiddenObjectTracker hiddenObjectTracker = hiddenObjectTracker;
     private readonly VisibilityFlags hiddenFlags = hiddenFlags;
     private readonly Dictionary<nint, FadeRecord> fadeObjects = [];
+    private readonly HashSet<nint> liveFadeAddresses = [];
+    private readonly List<nint> staleAddresses = [];
 
     public bool HasActiveFades => fadeObjects.Count > 0;
 
-    public bool Update(GameObject* gameObject, bool shouldHide)
+    public bool IsFading(PlayerObjectIdentity identity)
+    {
+        return fadeObjects.TryGetValue(identity.Address, out var record) && record.IsSameObject(identity);
+    }
+
+    public bool Update(GameObject* gameObject, bool shouldHide, int objectIndex)
     {
         var address = (nint)gameObject;
         if (address == nint.Zero)
@@ -30,14 +37,18 @@ internal sealed unsafe class ObjectFadeController(HiddenObjectTracker hiddenObje
         {
             if (shouldHide && !isHidden)
             {
-                FadeVisibleObjectHidden(gameObject, address, FadeRecord.From(gameObject, desiredVisible: false, alpha: OpaqueAlpha));
+                FadeVisibleObjectHidden(
+                    gameObject,
+                    address,
+                    FadeRecord.From(gameObject, desiredVisible: false, alpha: OpaqueAlpha, objectIndex)
+                );
                 return true;
             }
 
             if (!shouldHide && isHidden)
             {
                 hiddenObjectTracker.RestoreIfHidden(gameObject);
-                FadeHiddenObjectVisible(gameObject, address, FadeRecord.From(gameObject, desiredVisible: true, alpha: 0f));
+                FadeHiddenObjectVisible(gameObject, address, FadeRecord.From(gameObject, desiredVisible: true, alpha: 0f, objectIndex));
                 return true;
             }
 
@@ -59,12 +70,20 @@ internal sealed unsafe class ObjectFadeController(HiddenObjectTracker hiddenObje
 
     public void Reset(GameObjectManager* manager)
     {
-        foreach (var (address, record) in fadeObjects)
+        if (fadeObjects.Count == 0)
         {
-            var gameObject = FindObject(manager, address, record);
-            if (gameObject != null)
+            return;
+        }
+
+        if (manager != null)
+        {
+            for (var i = 0; i < manager->Objects.IndexSorted.Length; i++)
             {
-                SetAlpha(gameObject, OpaqueAlpha);
+                var gameObject = manager->Objects.IndexSorted[i].Value;
+                if (TryGetLiveRecord(gameObject, out _))
+                {
+                    SetAlpha(gameObject, OpaqueAlpha);
+                }
             }
         }
 
@@ -73,11 +92,29 @@ internal sealed unsafe class ObjectFadeController(HiddenObjectTracker hiddenObje
 
     public void PruneMissing(GameObjectManager* manager)
     {
-        var staleAddresses = new List<nint>();
-
-        foreach (var (address, record) in fadeObjects)
+        if (fadeObjects.Count == 0)
         {
-            if (FindObject(manager, address, record) == null)
+            return;
+        }
+
+        liveFadeAddresses.Clear();
+        staleAddresses.Clear();
+
+        if (manager != null)
+        {
+            for (var i = 0; i < manager->Objects.IndexSorted.Length; i++)
+            {
+                var gameObject = manager->Objects.IndexSorted[i].Value;
+                if (TryGetLiveRecord(gameObject, out _))
+                {
+                    liveFadeAddresses.Add((nint)gameObject);
+                }
+            }
+        }
+
+        foreach (var address in fadeObjects.Keys)
+        {
+            if (!liveFadeAddresses.Contains(address))
             {
                 staleAddresses.Add(address);
             }
@@ -87,6 +124,9 @@ internal sealed unsafe class ObjectFadeController(HiddenObjectTracker hiddenObje
         {
             fadeObjects.Remove(address);
         }
+
+        liveFadeAddresses.Clear();
+        staleAddresses.Clear();
     }
 
     public void Clear()
@@ -125,7 +165,7 @@ internal sealed unsafe class ObjectFadeController(HiddenObjectTracker hiddenObje
         var alpha = CalculateFadeAlpha(record, now);
         if (alpha <= 0f)
         {
-            hiddenObjectTracker.Hide(gameObject, hiddenFlags);
+            hiddenObjectTracker.Hide(gameObject, hiddenFlags, record.ObjectIndex);
             SetAlpha(gameObject, OpaqueAlpha);
             fadeObjects.Remove(address);
             return;
@@ -182,23 +222,15 @@ internal sealed unsafe class ObjectFadeController(HiddenObjectTracker hiddenObje
         return start + ((end - start) * progress);
     }
 
-    private static GameObject* FindObject(GameObjectManager* manager, nint address, FadeRecord record)
+    private bool TryGetLiveRecord(GameObject* gameObject, out FadeRecord record)
     {
-        if (manager == null || address == nint.Zero)
+        if (gameObject == null)
         {
-            return null;
+            record = default;
+            return false;
         }
 
-        for (var i = 0; i < manager->Objects.IndexSorted.Length; i++)
-        {
-            ref var entry = ref manager->Objects.IndexSorted[i];
-            if ((nint)entry.Value == address && record.IsSameObject(entry.Value))
-            {
-                return entry.Value;
-            }
-        }
-
-        return null;
+        return fadeObjects.TryGetValue((nint)gameObject, out record) && record.IsSameObject(gameObject);
     }
 
     private readonly record struct FadeRecord(
@@ -208,10 +240,11 @@ internal sealed unsafe class ObjectFadeController(HiddenObjectTracker hiddenObje
         float StartAlpha,
         float Alpha,
         long TransitionStart,
-        long LastUpdate
+        long LastUpdate,
+        int ObjectIndex
     )
     {
-        public static FadeRecord From(GameObject* gameObject, bool desiredVisible, float alpha)
+        public static FadeRecord From(GameObject* gameObject, bool desiredVisible, float alpha, int objectIndex)
         {
             return new(
                 (ulong)gameObject->GetGameObjectId(),
@@ -220,7 +253,8 @@ internal sealed unsafe class ObjectFadeController(HiddenObjectTracker hiddenObje
                 alpha,
                 alpha,
                 Environment.TickCount64,
-                Environment.TickCount64
+                Environment.TickCount64,
+                objectIndex
             );
         }
 
@@ -231,5 +265,7 @@ internal sealed unsafe class ObjectFadeController(HiddenObjectTracker hiddenObje
 
         public bool IsSameObject(GameObject* gameObject) =>
             gameObject != null && ((ulong)gameObject->GetGameObjectId() == GameObjectId) && (gameObject->EntityId == EntityId);
+
+        public bool IsSameObject(PlayerObjectIdentity identity) => identity.GameObjectId == GameObjectId && identity.EntityId == EntityId;
     }
 }

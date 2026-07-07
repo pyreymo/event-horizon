@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using Dalamud.Game.Chat;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Command;
@@ -29,6 +30,9 @@ public sealed class Plugin : IDalamudPlugin
     private const string ShortCommandName = "/eh";
     private const int DynamicCullingRefreshIntervalMs = 200;
     private const int DtrBarRefreshIntervalMs = 1_000;
+    private const int PlayerPreviewActiveLeaseMs = 500;
+    private const double SlowFrameworkUpdateLogThresholdMs = 2.0;
+    private const int SlowFrameworkUpdateLogCooldownMs = 1_000;
 
     #region Services
 
@@ -105,6 +109,8 @@ public sealed class Plugin : IDalamudPlugin
 
     private long nextDynamicCullingRefresh;
     private long nextDtrBarRefresh;
+    private long nextSlowFrameworkUpdateLog;
+    private long playerPreviewActiveUntil;
     public int HiddenPlayerCount => UpdateObjectArraysHook.HiddenPlayerCount;
     internal PlayerKeepBudgetStats KeepBudgetStats => UpdateObjectArraysHook.KeepBudgetStats;
     internal PlayerPreviewSnapshot PlayerPreviewSnapshot => UpdateObjectArraysHook.PlayerPreviewSnapshot;
@@ -286,24 +292,41 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnFrameworkUpdate(IFramework framework)
     {
+        var start = Stopwatch.GetTimestamp();
+        var phaseStart = start;
         RefreshDtrBarIfNeeded();
-        PlayerPreviewHighlighter.Update();
+        var dtrTicks = Stopwatch.GetTimestamp() - phaseStart;
 
+        phaseStart = Stopwatch.GetTimestamp();
+        PlayerPreviewHighlighter.Update();
+        var highlightTicks = Stopwatch.GetTimestamp() - phaseStart;
+
+        phaseStart = Stopwatch.GetTimestamp();
         if (!NeedsDynamicCullingRefresh())
         {
+            var needsDynamicTicks = Stopwatch.GetTimestamp() - phaseStart;
+            LogSlowFrameworkUpdate(start, dtrTicks, highlightTicks, needsDynamicTicks, 0, 0, didRefresh: false, tickTrace: default);
             return;
         }
+        var dynamicCheckTicks = Stopwatch.GetTimestamp() - phaseStart;
 
+        phaseStart = Stopwatch.GetTimestamp();
         UpdateObjectArraysHook.Tick();
+        var tickTicks = Stopwatch.GetTimestamp() - phaseStart;
+        var tickTrace = UpdateObjectArraysHook.LastTickTrace;
 
         var now = Environment.TickCount64;
         if (now < nextDynamicCullingRefresh)
         {
+            LogSlowFrameworkUpdate(start, dtrTicks, highlightTicks, dynamicCheckTicks, tickTicks, 0, didRefresh: false, tickTrace);
             return;
         }
 
+        phaseStart = Stopwatch.GetTimestamp();
         RefreshObjectCulling();
+        var refreshTicks = Stopwatch.GetTimestamp() - phaseStart;
         nextDynamicCullingRefresh = Environment.TickCount64 + DynamicCullingRefreshIntervalMs;
+        LogSlowFrameworkUpdate(start, dtrTicks, highlightTicks, dynamicCheckTicks, tickTicks, refreshTicks, didRefresh: true, tickTrace);
     }
 
     private void RefreshDtrBarIfNeeded()
@@ -323,14 +346,113 @@ public sealed class Plugin : IDalamudPlugin
         return UpdateObjectArraysHook.NeedsDynamicRefresh;
     }
 
+    private bool IsPlayerPreviewActive()
+    {
+        return Environment.TickCount64 <= playerPreviewActiveUntil;
+    }
+
+    private void LogSlowFrameworkUpdate(
+        long start,
+        long dtrTicks,
+        long highlightTicks,
+        long dynamicCheckTicks,
+        long tickTicks,
+        long refreshTicks,
+        bool didRefresh,
+        CullingPerformanceTrace tickTrace
+    )
+    {
+        var totalTicks = Stopwatch.GetTimestamp() - start;
+        if (ToMilliseconds(totalTicks) < SlowFrameworkUpdateLogThresholdMs)
+        {
+            return;
+        }
+
+        var now = Environment.TickCount64;
+        if (now < nextSlowFrameworkUpdateLog)
+        {
+            return;
+        }
+
+        nextSlowFrameworkUpdateLog = now + SlowFrameworkUpdateLogCooldownMs;
+        Log.Information(
+            "[Perf] Slow Plugin.OnFrameworkUpdate total={TotalMs:F3}ms dtr={DtrMs:F3}ms highlight={HighlightMs:F3}ms dynamicCheck={DynamicCheckMs:F3}ms tick={TickMs:F3}ms refresh={RefreshMs:F3}ms didRefresh={DidRefresh} tickTrace={TickTrace} refreshTrace={RefreshTrace}",
+            ToMilliseconds(totalTicks),
+            ToMilliseconds(dtrTicks),
+            ToMilliseconds(highlightTicks),
+            ToMilliseconds(dynamicCheckTicks),
+            ToMilliseconds(tickTicks),
+            ToMilliseconds(refreshTicks),
+            didRefresh,
+            FormatCullingTrace(tickTrace),
+            didRefresh ? FormatCullingTrace(UpdateObjectArraysHook.LastRefreshTrace) : "n/a"
+        );
+    }
+
+    private static string FormatCullingTrace(CullingPerformanceTrace trace)
+    {
+        if (!trace.HasValue)
+        {
+            return "n/a";
+        }
+
+        return string.Format(
+            "total={0:F3} guard={1:F3} keep={2:F3} plan={3:F3} reconcile={4:F3} preview={5:F3} actions={6} pendingShow={7} pendingHide={8} previewActive={9} tick[{10}]",
+            ToMilliseconds(trace.TotalTicks),
+            ToMilliseconds(trace.GuardTicks),
+            ToMilliseconds(trace.KeepPlanTicks),
+            ToMilliseconds(trace.VisibilityPlanTicks),
+            ToMilliseconds(trace.ReconcileTicks),
+            ToMilliseconds(trace.PreviewTicks),
+            trace.ActionCount,
+            trace.PendingShowCount,
+            trace.PendingHideCount,
+            trace.RefreshPlayerPreview,
+            FormatTickTrace(trace.Tick)
+        );
+    }
+
+    private static string FormatTickTrace(CullingTickPerformanceTrace trace)
+    {
+        if (!trace.HasValue)
+        {
+            return "n/a";
+        }
+
+        var accountedTicks =
+            trace.PlayerActionsTicks + trace.NonPlayerTicks + trace.PruneHiddenTicks + trace.PruneFadesTicks + trace.HiddenVfxTicks;
+        var unaccountedTicks = Math.Max(0, trace.TotalTicks - accountedTicks);
+        return string.Format(
+            "total={0:F3} playerActions={1:F3} nonPlayer={2:F3} pruneHidden={3:F3} pruneFades={4:F3} hiddenVfx={5:F3} unaccounted={6:F3} actions={7}",
+            ToMilliseconds(trace.TotalTicks),
+            ToMilliseconds(trace.PlayerActionsTicks),
+            ToMilliseconds(trace.NonPlayerTicks),
+            ToMilliseconds(trace.PruneHiddenTicks),
+            ToMilliseconds(trace.PruneFadesTicks),
+            ToMilliseconds(trace.HiddenVfxTicks),
+            ToMilliseconds(unaccountedTicks),
+            trace.ActionCount
+        );
+    }
+
+    private static double ToMilliseconds(long stopwatchTicks)
+    {
+        return stopwatchTicks * 1000.0 / Stopwatch.Frequency;
+    }
+
     public void RefreshObjectCulling(bool resetRuleState = false)
     {
-        UpdateObjectArraysHook.Refresh(resetRuleState);
+        UpdateObjectArraysHook.Refresh(resetRuleState, IsPlayerPreviewActive());
     }
 
     internal void RefreshPlayerPreview()
     {
         UpdateObjectArraysHook.RefreshPlayerPreview();
+    }
+
+    internal void MarkPlayerPreviewActive()
+    {
+        playerPreviewActiveUntil = Environment.TickCount64 + PlayerPreviewActiveLeaseMs;
     }
 
     internal void SetPreviewSelectedPlayer(uint? entityId)

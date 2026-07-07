@@ -16,6 +16,7 @@ internal sealed class PlayerPreviewPanel(Plugin plugin, IGameGui gameGui)
 
     public void DrawInlineContent(Func<PlayerKeepRuleId, string> getRuleLabel)
     {
+        plugin.MarkPlayerPreviewActive();
         RefreshIfNeeded();
         var side = Math.Max(
             PlayerPreviewConstants.MinimumPreviewSide,
@@ -28,6 +29,7 @@ internal sealed class PlayerPreviewPanel(Plugin plugin, IGameGui gameGui)
 
     public void DrawFloatingContent(Func<PlayerKeepRuleId, string> getRuleLabel)
     {
+        plugin.MarkPlayerPreviewActive();
         RefreshIfNeeded();
         var available = ImGui.GetContentRegionAvail();
         var side = Math.Max(PlayerPreviewConstants.MinimumPreviewSide, Math.Min(available.X, available.Y));

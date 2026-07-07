@@ -26,6 +26,8 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
     public int HiddenPlayerCount => objectCuller.GetHiddenPlayerCount();
     public PlayerKeepBudgetStats KeepBudgetStats => objectCuller.GetKeepBudgetStats();
     public PlayerPreviewSnapshot PlayerPreviewSnapshot => objectCuller.GetPlayerPreviewSnapshot();
+    public CullingPerformanceTrace LastRefreshTrace => objectCuller.LastUpdateTrace;
+    public CullingPerformanceTrace LastTickTrace => objectCuller.LastTickTrace;
 
     public UpdateObjectArraysHook(
         IGameInteropProvider gameInteropProvider,
@@ -47,14 +49,14 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         hook.Enable();
     }
 
-    public void Refresh(bool resetRuleState = false)
+    public void Refresh(bool resetRuleState = false, bool refreshPlayerPreview = false)
     {
         if (resetRuleState)
         {
             objectCuller.ClearRuleState();
         }
 
-        OnObjectArraysUpdated(GameObjectManager.Instance());
+        OnObjectArraysUpdated(GameObjectManager.Instance(), refreshPlayerPreview);
     }
 
     public void Tick()
@@ -91,8 +93,8 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         return result;
     }
 
-    private void OnObjectArraysUpdated(GameObjectManager* objectManager)
+    private void OnObjectArraysUpdated(GameObjectManager* objectManager, bool refreshPlayerPreview)
     {
-        objectCuller.Update(objectManager);
+        objectCuller.Update(objectManager, refreshPlayerPreview);
     }
 }

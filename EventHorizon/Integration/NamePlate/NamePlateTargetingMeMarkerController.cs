@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Game.ClientState.Conditions;
@@ -21,6 +22,8 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
     private const int NamePlateSlotCount = 50;
     private const uint MarkerNodeIdBase = 930000;
     private const string TargetingMeVfxPath = "vfx/common/eff/m0904_stlppos01_0a1.avfx";
+    private const double SlowFrameworkUpdateLogThresholdMs = 2.0;
+    private const int SlowFrameworkUpdateLogCooldownMs = 1_000;
 
     // Marker-specific data belongs here. To add another embedded PNG:
     // 1. include it as an EmbeddedResource, 2. add another definition,
@@ -49,12 +52,14 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
     private readonly NamePlateMarkerSlot[] slots = new NamePlateMarkerSlot[NamePlateSlotCount];
     private readonly EmbeddedMarkerTextureResources markerResources;
     private readonly ActorVfxController actorVfxController;
+    private readonly IPluginLog log;
 
     private TargetingMeMarkerStyle appliedStyle;
     private int styleRevision;
     private bool lastTextureReady;
     private bool refreshPending;
     private bool disposed;
+    private long nextSlowFrameworkUpdateLog;
 
     public NamePlateTargetingMeMarkerController(
         IAddonLifecycle addonLifecycle,
@@ -79,6 +84,7 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
         this.configuration = configuration;
         this.framework = framework;
         this.actorVfxController = actorVfxController;
+        this.log = log;
         markerResources = new EmbeddedMarkerTextureResources(textureProvider, log, GazeMarker);
 
         for (var index = 0; index < slots.Length; index++)
@@ -122,32 +128,102 @@ internal sealed unsafe class NamePlateTargetingMeMarkerController : IDisposable
 
     private void OnFrameworkUpdate(IFramework _)
     {
+        var start = Stopwatch.GetTimestamp();
+        var phaseStart = start;
         if (disposed)
         {
             return;
         }
 
+        var wasRefreshPending = refreshPending;
         if (refreshPending)
         {
             refreshPending = false;
             RefreshOnFrameworkThread();
         }
+        var refreshTicks = Stopwatch.GetTimestamp() - phaseStart;
 
+        phaseStart = Stopwatch.GetTimestamp();
         if (ShouldSuppressTargetingMeVfx() || ShouldClearTargetingMeVfx())
         {
             actorVfxController.ClearScope(ActorVfxScope.TargetingMeMarker);
         }
+        var vfxClearTicks = Stopwatch.GetTimestamp() - phaseStart;
 
+        phaseStart = Stopwatch.GetTimestamp();
         markerResources.UpdateLoadState();
+        var textureLoadTicks = Stopwatch.GetTimestamp() - phaseStart;
 
+        phaseStart = Stopwatch.GetTimestamp();
         var textureReady = markerResources.IsTextureReady();
         if (textureReady == lastTextureReady)
         {
+            LogSlowFrameworkUpdate(
+                start,
+                refreshTicks,
+                vfxClearTicks,
+                textureLoadTicks,
+                Stopwatch.GetTimestamp() - phaseStart,
+                wasRefreshPending,
+                textureChanged: false
+            );
             return;
         }
 
         lastTextureReady = textureReady;
         MarkMarkerImagesDirty(textureReady);
+        LogSlowFrameworkUpdate(
+            start,
+            refreshTicks,
+            vfxClearTicks,
+            textureLoadTicks,
+            Stopwatch.GetTimestamp() - phaseStart,
+            wasRefreshPending,
+            textureChanged: true
+        );
+    }
+
+    private void LogSlowFrameworkUpdate(
+        long start,
+        long refreshTicks,
+        long vfxClearTicks,
+        long textureLoadTicks,
+        long textureReadyTicks,
+        bool wasRefreshPending,
+        bool textureChanged
+    )
+    {
+        var totalTicks = Stopwatch.GetTimestamp() - start;
+        if (ToMilliseconds(totalTicks) < SlowFrameworkUpdateLogThresholdMs)
+        {
+            return;
+        }
+
+        var now = Environment.TickCount64;
+        if (now < nextSlowFrameworkUpdateLog)
+        {
+            return;
+        }
+
+        nextSlowFrameworkUpdateLog = now + SlowFrameworkUpdateLogCooldownMs;
+        log.Information(
+            "[Perf] Slow NamePlateTargetingMeMarkerController.OnFrameworkUpdate total={TotalMs:F3}ms refresh={RefreshMs:F3}ms vfxClear={VfxClearMs:F3}ms textureLoad={TextureLoadMs:F3}ms textureReady={TextureReadyMs:F3}ms refreshPending={RefreshPending} textureChanged={TextureChanged} markerEnabled={MarkerEnabled} namePlate={NamePlateEnabled} vfx={VfxEnabled}",
+            ToMilliseconds(totalTicks),
+            ToMilliseconds(refreshTicks),
+            ToMilliseconds(vfxClearTicks),
+            ToMilliseconds(textureLoadTicks),
+            ToMilliseconds(textureReadyTicks),
+            wasRefreshPending,
+            textureChanged,
+            configuration.EnableTargetingMeMarker,
+            configuration.EnableTargetingMeNamePlateMarker,
+            configuration.EnableTargetingMeVfxMarker
+        );
+    }
+
+    private static double ToMilliseconds(long stopwatchTicks)
+    {
+        return stopwatchTicks * 1000.0 / Stopwatch.Frequency;
     }
 
     private void RefreshOnFrameworkThread()

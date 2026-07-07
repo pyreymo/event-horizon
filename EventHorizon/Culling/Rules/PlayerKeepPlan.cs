@@ -6,32 +6,25 @@ namespace EventHorizon.Culling.Rules;
 
 internal sealed class PlayerKeepPlan
 {
-    private readonly Dictionary<nint, PlayerKeepDecision> keepDecisions;
-    private readonly HashSet<nint>? visibleBudgetedPlayers;
+    private readonly Dictionary<nint, PlayerKeepDecision> keepDecisions = [];
+    private readonly HashSet<nint> visibleBudgetedPlayers = [];
+    private readonly List<PlayerKeepCandidate> budgetedPlayers = [];
+    private bool limitVisibleBudgetedPlayers;
 
-    private PlayerKeepPlan(Dictionary<nint, PlayerKeepDecision> keepDecisions, HashSet<nint>? visibleBudgetedPlayers)
+    public int BudgetExemptPlayerCount { get; private set; }
+    public int VisibleBudgetedPlayerCount { get; private set; }
+
+    public void Update(Configuration configuration, IReadOnlyList<PlayerKeepCandidate> candidates)
     {
-        this.keepDecisions = keepDecisions;
-        this.visibleBudgetedPlayers = visibleBudgetedPlayers;
-    }
-
-    public int BudgetExemptPlayerCount { get; private init; }
-    public int VisibleBudgetedPlayerCount { get; private init; }
-
-    public static PlayerKeepPlan Build(Configuration configuration, IReadOnlyList<PlayerKeepCandidate> candidates)
-    {
-        var keepDecisions = new Dictionary<nint, PlayerKeepDecision>();
+        keepDecisions.Clear();
         foreach (var candidate in candidates)
         {
             keepDecisions[candidate.Address] = candidate.KeepDecision;
         }
 
-        var visibleBudgetedPlayers = GetVisibleBudgetedPlayers(configuration, candidates);
-        return new PlayerKeepPlan(keepDecisions, visibleBudgetedPlayers)
-        {
-            BudgetExemptPlayerCount = CountBudgetExemptPlayers(candidates),
-            VisibleBudgetedPlayerCount = CountVisibleBudgetedPlayers(candidates, visibleBudgetedPlayers),
-        };
+        UpdateVisibleBudgetedPlayers(configuration, candidates);
+        BudgetExemptPlayerCount = CountBudgetExemptPlayers(candidates);
+        VisibleBudgetedPlayerCount = CountVisibleBudgetedPlayers(candidates);
     }
 
     public bool ShouldHide(nint address)
@@ -45,8 +38,8 @@ internal sealed class PlayerKeepPlan
         return keepDecision.Kind switch
         {
             PlayerKeepDecisionKind.Keep when keepDecision.BudgetPolicy == PlayerKeepBudgetPolicy.Exempt => false,
-            PlayerKeepDecisionKind.Keep when keepDecision.BudgetPolicy == PlayerKeepBudgetPolicy.Counted =>
-                visibleBudgetedPlayers?.Contains(address) == false,
+            PlayerKeepDecisionKind.Keep when keepDecision.BudgetPolicy == PlayerKeepBudgetPolicy.Counted => limitVisibleBudgetedPlayers
+                && !visibleBudgetedPlayers.Contains(address),
             _ => true,
         };
     }
@@ -58,17 +51,20 @@ internal sealed class PlayerKeepPlan
         var keepDecision = GetDecision(address);
         return keepDecision.Kind == PlayerKeepDecisionKind.Keep
             && keepDecision.BudgetPolicy == PlayerKeepBudgetPolicy.Counted
-            && visibleBudgetedPlayers?.Contains(address) == false;
+            && limitVisibleBudgetedPlayers
+            && !visibleBudgetedPlayers.Contains(address);
     }
 
-    private static HashSet<nint>? GetVisibleBudgetedPlayers(Configuration configuration, IReadOnlyList<PlayerKeepCandidate> candidates)
+    private void UpdateVisibleBudgetedPlayers(Configuration configuration, IReadOnlyList<PlayerKeepCandidate> candidates)
     {
+        visibleBudgetedPlayers.Clear();
+        budgetedPlayers.Clear();
+        limitVisibleBudgetedPlayers = configuration.LimitVisiblePlayerCount;
         if (!configuration.LimitVisiblePlayerCount)
         {
-            return null;
+            return;
         }
 
-        var budgetedPlayers = new List<PlayerKeepCandidate>();
         foreach (var candidate in candidates)
         {
             if (candidate.KeepDecision.BudgetPolicy == PlayerKeepBudgetPolicy.Counted)
@@ -80,13 +76,10 @@ internal sealed class PlayerKeepPlan
         budgetedPlayers.Sort(CompareBudgetedPlayers);
 
         var visiblePlayerLimit = Math.Clamp(configuration.VisiblePlayerCountLimit, 1, 100);
-        var visiblePlayers = new HashSet<nint>();
         for (var i = 0; i < budgetedPlayers.Count && i < visiblePlayerLimit; i++)
         {
-            visiblePlayers.Add(budgetedPlayers[i].Address);
+            visibleBudgetedPlayers.Add(budgetedPlayers[i].Address);
         }
-
-        return visiblePlayers;
     }
 
     private static int CountBudgetExemptPlayers(IReadOnlyList<PlayerKeepCandidate> candidates)
@@ -103,9 +96,9 @@ internal sealed class PlayerKeepPlan
         return count;
     }
 
-    private static int CountVisibleBudgetedPlayers(IReadOnlyList<PlayerKeepCandidate> candidates, HashSet<nint>? visibleBudgetedPlayers)
+    private int CountVisibleBudgetedPlayers(IReadOnlyList<PlayerKeepCandidate> candidates)
     {
-        if (visibleBudgetedPlayers != null)
+        if (limitVisibleBudgetedPlayers)
         {
             return visibleBudgetedPlayers.Count;
         }

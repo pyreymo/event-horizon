@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Numerics;
 using System.Threading;
 using Dalamud.Game.Chat;
@@ -17,6 +16,7 @@ namespace EventHorizon.Culling.Rules;
 
 internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjectTable objectTable, ITargetManager targetManager)
 {
+    private const int RuleCount = 8;
     private const int TargetingMePlayerKeepMs = 60_000;
     private const int RecentTargetPlayerKeepMs = 30_000;
     private const int RecentChatPlayerKeepMs = 300_000;
@@ -29,7 +29,18 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
     private readonly Dictionary<ulong, long> recentTargetPlayers = [];
     private readonly Dictionary<ulong, long> targetingMePlayers = [];
     private readonly Dictionary<string, long> recentChatPlayers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<ulong> expiredPlayerIds = [];
+    private readonly List<string> expiredPlayerNames = [];
+    private readonly int[] ruleRanks = new int[RuleCount];
+    private readonly PlayerKeepBudgetPolicy[] ruleBudgetPolicies = new PlayerKeepBudgetPolicy[RuleCount];
     private readonly Lock recentChatPlayersLock = new();
+    private Vector3 localPlayerPosition;
+    private ulong localPlayerId;
+    private nint targetAddress;
+    private nint focusTargetAddress;
+    private long updateNow;
+    private float nearbyRangeSq;
+    private bool hasRecentChatPlayers;
 
     public bool NeedsDynamicRefresh =>
         configuration.KeepRecruitingPlayers
@@ -42,6 +53,10 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
 
     public void BeforeUpdate()
     {
+        updateNow = Environment.TickCount64;
+        PlayerKeepRuleOrder.FillRanks(configuration, ruleRanks);
+        PlayerKeepRuleBudgetDefaults.FillPolicies(configuration, ruleBudgetPolicies);
+        RefreshObjectState();
         PruneExpiredKeepState();
     }
 
@@ -191,6 +206,11 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
             return false;
         }
 
+        if (!hasRecentChatPlayers)
+        {
+            return false;
+        }
+
         var playerName = NormalizePlayerName(gameObject->NameString);
         if (string.IsNullOrWhiteSpace(playerName))
         {
@@ -204,7 +224,7 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
                 return false;
             }
 
-            if (expireTime > Environment.TickCount64)
+            if (expireTime > updateNow)
             {
                 return true;
             }
@@ -223,8 +243,7 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
             return false;
         }
 
-        var localPlayer = objectTable.LocalPlayer;
-        if (localPlayer == null)
+        if (localPlayerId == 0)
         {
             return false;
         }
@@ -236,16 +255,11 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
             return false;
         }
 
-        var range = Math.Clamp(
-            configuration.KeepNearbyPlayersRange,
-            PlayerPreviewConstants.NearbyRangeMin,
-            PlayerPreviewConstants.NearbyRangeMax
-        );
-        distanceSq = Vector3.DistanceSquared(localPlayer.Position, player->Position);
+        distanceSq = Vector3.DistanceSquared(localPlayerPosition, player->Position);
 
         if (nearbyKeptPlayers.Contains(playerId))
         {
-            if (distanceSq <= range * range)
+            if (distanceSq <= nearbyRangeSq)
             {
                 return true;
             }
@@ -254,7 +268,7 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
             return false;
         }
 
-        if (distanceSq > range * range)
+        if (distanceSq > nearbyRangeSq)
         {
             return false;
         }
@@ -277,14 +291,13 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
             return false;
         }
 
-        var now = Environment.TickCount64;
         if (IsTargetOrFocus(gameObject))
         {
-            recentTargetPlayers[playerId] = now + RecentTargetPlayerKeepMs;
+            recentTargetPlayers[playerId] = updateNow + RecentTargetPlayerKeepMs;
             return true;
         }
 
-        return IsTimedKeepAlive(recentTargetPlayers, playerId, now);
+        return IsTimedKeepAlive(recentTargetPlayers, playerId, updateNow);
     }
 
     private bool ShouldKeepPlayerTargetingLocalPlayer(GameObject* gameObject)
@@ -296,20 +309,18 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
 
         var player = (BattleChara*)gameObject;
         var playerId = GetPlayerTrackingId(player);
-        var localPlayerId = objectTable.LocalPlayer?.GameObjectId ?? 0;
         if (playerId == 0 || localPlayerId == 0)
         {
             return false;
         }
 
-        var now = Environment.TickCount64;
         if ((ulong)player->GetTargetId() == localPlayerId)
         {
-            targetingMePlayers[playerId] = now + TargetingMePlayerKeepMs;
+            targetingMePlayers[playerId] = updateNow + TargetingMePlayerKeepMs;
             return true;
         }
 
-        return IsTimedKeepAlive(targetingMePlayers, playerId, now);
+        return IsTimedKeepAlive(targetingMePlayers, playerId, updateNow);
     }
 
     private bool ShouldKeepByRace(GameObject* gameObject)
@@ -330,10 +341,30 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
 
     private void PruneExpiredKeepState()
     {
-        var now = Environment.TickCount64;
-        PruneExpiredKeepState(recentTargetPlayers, now);
-        PruneExpiredKeepState(targetingMePlayers, now);
-        PruneExpiredRecentChatPlayers(now);
+        PruneExpiredKeepState(recentTargetPlayers, updateNow, expiredPlayerIds);
+        PruneExpiredKeepState(targetingMePlayers, updateNow, expiredPlayerIds);
+        PruneExpiredRecentChatPlayers(updateNow);
+    }
+
+    private void RefreshObjectState()
+    {
+        var localPlayer = objectTable.LocalPlayer;
+        localPlayerId = localPlayer?.GameObjectId ?? 0;
+        localPlayerPosition = localPlayer?.Position ?? default;
+        targetAddress = targetManager.Target?.Address ?? nint.Zero;
+        focusTargetAddress = targetManager.FocusTarget?.Address ?? nint.Zero;
+
+        var nearbyRange = Math.Clamp(
+            configuration.KeepNearbyPlayersRange,
+            PlayerPreviewConstants.NearbyRangeMin,
+            PlayerPreviewConstants.NearbyRangeMax
+        );
+        nearbyRangeSq = nearbyRange * nearbyRange;
+
+        lock (recentChatPlayersLock)
+        {
+            hasRecentChatPlayers = recentChatPlayers.Count > 0;
+        }
     }
 
     private static bool IsTimedKeepAlive(Dictionary<ulong, long> keepAlivePlayers, ulong playerId, long now)
@@ -352,14 +383,54 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
         return false;
     }
 
-    private static void PruneExpiredKeepState(Dictionary<ulong, long> keepAlivePlayers, long now)
+    private void PruneExpiredKeepState(Dictionary<ulong, long> keepAlivePlayers, long now, List<ulong> expiredIds)
     {
-        foreach (var (playerId, expireTime) in new List<KeyValuePair<ulong, long>>(keepAlivePlayers))
+        if (keepAlivePlayers.Count == 0)
+        {
+            return;
+        }
+
+        expiredIds.Clear();
+        foreach (var (playerId, expireTime) in keepAlivePlayers)
         {
             if (expireTime <= now)
             {
-                keepAlivePlayers.Remove(playerId);
+                expiredIds.Add(playerId);
             }
+        }
+
+        foreach (var playerId in expiredIds)
+        {
+            keepAlivePlayers.Remove(playerId);
+        }
+
+        expiredIds.Clear();
+    }
+
+    private void PruneExpiredRecentChatPlayers(long now)
+    {
+        lock (recentChatPlayersLock)
+        {
+            if (recentChatPlayers.Count == 0)
+            {
+                return;
+            }
+
+            expiredPlayerNames.Clear();
+            foreach (var (playerName, expireTime) in recentChatPlayers)
+            {
+                if (expireTime <= now)
+                {
+                    expiredPlayerNames.Add(playerName);
+                }
+            }
+
+            foreach (var playerName in expiredPlayerNames)
+            {
+                recentChatPlayers.Remove(playerName);
+            }
+
+            expiredPlayerNames.Clear();
         }
     }
 
@@ -380,9 +451,12 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
 
     private static void AddPlayerPayloadNames(HashSet<string> playerNames, SeString text)
     {
-        foreach (var payload in text.Payloads.OfType<PlayerPayload>())
+        foreach (var payload in text.Payloads)
         {
-            AddRecentChatPlayerName(playerNames, payload.PlayerName);
+            if (payload is PlayerPayload playerPayload)
+            {
+                AddRecentChatPlayerName(playerNames, playerPayload.PlayerName);
+            }
         }
     }
 
@@ -438,7 +512,7 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
     private bool IsTargetOrFocus(GameObject* gameObject)
     {
         var address = (nint)gameObject;
-        return address == targetManager.Target?.Address || address == targetManager.FocusTarget?.Address;
+        return address == targetAddress || address == focusTargetAddress;
     }
 
     private static ulong GetPlayerTrackingId(BattleChara* player)
@@ -453,7 +527,7 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
         int rank,
         PlayerKeepTieBreaker tieBreaker,
         PlayerKeepRuleMask matchedRules
-    ) => PlayerKeepDecision.Keep(ruleId, rank, PlayerKeepRuleBudgetDefaults.GetPolicy(configuration, ruleId), tieBreaker, matchedRules);
+    ) => PlayerKeepDecision.Keep(ruleId, rank, ruleBudgetPolicies[(int)ruleId], tieBreaker, matchedRules);
 
     private void KeepBetterRule(
         ref PlayerKeepRuleId? winningRule,
@@ -463,7 +537,7 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
         PlayerKeepTieBreaker tieBreaker
     )
     {
-        var rank = PlayerKeepRuleOrder.GetRank(configuration, rule);
+        var rank = ruleRanks[(int)rule];
         if (!currentRank.HasValue || rank < currentRank.Value)
         {
             winningRule = rule;
@@ -482,17 +556,6 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
     #endregion
 
     #region Chat State
-
-    private void PruneExpiredRecentChatPlayers(long now)
-    {
-        lock (recentChatPlayersLock)
-        {
-            foreach (var playerName in recentChatPlayers.Where(x => x.Value <= now).Select(x => x.Key).ToArray())
-            {
-                recentChatPlayers.Remove(playerName);
-            }
-        }
-    }
 
     private void ClearRecentChatPlayers()
     {
