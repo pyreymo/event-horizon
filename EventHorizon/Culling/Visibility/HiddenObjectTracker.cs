@@ -107,6 +107,11 @@ internal sealed unsafe class HiddenObjectTracker
         return gameObject != null && hiddenObjects.TryGetValue((nint)gameObject, out var record) && record.IsSameObject(gameObject);
     }
 
+    public bool IsHidden(PlayerObjectIdentity identity)
+    {
+        return hiddenObjects.TryGetValue(identity.Address, out var record) && record.IsSameObject(identity);
+    }
+
     public void CollectHiddenPlayerAddresses(GameObjectManager* manager, List<nint> addresses)
     {
         if (manager == null)
@@ -158,5 +163,7 @@ internal sealed unsafe class HiddenObjectTracker
 
         public bool IsSameObject(GameObject* gameObject) =>
             gameObject != null && (ulong)gameObject->GetGameObjectId() == GameObjectId && gameObject->EntityId == EntityId;
+
+        public bool IsSameObject(PlayerObjectIdentity identity) => identity.GameObjectId == GameObjectId && identity.EntityId == EntityId;
     }
 }

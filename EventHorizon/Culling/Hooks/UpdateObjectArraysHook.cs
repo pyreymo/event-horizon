@@ -23,7 +23,6 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
     private delegate void* UpdateObjectArraysDelegate(GameObjectManager* objectManager);
 
     public bool NeedsDynamicRefresh => objectCuller.NeedsDynamicRefresh();
-    public bool HasActiveFades => objectCuller.HasActiveFades;
     public int HiddenPlayerCount => objectCuller.GetHiddenPlayerCount();
     public PlayerKeepBudgetStats KeepBudgetStats => objectCuller.GetKeepBudgetStats();
     public PlayerPreviewSnapshot PlayerPreviewSnapshot => objectCuller.GetPlayerPreviewSnapshot();
@@ -58,6 +57,11 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         OnObjectArraysUpdated(GameObjectManager.Instance());
     }
 
+    public void Tick()
+    {
+        objectCuller.Tick(GameObjectManager.Instance());
+    }
+
     public void RefreshPlayerPreview()
     {
         objectCuller.RefreshPlayerPreview(GameObjectManager.Instance());
@@ -82,7 +86,7 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
     private void* Detour(GameObjectManager* objectManager)
     {
         var result = hook.Original(objectManager);
-        OnObjectArraysUpdated(objectManager);
+        objectCuller.Tick(objectManager);
 
         return result;
     }

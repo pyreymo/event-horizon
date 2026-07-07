@@ -27,10 +27,13 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly PlayerKeepRules playerKeepRules;
     private readonly HiddenObjectTracker hiddenObjectTracker;
     private readonly ObjectFadeController fadeController;
+    private readonly ShowTransitionBudget showTransitionBudget = new();
     private PlayerKeepBudgetStats keepBudgetStats;
     private PlayerPreviewSnapshot playerPreviewSnapshot = PlayerPreviewSnapshot.Empty;
     private uint? previewSelectedPlayerEntityId;
     private long previewSelectionExpiresAt;
+    private int nextPlayerVisibilityPlanRevision;
+    private PlayerVisibilityReconciliation? latestPlayerVisibilityReconciliation;
 
     public ObjectCuller(
         Configuration configuration,
@@ -96,78 +99,48 @@ internal sealed unsafe class ObjectCuller : IDisposable
         }
 
         var playerKeepPlan = PlayerKeepPlan.Build(configuration, GetPlayerKeepCandidates(manager));
-        var previewVisibleEntityId = GetActivePreviewSelectedPlayerEntityId();
-        var previewBuilder = PlayerPreviewBuilder.Begin(manager, configuration);
-        keepBudgetStats = new(
-            playerKeepPlan.BudgetExemptPlayerCount,
-            playerKeepPlan.VisibleBudgetedPlayerCount,
-            Math.Clamp(configuration.VisiblePlayerCountLimit, 1, 100)
+        var playerVisibilityPlan = PlayerVisibilityPlan.Build(
+            ++nextPlayerVisibilityPlanRevision,
+            configuration,
+            manager,
+            playerKeepPlan,
+            GetActivePreviewSelectedPlayerEntityId()
         );
+        var previewBuilder = PlayerPreviewBuilder.Begin(manager, configuration);
+        keepBudgetStats = playerVisibilityPlan.BudgetStats;
 
-        for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
-        {
-            var gameObject = manager->Objects.IndexSorted[index].Value;
-            if (gameObject == null)
-            {
-                continue;
-            }
-
-            if (gameObject->ObjectKind != ObjectKind.Pc)
-            {
-                continue;
-            }
-
-            var shouldHideByRules = ShouldHidePlayerSlotObject(gameObject, index, playerKeepPlan);
-            var shouldHide = shouldHideByRules && previewVisibleEntityId != gameObject->EntityId;
-            if (!IsLocalPlayerReservedSlot(index) && IsPlayerRelatedEvenSlot(index))
-            {
-                var address = (nint)gameObject;
-                previewBuilder.Add(
-                    gameObject,
-                    index,
-                    playerKeepPlan.GetDecision(address),
-                    shouldHide,
-                    playerKeepPlan.IsCutByBudget(address)
-                );
-            }
-
-            if (UpdateFade(gameObject, shouldHide))
-            {
-                continue;
-            }
-
-            if (shouldHide)
-            {
-                Hide(gameObject);
-            }
-            else
-            {
-                RestoreIfHidden(gameObject);
-            }
-        }
-
-        for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
-        {
-            var gameObject = manager->Objects.IndexSorted[index].Value;
-            if (gameObject == null || gameObject->ObjectKind == ObjectKind.Pc)
-            {
-                continue;
-            }
-
-            if (ShouldHideNonPlayerSlotObject(manager, gameObject, index))
-            {
-                Hide(gameObject);
-            }
-            else
-            {
-                RestoreIfHidden(gameObject);
-            }
-        }
-
-        PruneMissingHiddenObjects(manager);
-        PruneMissingFades(manager);
-        UpdateHiddenPlayerVfx(manager);
+        var playerVisibilityReconciliation = PlayerVisibilityReconciler.Reconcile(playerVisibilityPlan, hiddenObjectTracker);
+        latestPlayerVisibilityReconciliation = playerVisibilityReconciliation;
+        AddPlayerPreviewEntries(manager, playerVisibilityPlan, previewBuilder);
+        TickVisibility(manager);
         playerPreviewSnapshot = previewBuilder.Build();
+    }
+
+    public void Tick(GameObjectManager* manager)
+    {
+        if (manager == null)
+        {
+            Clear();
+            return;
+        }
+
+        if (!CanTickVisibility())
+        {
+            Reset(manager);
+            return;
+        }
+
+        if (latestPlayerVisibilityReconciliation == null)
+        {
+            return;
+        }
+
+        if (!configuration.EnableFadeTransitions && HasActiveFades)
+        {
+            ResetFades(manager);
+        }
+
+        TickVisibility(manager);
     }
 
     public void Reset(GameObjectManager* manager)
@@ -271,6 +244,163 @@ internal sealed unsafe class ObjectCuller : IDisposable
         hiddenObjectTracker.RestoreIfHidden(gameObject);
     }
 
+    private void ApplyPlayerVisibilityReconciliation(GameObjectManager* manager, PlayerVisibilityReconciliation reconciliation)
+    {
+        foreach (var action in reconciliation.Actions)
+        {
+            switch (action.Kind)
+            {
+                case PlayerVisibilityActionKind.Show:
+                    ApplyShowAction(manager, action.Intent);
+                    break;
+                case PlayerVisibilityActionKind.Hide:
+                    ApplyHideAction(manager, action.Intent);
+                    break;
+                case PlayerVisibilityActionKind.Swap:
+                    ApplySwapAction(manager, action);
+                    break;
+            }
+        }
+    }
+
+    private void TickVisibility(GameObjectManager* manager)
+    {
+        if (latestPlayerVisibilityReconciliation == null)
+        {
+            return;
+        }
+
+        showTransitionBudget.BeginFrame();
+        ApplyPlayerVisibilityReconciliation(manager, latestPlayerVisibilityReconciliation);
+        ApplyNonPlayerVisibility(manager);
+        PruneMissingHiddenObjects(manager);
+        PruneMissingFades(manager);
+        UpdateHiddenPlayerVfx(manager);
+    }
+
+    private void ApplyNonPlayerVisibility(GameObjectManager* manager)
+    {
+        for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
+        {
+            var gameObject = manager->Objects.IndexSorted[index].Value;
+            if (gameObject == null || gameObject->ObjectKind == ObjectKind.Pc)
+            {
+                continue;
+            }
+
+            if (ShouldHideNonPlayerSlotObject(manager, gameObject, index))
+            {
+                Hide(gameObject);
+            }
+            else
+            {
+                RestoreIfHidden(gameObject);
+            }
+        }
+    }
+
+    private void ApplyShowAction(GameObjectManager* manager, PlayerVisibilityIntent intent)
+    {
+        var gameObject = FindPlayerObject(manager, intent.Identity, intent.ObjectIndex);
+        if (gameObject == null)
+        {
+            return;
+        }
+
+        var wasHidden = hiddenObjectTracker.IsHidden(gameObject);
+        if (wasHidden && !showTransitionBudget.CanStartShow())
+        {
+            return;
+        }
+
+        ApplyVisibility(gameObject, shouldHide: false);
+        if (wasHidden && !hiddenObjectTracker.IsHidden(gameObject))
+        {
+            showTransitionBudget.ConsumeShow();
+        }
+    }
+
+    private void ApplyHideAction(GameObjectManager* manager, PlayerVisibilityIntent intent)
+    {
+        var gameObject = FindPlayerObject(manager, intent.Identity, intent.ObjectIndex);
+        if (gameObject != null)
+        {
+            ApplyVisibility(gameObject, shouldHide: true);
+        }
+    }
+
+    private void ApplySwapAction(GameObjectManager* manager, PlayerVisibilityAction action)
+    {
+        if (!action.PairedIntent.HasValue)
+        {
+            ApplyShowAction(manager, action.Intent);
+            return;
+        }
+
+        var incoming = FindPlayerObject(manager, action.Intent.Identity, action.Intent.ObjectIndex);
+        if (incoming == null)
+        {
+            return;
+        }
+
+        var incomingWasHidden = hiddenObjectTracker.IsHidden(incoming);
+        if (incomingWasHidden && !showTransitionBudget.CanStartShow())
+        {
+            return;
+        }
+
+        var outgoingIntent = action.PairedIntent.Value;
+        var outgoing = FindPlayerObject(manager, outgoingIntent.Identity, outgoingIntent.ObjectIndex);
+        if (outgoing != null)
+        {
+            ApplyVisibility(outgoing, shouldHide: true);
+        }
+
+        ApplyVisibility(incoming, shouldHide: false);
+        if (incomingWasHidden && !hiddenObjectTracker.IsHidden(incoming))
+        {
+            showTransitionBudget.ConsumeShow();
+        }
+    }
+
+    private void ApplyVisibility(GameObject* gameObject, bool shouldHide)
+    {
+        if (UpdateFade(gameObject, shouldHide))
+        {
+            return;
+        }
+
+        if (shouldHide)
+        {
+            Hide(gameObject);
+        }
+        else
+        {
+            RestoreIfHidden(gameObject);
+        }
+    }
+
+    private static void AddPlayerPreviewEntries(
+        GameObjectManager* manager,
+        PlayerVisibilityPlan playerVisibilityPlan,
+        PlayerPreviewBuilder previewBuilder
+    )
+    {
+        foreach (var intent in playerVisibilityPlan.Intents)
+        {
+            if (IsLocalPlayerReservedSlot(intent.ObjectIndex) || !IsPlayerRelatedEvenSlot(intent.ObjectIndex))
+            {
+                continue;
+            }
+
+            var gameObject = FindPlayerObject(manager, intent.Identity, intent.ObjectIndex);
+            if (gameObject != null)
+            {
+                previewBuilder.Add(gameObject, intent.ObjectIndex, intent.Decision, !intent.DesiredVisible, intent.CutByBudget);
+            }
+        }
+    }
+
     private bool UpdateFade(GameObject* gameObject, bool shouldHide)
     {
         if (!configuration.EnableFadeTransitions)
@@ -300,12 +430,14 @@ internal sealed unsafe class ObjectCuller : IDisposable
     {
         hiddenObjectTracker.Clear();
         fadeController.Clear();
+        showTransitionBudget.Reset();
         ClearHiddenPlayerVfx();
         playerKeepRules.Clear();
         keepBudgetStats = default;
         playerPreviewSnapshot = PlayerPreviewSnapshot.Empty;
         previewSelectedPlayerEntityId = null;
         previewSelectionExpiresAt = 0;
+        latestPlayerVisibilityReconciliation = null;
     }
 
     #endregion
@@ -326,16 +458,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private bool ShouldSuspendCullingInDuty()
     {
         return configuration.DisableInDuty && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]);
-    }
-
-    private static bool ShouldHidePlayerSlotObject(GameObject* gameObject, int index, PlayerKeepPlan playerKeepPlan)
-    {
-        if (!IsPlayerRelatedEvenSlot(index) || IsLocalPlayerReservedSlot(index))
-        {
-            return false;
-        }
-
-        return playerKeepPlan.ShouldHide((nint)gameObject);
     }
 
     private bool ShouldHideNonPlayerSlotObject(GameObjectManager* manager, GameObject* gameObject, int index)
@@ -449,6 +571,34 @@ internal sealed unsafe class ObjectCuller : IDisposable
         return null;
     }
 
+    private static GameObject* FindPlayerObject(GameObjectManager* manager, PlayerObjectIdentity identity, int expectedIndex)
+    {
+        if (manager == null || identity.Address == nint.Zero)
+        {
+            return null;
+        }
+
+        if (expectedIndex >= 0 && expectedIndex < manager->Objects.IndexSorted.Length)
+        {
+            var expectedObject = manager->Objects.IndexSorted[expectedIndex].Value;
+            if (expectedObject != null && expectedObject->ObjectKind == ObjectKind.Pc && identity.Matches(expectedObject))
+            {
+                return expectedObject;
+            }
+        }
+
+        for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
+        {
+            var gameObject = manager->Objects.IndexSorted[index].Value;
+            if (gameObject != null && gameObject->ObjectKind == ObjectKind.Pc && identity.Matches(gameObject))
+            {
+                return gameObject;
+            }
+        }
+
+        return null;
+    }
+
     private bool IsHiddenByThisPlugin(GameObject* gameObject)
     {
         return hiddenObjectTracker.IsHidden(gameObject);
@@ -513,6 +663,11 @@ internal sealed unsafe class ObjectCuller : IDisposable
     public PlayerPreviewSnapshot GetPlayerPreviewSnapshot() => playerPreviewSnapshot;
 
     public bool NeedsDynamicRefresh()
+    {
+        return IsCullingEnabled() && !ShouldSuspendCullingInDuty() && playerState.IsLoaded;
+    }
+
+    private bool CanTickVisibility()
     {
         return IsCullingEnabled() && !ShouldSuspendCullingInDuty() && playerState.IsLoaded;
     }
