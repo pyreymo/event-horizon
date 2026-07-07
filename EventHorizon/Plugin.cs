@@ -143,7 +143,7 @@ public sealed class Plugin : IDalamudPlugin
         CharacterAlphaController = new CharacterAlphaController(ObjectTable);
         DtrBarIntegration = new DtrBarIntegration(DtrBar, Configuration, GetDtrBarState, SetPlayerHidingEnabled, ToggleConfigUi);
         DtrBackgroundController = new DtrBackgroundController(AddonLifecycle, GameGui, Configuration);
-        ChatLogScroller = new ChatLogScroller(GameGui, Framework);
+        ChatLogScroller = new ChatLogScroller(GameGui, Framework, Log);
         NamePlateTargetingMeMarkerController = new NamePlateTargetingMeMarkerController(
             AddonLifecycle,
             GameGui,
@@ -264,6 +264,8 @@ public sealed class Plugin : IDalamudPlugin
     public void RefreshDtrBackground() => DtrBackgroundController.Refresh();
 
     public void ScrollChatLogLines(int lineDelta) => ChatLogScroller.ScrollActivePanelLines(lineDelta);
+
+    public void JumpChatLogToMatchingText(string text, int direction) => ChatLogScroller.JumpToMatchingLogMessage(text, direction);
 
     public void RequestTargetingMeMarkerRefresh() => NamePlateTargetingMeMarkerController.RequestRefresh();
 

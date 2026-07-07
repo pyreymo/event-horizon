@@ -30,6 +30,7 @@ public partial class ConfigWindow : Window, IDisposable
     private float cullingLeftColumnWidth = 690f;
     private bool keepRuleOrderChanged;
     private bool showRaceSexEditor;
+    private string chatLogSearchText = string.Empty;
 
     private readonly record struct ImGuiItemState(bool Hovered, bool Active = false);
 

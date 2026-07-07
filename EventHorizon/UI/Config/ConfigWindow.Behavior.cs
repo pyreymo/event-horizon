@@ -141,6 +141,23 @@ public partial class ConfigWindow
         {
             plugin.ScrollChatLogLines(5);
         }
+
+        ImGui.Spacing();
+        ImGui.SetNextItemWidth(-1f);
+        ImGui.InputTextWithHint("##ChatLogSearchText", Loc.Text("Config.Debug.ChatSearchTextHint"), ref chatLogSearchText, 256);
+
+        buttonWidth = Math.Max(1f, (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X) * 0.5f);
+        if (ImGui.Button(Loc.Text("Config.Debug.JumpChatPreviousMatch"), new Vector2(buttonWidth, 0f)))
+        {
+            plugin.JumpChatLogToMatchingText(chatLogSearchText, -1);
+        }
+
+        ImGui.SameLine();
+
+        if (ImGui.Button(Loc.Text("Config.Debug.JumpChatNextMatch"), new Vector2(buttonWidth, 0f)))
+        {
+            plugin.JumpChatLogToMatchingText(chatLogSearchText, 1);
+        }
     }
 
     private void DrawTargetingMeNamePlateMarkerSection()

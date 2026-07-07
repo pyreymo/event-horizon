@@ -1,11 +1,14 @@
 using System;
+using System.Collections.Generic;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Client.UI.Misc;
 using FFXIVClientStructs.FFXIV.Component.GUI;
+using Lumina.Text.ReadOnly;
 
 namespace EventHorizon.Integration.Chat;
 
-internal sealed unsafe class ChatLogScroller(IGameGui gameGui, IFramework framework)
+internal sealed unsafe class ChatLogScroller(IGameGui gameGui, IFramework framework, IPluginLog log)
 {
     private const string ChatLogAddonName = "ChatLog";
     private const string ChatLogPanelAddonNamePrefix = "ChatLogPanel_";
@@ -18,6 +21,16 @@ internal sealed unsafe class ChatLogScroller(IGameGui gameGui, IFramework framew
         }
 
         _ = framework.RunOnFrameworkThread(() => TryScrollActivePanelLines(lineDelta));
+    }
+
+    public void JumpToMatchingLogMessage(string text, int direction)
+    {
+        if (string.IsNullOrWhiteSpace(text) || direction == 0)
+        {
+            return;
+        }
+
+        _ = framework.RunOnFrameworkThread(() => TryJumpToMatchingLogMessage(text, direction));
     }
 
     private bool TryScrollActivePanelLines(int lineDelta)
@@ -39,8 +52,141 @@ internal sealed unsafe class ChatLogScroller(IGameGui gameGui, IFramework framew
             return false;
         }
 
-        FireMouseWheelEvent(wheelEvent, (short)-lineDelta);
+        var beforeFirstLine = logViewer->FirstLineVisible;
+        var beforeLastLine = logViewer->LastLineVisible;
+        var beforeMessagesAbove = logViewer->MessagesAboveCurrent;
+
+        FireMouseWheelEvent(wheelEvent, ToWheelDirection(lineDelta));
+
+        log.Information(
+            "Chat scroll delta={RequestedDelta}: "
+                + "first={BeforeFirst}->{AfterFirst}, "
+                + "last={BeforeLast}->{AfterLast}, "
+                + "messagesAbove={BeforeMessages}->{AfterMessages}, "
+                + "totalLines={TotalLines}",
+            lineDelta,
+            beforeFirstLine,
+            logViewer->FirstLineVisible,
+            beforeLastLine,
+            logViewer->LastLineVisible,
+            beforeMessagesAbove,
+            logViewer->MessagesAboveCurrent,
+            logViewer->TotalLineCount
+        );
         return true;
+    }
+
+    private bool TryJumpToMatchingLogMessage(string text, int direction)
+    {
+        if (!TryGetActivePanel(out var panel))
+        {
+            return false;
+        }
+
+        var logViewer = &panel->LogViewer;
+        if (logViewer->ChatText == null)
+        {
+            return false;
+        }
+
+        var wheelEvent = FindMouseWheelEvent(panel);
+        if (wheelEvent == null || wheelEvent->Listener == null)
+        {
+            return false;
+        }
+
+        var matchingMessageIndices = FindMatchingLogMessageIndices(text);
+        var targetMessageIndex =
+            direction < 0
+                ? FindPreviousMatchingIndex(matchingMessageIndices, (int)logViewer->FirstLineVisible - 1)
+                : FindNextMatchingIndex(matchingMessageIndices, (int)logViewer->LastLineVisible + 1);
+        if (targetMessageIndex < 0)
+        {
+            return false;
+        }
+
+        var lineDelta = targetMessageIndex - (int)logViewer->FirstLineVisible;
+        if (lineDelta == 0)
+        {
+            return true;
+        }
+
+        FireMouseWheelEvent(wheelEvent, ToWheelDirection(lineDelta));
+        return true;
+    }
+
+    private static int[] FindMatchingLogMessageIndices(string searchText)
+    {
+        var raptureLogModule = RaptureLogModule.Instance();
+        if (raptureLogModule == null)
+        {
+            return [];
+        }
+
+        var messageCount = raptureLogModule->LogModule.LogMessageCount;
+        if (messageCount <= 0)
+        {
+            return [];
+        }
+
+        var matchingMessageIndices = new List<int>();
+        for (var i = 0; i < messageCount; i++)
+        {
+            if (!raptureLogModule->GetLogMessageDetail(i, out var senderBytes, out var messageBytes, out _, out _, out _, out _))
+            {
+                continue;
+            }
+
+            var senderText = ExtractText(senderBytes);
+            var messageText = ExtractText(messageBytes);
+            var combinedText = string.Concat(senderText, " ", messageText);
+            if (ContainsText(combinedText, searchText))
+            {
+                matchingMessageIndices.Add(i);
+            }
+        }
+
+        return matchingMessageIndices.ToArray();
+    }
+
+    private static string ExtractText(byte[] bytes)
+    {
+        var span = new ReadOnlySeStringSpan(bytes);
+        return span.ExtractText();
+    }
+
+    private static int FindPreviousMatchingIndex(int[] indices, int startIndex)
+    {
+        for (var i = indices.Length - 1; i >= 0; i--)
+        {
+            if (indices[i] <= startIndex)
+            {
+                return indices[i];
+            }
+        }
+
+        return -1;
+    }
+
+    private static int FindNextMatchingIndex(int[] indices, int startIndex)
+    {
+        for (var i = 0; i < indices.Length; i++)
+        {
+            if (indices[i] >= startIndex)
+            {
+                return indices[i];
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool ContainsText(string value, string text) => value.Contains(text, StringComparison.OrdinalIgnoreCase);
+
+    private static short ToWheelDirection(int lineDelta)
+    {
+        var wheelDirection = -lineDelta;
+        return (short)Math.Clamp(wheelDirection, short.MinValue + 1, short.MaxValue);
     }
 
     private static void FireMouseWheelEvent(AtkEvent* registeredEvent, short wheelDirection)

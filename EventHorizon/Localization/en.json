@@ -138,5 +138,8 @@
     "Config.Section.Debug": "Debug",
     "Config.Debug.ScrollChatUpFiveLines": "Scroll chat up 5 lines",
     "Config.Debug.ScrollChatDownFiveLines": "Scroll chat down 5 lines",
+    "Config.Debug.ChatSearchTextHint": "Text to find in chat",
+    "Config.Debug.JumpChatPreviousMatch": "Previous matching line",
+    "Config.Debug.JumpChatNextMatch": "Next matching line",
     "Config.EnableHiddenPlayerGroundMarker": "Show an effect at hidden players' feet (experimental)"
 }

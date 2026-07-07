@@ -138,5 +138,8 @@
     "Config.Section.Debug": "调试",
     "Config.Debug.ScrollChatUpFiveLines": "聊天上滚 5 行",
     "Config.Debug.ScrollChatDownFiveLines": "聊天下滚 5 行",
+    "Config.Debug.ChatSearchTextHint": "要在聊天中查找的文本",
+    "Config.Debug.JumpChatPreviousMatch": "上一条匹配行",
+    "Config.Debug.JumpChatNextMatch": "下一条匹配行",
     "Config.EnableHiddenPlayerGroundMarker": "在隐藏玩家脚下显示特效（实验性）"
 }
