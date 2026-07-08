@@ -105,6 +105,9 @@
 
     "Config.Section.PlayerDisplay": "Player display",
     "Config.EnableFadeTransitions": "Fade players in and out when visibility changes",
+    "Config.Section.LayoutGraphics": "Layout graphics",
+    "Config.HideBgPartGraphicsObjects": "Hide current area's BG part graphics",
+    "Config.HideTerrainGraphicsObjects": "Hide terrain graphics",
 
     "Config.Section.TargetingMeMarker": "Targeting-me marker",
     "Config.EnableTargetingMeMarker": "Mark players targeting me",

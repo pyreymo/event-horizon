@@ -32,6 +32,8 @@ internal class Configuration : IPluginConfiguration
     public bool ShowFrameRateInDtrBar { get; set; } = true;
     public bool EnableDtrBackground { get; set; } = false;
     public bool EnableHiddenPlayerGroundMarker { get; set; } = false;
+    public bool HideBgPartGraphicsObjects { get; set; } = false;
+    public bool HideTerrainGraphicsObjects { get; set; } = false;
     public bool EnableTargetingMeMarker { get; set; } = false;
 
     [JsonProperty(nameof(EnableTargetingMeNamePlateMarker))]

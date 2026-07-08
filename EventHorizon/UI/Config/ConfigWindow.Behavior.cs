@@ -11,6 +11,7 @@ public partial class ConfigWindow
     {
         DrawCard(Loc.Text("Config.Section.DtrBar"), DrawDtrBarControls);
         DrawCard(Loc.Text("Config.Section.PlayerDisplay"), DrawPlayerDisplayControls);
+        DrawCard(Loc.Text("Config.Section.LayoutGraphics"), DrawLayoutGraphicsControls);
         DrawCard(Loc.Text("Config.Section.TargetingMeMarker"), DrawTargetingMeMarkerControls);
     }
 
@@ -84,6 +85,25 @@ public partial class ConfigWindow
         {
             configuration.EnableHiddenPlayerGroundMarker = enableHiddenPlayerGroundMarker;
             SaveAndRefreshWithoutRuleReset();
+        }
+    }
+
+    private void DrawLayoutGraphicsControls()
+    {
+        var hideBgPartGraphicsObjects = configuration.HideBgPartGraphicsObjects;
+        if (DrawAutoFitCheckbox("HideBgPartGraphicsObjects", Loc.Text("Config.HideBgPartGraphicsObjects"), ref hideBgPartGraphicsObjects))
+        {
+            configuration.HideBgPartGraphicsObjects = hideBgPartGraphicsObjects;
+            configuration.Save();
+        }
+
+        var hideTerrainGraphicsObjects = configuration.HideTerrainGraphicsObjects;
+        if (
+            DrawAutoFitCheckbox("HideTerrainGraphicsObjects", Loc.Text("Config.HideTerrainGraphicsObjects"), ref hideTerrainGraphicsObjects)
+        )
+        {
+            configuration.HideTerrainGraphicsObjects = hideTerrainGraphicsObjects;
+            configuration.Save();
         }
     }
 

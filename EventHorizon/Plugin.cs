@@ -12,6 +12,7 @@ using EventHorizon.Culling;
 using EventHorizon.Culling.Hooks;
 using EventHorizon.Culling.Rules;
 using EventHorizon.Integration.Dtr;
+using EventHorizon.Integration.Layout;
 using EventHorizon.Integration.NamePlate;
 using EventHorizon.Integration.Vfx;
 using EventHorizon.Localization;
@@ -104,6 +105,7 @@ public sealed class Plugin : IDalamudPlugin
     private StaticVfxController StaticVfxController { get; init; }
     private DtrBarIntegration DtrBarIntegration { get; init; }
     private DtrBackgroundController DtrBackgroundController { get; init; }
+    private LayoutGraphicsVisibilityController LayoutGraphicsVisibilityController { get; init; }
     private NamePlateTargetingMeMarkerController NamePlateTargetingMeMarkerController { get; init; }
     private CharacterAlphaController CharacterAlphaController { get; init; }
 
@@ -147,6 +149,7 @@ public sealed class Plugin : IDalamudPlugin
         CharacterAlphaController = new CharacterAlphaController(ObjectTable);
         DtrBarIntegration = new DtrBarIntegration(DtrBar, Configuration, GetDtrBarState, SetPlayerHidingEnabled, ToggleConfigUi);
         DtrBackgroundController = new DtrBackgroundController(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
+        LayoutGraphicsVisibilityController = new LayoutGraphicsVisibilityController(GameInteropProvider, ClientState, Log);
         NamePlateTargetingMeMarkerController = new NamePlateTargetingMeMarkerController(
             AddonLifecycle,
             GameGui,
@@ -193,6 +196,7 @@ public sealed class Plugin : IDalamudPlugin
         PlayerPreviewHighlighter.Dispose();
         DtrBarIntegration.Dispose();
         DtrBackgroundController.Dispose();
+        LayoutGraphicsVisibilityController.Dispose();
         NamePlateTargetingMeMarkerController.Dispose();
         CharacterAlphaController.Dispose();
         UpdateObjectArraysHook.Dispose();
@@ -292,6 +296,10 @@ public sealed class Plugin : IDalamudPlugin
         var dtrTicks = Stopwatch.GetTimestamp() - phaseStart;
 
         phaseStart = Stopwatch.GetTimestamp();
+        LayoutGraphicsVisibilityController.Update(Configuration.HideBgPartGraphicsObjects, Configuration.HideTerrainGraphicsObjects);
+        var layoutGraphicsTicks = Stopwatch.GetTimestamp() - phaseStart;
+
+        phaseStart = Stopwatch.GetTimestamp();
         PlayerPreviewHighlighter.Update();
         var highlightTicks = Stopwatch.GetTimestamp() - phaseStart;
 
@@ -299,7 +307,17 @@ public sealed class Plugin : IDalamudPlugin
         if (!NeedsDynamicCullingRefresh())
         {
             var needsDynamicTicks = Stopwatch.GetTimestamp() - phaseStart;
-            LogSlowFrameworkUpdate(start, dtrTicks, highlightTicks, needsDynamicTicks, 0, 0, didRefresh: false, tickTrace: default);
+            LogSlowFrameworkUpdate(
+                start,
+                dtrTicks,
+                layoutGraphicsTicks,
+                highlightTicks,
+                needsDynamicTicks,
+                0,
+                0,
+                didRefresh: false,
+                tickTrace: default
+            );
             return;
         }
         var dynamicCheckTicks = Stopwatch.GetTimestamp() - phaseStart;
@@ -312,7 +330,17 @@ public sealed class Plugin : IDalamudPlugin
         var now = Environment.TickCount64;
         if (now < nextDynamicCullingRefresh)
         {
-            LogSlowFrameworkUpdate(start, dtrTicks, highlightTicks, dynamicCheckTicks, tickTicks, 0, didRefresh: false, tickTrace);
+            LogSlowFrameworkUpdate(
+                start,
+                dtrTicks,
+                layoutGraphicsTicks,
+                highlightTicks,
+                dynamicCheckTicks,
+                tickTicks,
+                0,
+                didRefresh: false,
+                tickTrace
+            );
             return;
         }
 
@@ -320,7 +348,17 @@ public sealed class Plugin : IDalamudPlugin
         RefreshObjectCulling();
         var refreshTicks = Stopwatch.GetTimestamp() - phaseStart;
         nextDynamicCullingRefresh = Environment.TickCount64 + DynamicCullingRefreshIntervalMs;
-        LogSlowFrameworkUpdate(start, dtrTicks, highlightTicks, dynamicCheckTicks, tickTicks, refreshTicks, didRefresh: true, tickTrace);
+        LogSlowFrameworkUpdate(
+            start,
+            dtrTicks,
+            layoutGraphicsTicks,
+            highlightTicks,
+            dynamicCheckTicks,
+            tickTicks,
+            refreshTicks,
+            didRefresh: true,
+            tickTrace
+        );
     }
 
     private void RefreshDtrBarIfNeeded()
@@ -343,6 +381,7 @@ public sealed class Plugin : IDalamudPlugin
     private void LogSlowFrameworkUpdate(
         long start,
         long dtrTicks,
+        long layoutGraphicsTicks,
         long highlightTicks,
         long dynamicCheckTicks,
         long tickTicks,
@@ -365,9 +404,10 @@ public sealed class Plugin : IDalamudPlugin
 
         nextSlowFrameworkUpdateLog = now + SlowFrameworkUpdateLogCooldownMs;
         Log.Information(
-            "[Perf] Slow Plugin.OnFrameworkUpdate total={TotalMs:F3}ms dtr={DtrMs:F3}ms highlight={HighlightMs:F3}ms dynamicCheck={DynamicCheckMs:F3}ms tick={TickMs:F3}ms refresh={RefreshMs:F3}ms didRefresh={DidRefresh} tickTrace={TickTrace} refreshTrace={RefreshTrace}",
+            "[Perf] Slow Plugin.OnFrameworkUpdate total={TotalMs:F3}ms dtr={DtrMs:F3}ms layoutGraphics={LayoutGraphicsMs:F3}ms highlight={HighlightMs:F3}ms dynamicCheck={DynamicCheckMs:F3}ms tick={TickMs:F3}ms refresh={RefreshMs:F3}ms didRefresh={DidRefresh} tickTrace={TickTrace} refreshTrace={RefreshTrace}",
             ToMilliseconds(totalTicks),
             ToMilliseconds(dtrTicks),
+            ToMilliseconds(layoutGraphicsTicks),
             ToMilliseconds(highlightTicks),
             ToMilliseconds(dynamicCheckTicks),
             ToMilliseconds(tickTicks),

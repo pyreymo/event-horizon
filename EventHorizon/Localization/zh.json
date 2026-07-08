@@ -105,6 +105,9 @@
 
     "Config.Section.PlayerDisplay": "玩家显示",
     "Config.EnableFadeTransitions": "隐藏/显示玩家时淡入淡出",
+    "Config.Section.LayoutGraphics": "场景图形",
+    "Config.HideBgPartGraphicsObjects": "隐藏当前区域场景部件图形",
+    "Config.HideTerrainGraphicsObjects": "隐藏地形图形",
 
     "Config.Section.TargetingMeMarker": "注视标记",
     "Config.EnableTargetingMeMarker": "标记正在看我的玩家",
