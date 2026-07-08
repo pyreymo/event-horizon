@@ -3,7 +3,7 @@
     "Author": "pyreymo",
     "Name": "Event Horizon",
     "InternalName": "EventHorizon",
-    "AssemblyVersion": "0.2.2.1",
+    "AssemblyVersion": "0.2.3.0",
     "Description": "Cull distant or irrelevant world objects around your character. Use /eventhorizon or /eh to open settings.",
     "ApplicableVersion": "any",
     "RepoUrl": "https://github.com/pyreymo/event-horizon",
@@ -20,9 +20,9 @@
     "Punchline": "Cull what doesn't orbit you.",
     "AcceptsFeedback": true,
     "IconUrl": "https://raw.githubusercontent.com/pyreymo/event-horizon/master/images/icon.png",
-    "DownloadLinkInstall": "https://github.com/pyreymo/event-horizon/releases/download/v0.2.2.1/EventHorizon.zip",
-    "DownloadLinkUpdate": "https://github.com/pyreymo/event-horizon/releases/download/v0.2.2.1/EventHorizon.zip",
-    "LastUpdate": 1783069319,
-    "Changelog": "- Added a targeting-me marker that can highlight players targeting you with a native nameplate marker and optional VFX, including style controls for placement, scale, opacity, glow, and color.\n- Added an experimental hidden-player ground marker and updated VFX handling so hidden-player effects are tracked, updated, and cleaned up more reliably.\n- Reworked the player visibility planner and reconciliation path to reduce expensive refresh work, smooth fade/show transitions, and make visibility changes more predictable under player-count pressure.\n- Reorganized behavior settings into clearer sections with collapsed advanced controls, refreshed English and Chinese copy, and kept compact DTR controls for FPS and background styling.\n- Fixed the experimental DTR background lifecycle so it tears down safely when the DTR addon, chat log skin, bounds, or login state are unavailable, preventing stale native nodes after returning to the title screen."
+    "DownloadLinkInstall": "https://github.com/pyreymo/event-horizon/releases/download/v0.2.3/EventHorizon.zip",
+    "DownloadLinkUpdate": "https://github.com/pyreymo/event-horizon/releases/download/v0.2.3/EventHorizon.zip",
+    "LastUpdate": 1783476519,
+    "Changelog": "- Added an option to show FPS in the server info bar alongside EH: ON/OFF, making it easier to compare frame rate changes when toggling Event Horizon.\n- Added an optional dark background for the server info bar. Protect your eyes, one UI element at a time."
   }
 ]
