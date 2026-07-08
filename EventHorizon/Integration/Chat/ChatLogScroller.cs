@@ -8,6 +8,9 @@ using Lumina.Text.ReadOnly;
 
 namespace EventHorizon.Integration.Chat;
 
+/// <summary>
+/// STUB only
+/// </summary>
 internal sealed unsafe class ChatLogScroller(IGameGui gameGui, IFramework framework, IPluginLog log)
 {
     private const string ChatLogAddonName = "ChatLog";

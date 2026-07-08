@@ -11,7 +11,6 @@ using Dalamud.Plugin.Services;
 using EventHorizon.Culling;
 using EventHorizon.Culling.Hooks;
 using EventHorizon.Culling.Rules;
-using EventHorizon.Integration.Chat;
 using EventHorizon.Integration.Dtr;
 using EventHorizon.Integration.NamePlate;
 using EventHorizon.Integration.Vfx;
@@ -49,6 +48,9 @@ public sealed class Plugin : IDalamudPlugin
 
     [PluginService]
     internal static IPlayerState PlayerState { get; private set; } = null!;
+
+    [PluginService]
+    internal static IClientState ClientState { get; private set; } = null!;
 
     [PluginService]
     internal static IObjectTable ObjectTable { get; private set; } = null!;
@@ -102,7 +104,6 @@ public sealed class Plugin : IDalamudPlugin
     private StaticVfxController StaticVfxController { get; init; }
     private DtrBarIntegration DtrBarIntegration { get; init; }
     private DtrBackgroundController DtrBackgroundController { get; init; }
-    private ChatLogScroller ChatLogScroller { get; init; }
     private NamePlateTargetingMeMarkerController NamePlateTargetingMeMarkerController { get; init; }
     private CharacterAlphaController CharacterAlphaController { get; init; }
 
@@ -145,8 +146,7 @@ public sealed class Plugin : IDalamudPlugin
         );
         CharacterAlphaController = new CharacterAlphaController(ObjectTable);
         DtrBarIntegration = new DtrBarIntegration(DtrBar, Configuration, GetDtrBarState, SetPlayerHidingEnabled, ToggleConfigUi);
-        DtrBackgroundController = new DtrBackgroundController(AddonLifecycle, GameGui, Configuration);
-        ChatLogScroller = new ChatLogScroller(GameGui, Framework, Log);
+        DtrBackgroundController = new DtrBackgroundController(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
         NamePlateTargetingMeMarkerController = new NamePlateTargetingMeMarkerController(
             AddonLifecycle,
             GameGui,
@@ -265,10 +265,6 @@ public sealed class Plugin : IDalamudPlugin
     public void RefreshDtrBar() => DtrBarIntegration.Refresh();
 
     public void RefreshDtrBackground() => DtrBackgroundController.Refresh();
-
-    public void ScrollChatLogLines(int lineDelta) => ChatLogScroller.ScrollActivePanelLines(lineDelta);
-
-    public void JumpChatLogToMatchingText(string text, int direction) => ChatLogScroller.JumpToMatchingLogMessage(text, direction);
 
     public void RequestTargetingMeMarkerRefresh() => NamePlateTargetingMeMarkerController.RequestRefresh();
 

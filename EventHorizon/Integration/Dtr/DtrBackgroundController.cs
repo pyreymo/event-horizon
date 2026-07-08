@@ -14,27 +14,38 @@ internal sealed class DtrBackgroundController : IDisposable
 
     private readonly IAddonLifecycle addonLifecycle;
     private readonly IGameGui gameGui;
+    private readonly IFramework framework;
+    private readonly IClientState clientState;
     private readonly Configuration configuration;
     private readonly ChatLogBackgroundSkinProvider skinProvider;
     private readonly DtrBackgroundNode backgroundNode = new(BackgroundNodeId);
 
-    public DtrBackgroundController(IAddonLifecycle addonLifecycle, IGameGui gameGui, Configuration configuration)
+    public DtrBackgroundController(
+        IAddonLifecycle addonLifecycle,
+        IGameGui gameGui,
+        IFramework framework,
+        IClientState clientState,
+        Configuration configuration
+    )
     {
         this.addonLifecycle = addonLifecycle;
         this.gameGui = gameGui;
+        this.framework = framework;
+        this.clientState = clientState;
         this.configuration = configuration;
         skinProvider = new ChatLogBackgroundSkinProvider(gameGui);
 
         addonLifecycle.RegisterListener(AddonEvent.PostSetup, DtrAddonName, OnDtrPostSetup);
         addonLifecycle.RegisterListener(AddonEvent.PreDraw, DtrAddonName, OnDtrPreDraw);
         addonLifecycle.RegisterListener(AddonEvent.PreFinalize, DtrAddonName, OnDtrPreFinalize);
+        framework.Update += OnFrameworkUpdate;
 
         Refresh();
     }
 
     public void Refresh()
     {
-        if (!configuration.EnableDtrBackground)
+        if (!ShouldShowBackground())
         {
             RemoveBackground();
             return;
@@ -49,6 +60,7 @@ internal sealed class DtrBackgroundController : IDisposable
 
     public void Dispose()
     {
+        framework.Update -= OnFrameworkUpdate;
         addonLifecycle.UnregisterListener(AddonEvent.PostSetup, DtrAddonName, OnDtrPostSetup);
         addonLifecycle.UnregisterListener(AddonEvent.PreDraw, DtrAddonName, OnDtrPreDraw);
         addonLifecycle.UnregisterListener(AddonEvent.PreFinalize, DtrAddonName, OnDtrPreFinalize);
@@ -60,28 +72,45 @@ internal sealed class DtrBackgroundController : IDisposable
 
     private void OnDtrPreDraw(AddonEvent type, AddonArgs args) => Apply(args.Addon);
 
-    private void OnDtrPreFinalize(AddonEvent type, AddonArgs args) => RemoveBackground();
+    private void OnDtrPreFinalize(AddonEvent type, AddonArgs args) => RemoveBackground(args.Addon);
+
+    private void OnFrameworkUpdate(IFramework _)
+    {
+        if (!clientState.IsLoggedIn && backgroundNode.IsCreated)
+        {
+            RemoveBackground();
+        }
+    }
 
     private unsafe void Apply(nint dtrPointer)
     {
-        if (!configuration.EnableDtrBackground)
+        if (!ShouldShowBackground())
+        {
+            RemoveBackground(dtrPointer);
+            return;
+        }
+
+        if (dtrPointer == nint.Zero)
         {
             RemoveBackground();
             return;
         }
 
-        if (dtrPointer == nint.Zero || !skinProvider.TryGetChatLogBackgroundSkin(out var skin))
+        if (!skinProvider.TryGetChatLogBackgroundSkin(out var skin))
         {
+            RemoveBackground(dtrPointer);
             return;
         }
 
         var unit = (AtkUnitBase*)dtrPointer;
         var root = unit->RootNode;
-        if (
-            root == null
-            || !backgroundNode.EnsureAttached(unit, root)
-            || !DtrBoundsProvider.TryGetBounds(unit, backgroundNode.ResourceNode, out var bounds)
-        )
+        if (root == null || !DtrBoundsProvider.TryGetBounds(unit, backgroundNode.ResourceNode, out var bounds))
+        {
+            RemoveBackground(dtrPointer);
+            return;
+        }
+
+        if (!backgroundNode.EnsureAttached(unit, root))
         {
             return;
         }
@@ -92,10 +121,15 @@ internal sealed class DtrBackgroundController : IDisposable
         }
     }
 
-    private unsafe void RemoveBackground()
+    private void RemoveBackground()
     {
         var addonPointer = gameGui.GetAddonByName(DtrAddonName);
-        backgroundNode.Destroy(addonPointer != nint.Zero ? (AtkUnitBase*)addonPointer.Address : null);
+        RemoveBackground(addonPointer != nint.Zero ? addonPointer.Address : nint.Zero);
+    }
+
+    private unsafe void RemoveBackground(nint dtrPointer)
+    {
+        backgroundNode.Destroy(dtrPointer != nint.Zero ? (AtkUnitBase*)dtrPointer : null);
     }
 
     private DtrBackgroundStyle CreateStyle()
@@ -108,4 +142,6 @@ internal sealed class DtrBackgroundController : IDisposable
             configuration.DtrBackgroundAlpha
         );
     }
+
+    private bool ShouldShowBackground() => configuration.EnableDtrBackground && clientState.IsLoggedIn;
 }

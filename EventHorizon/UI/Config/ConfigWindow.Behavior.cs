@@ -12,7 +12,6 @@ public partial class ConfigWindow
         DrawCard(Loc.Text("Config.Section.DtrBar"), DrawDtrBarControls);
         DrawCard(Loc.Text("Config.Section.PlayerDisplay"), DrawPlayerDisplayControls);
         DrawCard(Loc.Text("Config.Section.TargetingMeMarker"), DrawTargetingMeMarkerControls);
-        DrawCard(Loc.Text("Config.Section.Debug"), DrawDebugControls);
     }
 
     private void DrawDtrBarControls()
@@ -124,39 +123,6 @@ public partial class ConfigWindow
         {
             configuration.EnableTargetingMeMarkerCurrentTargetTest = enableTargetingMeMarkerCurrentTargetTest;
             SaveAndRequestTargetingMeMarkerRefresh();
-        }
-    }
-
-    private void DrawDebugControls()
-    {
-        var buttonWidth = Math.Max(1f, (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X) * 0.5f);
-        if (ImGui.Button(Loc.Text("Config.Debug.ScrollChatUpFiveLines"), new Vector2(buttonWidth, 0f)))
-        {
-            plugin.ScrollChatLogLines(-5);
-        }
-
-        ImGui.SameLine();
-
-        if (ImGui.Button(Loc.Text("Config.Debug.ScrollChatDownFiveLines"), new Vector2(buttonWidth, 0f)))
-        {
-            plugin.ScrollChatLogLines(5);
-        }
-
-        ImGui.Spacing();
-        ImGui.SetNextItemWidth(-1f);
-        ImGui.InputTextWithHint("##ChatLogSearchText", Loc.Text("Config.Debug.ChatSearchTextHint"), ref chatLogSearchText, 256);
-
-        buttonWidth = Math.Max(1f, (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X) * 0.5f);
-        if (ImGui.Button(Loc.Text("Config.Debug.JumpChatPreviousMatch"), new Vector2(buttonWidth, 0f)))
-        {
-            plugin.JumpChatLogToMatchingText(chatLogSearchText, -1);
-        }
-
-        ImGui.SameLine();
-
-        if (ImGui.Button(Loc.Text("Config.Debug.JumpChatNextMatch"), new Vector2(buttonWidth, 0f)))
-        {
-            plugin.JumpChatLogToMatchingText(chatLogSearchText, 1);
         }
     }
 
