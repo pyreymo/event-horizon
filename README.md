@@ -72,6 +72,14 @@ You can limit how many other players remain visible after keep rules are applied
 
 This is useful in cities, venues, hunt trains, and other crowded scenes. Budget-exempt rules can keep important players visible beyond that limit.
 
+### Targeting-me marker
+
+Event Horizon can mark players who are targeting you.
+
+The marker can use a native nameplate icon, an optional world VFX marker, or both. You can tune its placement, scale, opacity, glow strength, and color from the behavior settings.
+
+This is useful when you want to keep the "players targeting me" rule visible and easy to verify in crowded scenes.
+
 ### Live preview
 
 The settings window includes a live preview of nearby players, showing who is visible or hidden, which keep rule matched, whether that player counts toward the budget, and the nearby-player keep range.
@@ -91,6 +99,12 @@ For players who remain visible, Event Horizon can also hide their:
 
 This reduces extra visual noise without hiding the player themselves.
 
+### Server info bar controls
+
+Event Horizon can add a compact Server Info Bar entry for quick status and toggling.
+
+The entry can show the current player-hiding state, optionally include FPS, and can be removed entirely from the behavior settings. An experimental native background can also be enabled for the full Server Info Bar.
+
 ### Safety options
 
 Event Horizon can automatically suspend hiding:
@@ -99,6 +113,8 @@ Event Horizon can automatically suspend hiding:
 - When the number of other players is below your configured threshold
 
 You can also preview the nearby-player keep range in the world.
+
+Experimental visual aids can show hidden-player ground markers, but these are optional and disabled unless you enable them.
 
 ## Commands
 
@@ -120,6 +136,7 @@ You can also preview the nearby-player keep range in the world.
 The plugin code is grouped by responsibility:
 
 - `EventHorizon/Culling` contains the object-table hook, visibility updates, fade handling, and keep-rule decisions.
+- `EventHorizon/Integration` contains native UI, nameplate marker, DTR, and VFX integrations.
 - `EventHorizon/Preview` contains preview snapshots, preview rendering, the floating preview window, world arrows, and selected-player highlights.
 - `EventHorizon/UI/Config` contains settings tabs and shared config-window layout helpers.
 - `EventHorizon/Settings` contains persisted plugin configuration.
