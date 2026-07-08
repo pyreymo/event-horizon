@@ -841,6 +841,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
             var keepDecision = playerKeepRules.GetKeepDecision(gameObject);
             if (keepDecision.Kind != PlayerKeepDecisionKind.None)
             {
+                keepDecision = keepDecision.WithViewport(IsScreenVisibleObject(gameObject));
                 playerKeepCandidates.Add(new((nint)gameObject, keepDecision, gameObject->EntityId));
             }
         }
@@ -1052,6 +1053,11 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private bool IsScreenVisiblePosition(Vector3 position)
     {
         return gameGui.WorldToScreen(position, out _, out var inView) && inView;
+    }
+
+    private bool IsScreenVisibleObject(GameObject* gameObject)
+    {
+        return TryGetObjectPosition(gameObject, out var position) && IsScreenVisiblePosition(position);
     }
 
     private void ClearHiddenPlayerVfx()

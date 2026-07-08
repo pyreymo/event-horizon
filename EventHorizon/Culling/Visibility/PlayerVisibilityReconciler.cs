@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using EventHorizon.Culling.Rules;
 
 namespace EventHorizon.Culling.Visibility;
 
@@ -106,10 +107,10 @@ internal sealed class PlayerVisibilityReconciler
             return rankComparison;
         }
 
-        var distanceComparison = left.Decision.TieBreaker.DistanceSq.CompareTo(right.Decision.TieBreaker.DistanceSq);
-        if (distanceComparison != 0)
+        var tieBreakerComparison = PlayerKeepTieBreaker.Compare(left.Decision.TieBreaker, right.Decision.TieBreaker);
+        if (tieBreakerComparison != 0)
         {
-            return distanceComparison;
+            return tieBreakerComparison;
         }
 
         var entityComparison = left.Identity.EntityId.CompareTo(right.Identity.EntityId);

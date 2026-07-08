@@ -123,10 +123,10 @@ internal sealed class PlayerKeepPlan
             return rankComparison;
         }
 
-        var distanceComparison = left.KeepDecision.TieBreaker.DistanceSq.CompareTo(right.KeepDecision.TieBreaker.DistanceSq);
-        if (distanceComparison != 0)
+        var tieBreakerComparison = PlayerKeepTieBreaker.Compare(left.KeepDecision.TieBreaker, right.KeepDecision.TieBreaker);
+        if (tieBreakerComparison != 0)
         {
-            return distanceComparison;
+            return tieBreakerComparison;
         }
 
         var entityComparison = left.EntityId.CompareTo(right.EntityId);
@@ -148,11 +148,23 @@ internal enum PlayerKeepDecisionKind
     Keep,
 }
 
-internal readonly record struct PlayerKeepTieBreaker(float DistanceSq)
+internal readonly record struct PlayerKeepTieBreaker(bool InViewport, float DistanceSq)
 {
-    public static readonly PlayerKeepTieBreaker None = new(float.MaxValue);
+    public static readonly PlayerKeepTieBreaker None = new(false, float.MaxValue);
 
-    public static PlayerKeepTieBreaker Nearby(float distanceSq) => new(distanceSq);
+    public static PlayerKeepTieBreaker Nearby(float distanceSq) => new(false, distanceSq);
+
+    public PlayerKeepTieBreaker WithViewport(bool inViewport) => this with { InViewport = inViewport };
+
+    public static int Compare(PlayerKeepTieBreaker left, PlayerKeepTieBreaker right)
+    {
+        if (left.InViewport != right.InViewport)
+        {
+            return left.InViewport ? -1 : 1;
+        }
+
+        return left.DistanceSq.CompareTo(right.DistanceSq);
+    }
 }
 
 internal readonly record struct PlayerKeepDecision(
@@ -180,4 +192,6 @@ internal readonly record struct PlayerKeepDecision(
         PlayerKeepTieBreaker tieBreaker,
         PlayerKeepRuleMask matchedRules
     ) => new(PlayerKeepDecisionKind.Keep, ruleId, rank, budgetPolicy, tieBreaker, matchedRules);
+
+    public PlayerKeepDecision WithViewport(bool inViewport) => this with { TieBreaker = TieBreaker.WithViewport(inViewport) };
 }
