@@ -37,7 +37,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly ObjectFadeController fadeController;
     private readonly PlayerVisibilityReconciler playerVisibilityReconciler = new();
     private readonly ShowTransitionBudget showTransitionBudget = new();
-    private readonly List<PlayerVisibilityIntent> playerVisibilityIntents = [];
+    private readonly List<PlayerVisibilityPlanEntry> playerVisibilityPlanEntries = [];
+    private readonly List<PlayerVisibilityTarget> playerVisibilityTargets = [];
     private readonly Dictionary<ulong, string> playerPreviewNames = [];
     private readonly List<nint> hiddenPlayerVfxAddresses = [];
     private readonly List<HiddenPlayerVfxCandidate> hiddenPlayerVfxCandidates = [];
@@ -50,7 +51,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private long previewSelectionExpiresAt;
     private int nextPlayerVisibilityPlanRevision;
     private int nextMaintainedVisibilityActionIndex;
-    private PlayerVisibilityPlan? latestPlayerVisibilityPlan;
+    private PlayerVisibilityTargetSet? latestPlayerVisibilityTargetSet;
     private PlayerVisibilityReconciliation? latestPlayerVisibilityReconciliation;
 
     public CullingPerformanceTrace LastUpdateTrace { get; private set; }
@@ -188,14 +189,15 @@ internal sealed unsafe class ObjectCuller : IDisposable
             manager,
             playerKeepPlan,
             GetActivePreviewSelectedPlayerEntityId(),
-            playerVisibilityIntents
+            playerVisibilityPlanEntries
         );
         keepBudgetStats = playerVisibilityPlan.BudgetStats;
-        latestPlayerVisibilityPlan = playerVisibilityPlan;
+        var playerVisibilityTargetSet = PlayerVisibilityLegacyTargetBuilder.Build(playerVisibilityPlan, playerVisibilityTargets);
+        latestPlayerVisibilityTargetSet = playerVisibilityTargetSet;
         var visibilityPlanTicks = Stopwatch.GetTimestamp() - phaseStart;
 
         phaseStart = Stopwatch.GetTimestamp();
-        var playerVisibilityReconciliation = playerVisibilityReconciler.Reconcile(playerVisibilityPlan, hiddenObjectTracker);
+        var playerVisibilityReconciliation = playerVisibilityReconciler.Reconcile(playerVisibilityTargetSet, hiddenObjectTracker);
         latestPlayerVisibilityReconciliation = playerVisibilityReconciliation;
         var reconcileTicks = Stopwatch.GetTimestamp() - phaseStart;
 
@@ -213,7 +215,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         if (previewBuilder != null)
         {
             phaseStart = Stopwatch.GetTimestamp();
-            AddPlayerPreviewEntries(manager, playerVisibilityPlan, previewBuilder);
+            AddPlayerPreviewEntries(manager, playerVisibilityTargetSet, previewBuilder);
             previewAddTicks = Stopwatch.GetTimestamp() - phaseStart;
         }
         var previewTicks = previewBeginTicks + previewAddTicks;
@@ -242,7 +244,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
             PreviewTicks: previewTicks,
             Tick: tickTrace,
             Preview: new CullingPreviewPerformanceTrace(previewBuilder?.Count ?? 0, previewBeginTicks, previewAddTicks, previewBuildTicks),
-            PlayerVisibilityClasses: playerVisibilityPlan.ClassificationCounts
+            PlayerVisibilityClasses: playerVisibilityTargetSet.ClassificationCounts
         );
     }
 
@@ -322,7 +324,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
             ReconcileTicks: 0,
             PreviewTicks: 0,
             Tick: tickTrace,
-            PlayerVisibilityClasses: latestPlayerVisibilityPlan?.ClassificationCounts ?? default
+            PlayerVisibilityClasses: latestPlayerVisibilityTargetSet?.ClassificationCounts ?? default
         );
     }
 
@@ -357,13 +359,13 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
     public void RefreshPlayerPreview(GameObjectManager* manager)
     {
-        if (manager == null || !IsCullingEnabled() || !playerState.IsLoaded || latestPlayerVisibilityPlan == null)
+        if (manager == null || !IsCullingEnabled() || !playerState.IsLoaded || latestPlayerVisibilityTargetSet == null)
         {
             return;
         }
 
         var previewBuilder = PlayerPreviewBuilder.Begin(manager, configuration);
-        AddPlayerPreviewEntries(manager, latestPlayerVisibilityPlan, previewBuilder);
+        AddPlayerPreviewEntries(manager, latestPlayerVisibilityTargetSet, previewBuilder);
         playerPreviewSnapshot = previewBuilder.Build();
     }
 
@@ -468,7 +470,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
                 continue;
             }
 
-            if (!fadeController.IsFading(action.Intent.Identity))
+            if (!fadeController.IsFading(action.Target.Identity))
             {
                 continue;
             }
@@ -501,10 +503,10 @@ internal sealed unsafe class ObjectCuller : IDisposable
         switch (action.Kind)
         {
             case PlayerVisibilityActionKind.Show:
-                ApplyShowAction(manager, action.Intent);
+                ApplyShowAction(manager, action.Target);
                 break;
             case PlayerVisibilityActionKind.Hide:
-                ApplyHideAction(manager, action.Intent);
+                ApplyHideAction(manager, action.Target);
                 break;
             case PlayerVisibilityActionKind.Swap:
                 ApplySwapAction(manager, action);
@@ -558,7 +560,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
                 hiddenVfxTicks,
                 hiddenVfxTrace
             ),
-            PlayerVisibilityClasses: latestPlayerVisibilityPlan?.ClassificationCounts ?? default
+            PlayerVisibilityClasses: latestPlayerVisibilityTargetSet?.ClassificationCounts ?? default
         );
     }
 
@@ -641,9 +643,9 @@ internal sealed unsafe class ObjectCuller : IDisposable
         }
     }
 
-    private void ApplyShowAction(GameObjectManager* manager, PlayerVisibilityIntent intent)
+    private void ApplyShowAction(GameObjectManager* manager, PlayerVisibilityTarget target)
     {
-        var gameObject = FindPlayerObject(manager, intent.Identity, intent.ObjectIndex);
+        var gameObject = FindPlayerObject(manager, target.Identity, target.ObjectIndex);
         if (gameObject == null)
         {
             return;
@@ -655,31 +657,31 @@ internal sealed unsafe class ObjectCuller : IDisposable
             return;
         }
 
-        ApplyVisibility(gameObject, shouldHide: false, intent.ObjectIndex);
+        ApplyVisibility(gameObject, shouldHide: false, target.ObjectIndex);
         if (wasHidden && !hiddenObjectTracker.IsHidden(gameObject))
         {
             showTransitionBudget.ConsumeShow();
         }
     }
 
-    private void ApplyHideAction(GameObjectManager* manager, PlayerVisibilityIntent intent)
+    private void ApplyHideAction(GameObjectManager* manager, PlayerVisibilityTarget target)
     {
-        var gameObject = FindPlayerObject(manager, intent.Identity, intent.ObjectIndex);
+        var gameObject = FindPlayerObject(manager, target.Identity, target.ObjectIndex);
         if (gameObject != null)
         {
-            ApplyVisibility(gameObject, shouldHide: true, intent.ObjectIndex);
+            ApplyVisibility(gameObject, shouldHide: true, target.ObjectIndex);
         }
     }
 
     private void ApplySwapAction(GameObjectManager* manager, PlayerVisibilityAction action)
     {
-        if (!action.PairedIntent.HasValue)
+        if (!action.PairedTarget.HasValue)
         {
-            ApplyShowAction(manager, action.Intent);
+            ApplyShowAction(manager, action.Target);
             return;
         }
 
-        var incoming = FindPlayerObject(manager, action.Intent.Identity, action.Intent.ObjectIndex);
+        var incoming = FindPlayerObject(manager, action.Target.Identity, action.Target.ObjectIndex);
         if (incoming == null)
         {
             return;
@@ -691,14 +693,14 @@ internal sealed unsafe class ObjectCuller : IDisposable
             return;
         }
 
-        var outgoingIntent = action.PairedIntent.Value;
-        var outgoing = FindPlayerObject(manager, outgoingIntent.Identity, outgoingIntent.ObjectIndex);
+        var outgoingTarget = action.PairedTarget.Value;
+        var outgoing = FindPlayerObject(manager, outgoingTarget.Identity, outgoingTarget.ObjectIndex);
         if (outgoing != null)
         {
-            ApplyVisibility(outgoing, shouldHide: true, outgoingIntent.ObjectIndex);
+            ApplyVisibility(outgoing, shouldHide: true, outgoingTarget.ObjectIndex);
         }
 
-        ApplyVisibility(incoming, shouldHide: false, action.Intent.ObjectIndex);
+        ApplyVisibility(incoming, shouldHide: false, action.Target.ObjectIndex);
         if (incomingWasHidden && !hiddenObjectTracker.IsHidden(incoming))
         {
             showTransitionBudget.ConsumeShow();
@@ -724,27 +726,27 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
     private void AddPlayerPreviewEntries(
         GameObjectManager* manager,
-        PlayerVisibilityPlan playerVisibilityPlan,
+        PlayerVisibilityTargetSet playerVisibilityTargetSet,
         PlayerPreviewBuilder previewBuilder
     )
     {
-        foreach (var intent in playerVisibilityPlan.Intents)
+        foreach (var target in playerVisibilityTargetSet.Targets)
         {
-            if (IsLocalPlayerReservedSlot(intent.ObjectIndex) || !IsPlayerRelatedEvenSlot(intent.ObjectIndex))
+            if (IsLocalPlayerReservedSlot(target.ObjectIndex) || !IsPlayerRelatedEvenSlot(target.ObjectIndex))
             {
                 continue;
             }
 
-            var gameObject = FindPlayerObject(manager, intent.Identity, intent.ObjectIndex);
+            var gameObject = FindPlayerObject(manager, target.Identity, target.ObjectIndex);
             if (gameObject != null)
             {
                 previewBuilder.Add(
                     gameObject,
-                    intent.ObjectIndex,
+                    target.ObjectIndex,
                     GetCachedPlayerPreviewName(gameObject),
-                    intent.Decision,
-                    !intent.DesiredVisible,
-                    intent.CutByBudget
+                    target.Decision,
+                    !target.DesiredVisible,
+                    target.CutByBudget
                 );
             }
         }
@@ -810,7 +812,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         previewSelectedPlayerEntityId = null;
         previewSelectionExpiresAt = 0;
         nextMaintainedVisibilityActionIndex = 0;
-        latestPlayerVisibilityPlan = null;
+        latestPlayerVisibilityTargetSet = null;
         latestPlayerVisibilityReconciliation = null;
     }
 

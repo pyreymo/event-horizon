@@ -125,3 +125,55 @@
 
 - Phase 1 继续：把“目标集合状态”从 `PlayerVisibilityPlan`/`PlayerVisibilityReconciler` 之间进一步独立出来，让后续 worker 只发布 immutable target result，Framework 线程负责采纳和执行。
 - 在实机打开慢帧日志或临时降低阈值时，先观察分类计数是否符合预期：默认目标/焦点/队友/好友应落入 `BypassVisible`，占预算规则命中者落入 `Competitive`，无 keep rule 的普通玩家落入 `ForceHidden`。
+
+## 2026-07-09 22:33 +08:00
+
+本轮步长：继续 Phase 1，把目标集合从 plan/reconcile 之间拆出来。
+
+完成内容：
+
+- `PlayerVisibilityPlan` 现在只产出 `PlayerVisibilityPlanEntry`：对象身份、槽位、分类、规则决策和旧预算裁剪标记。
+- 新增 `PlayerVisibilityTargetSet`，由当前 plan 生成本轮目标集合；第一版仍复用旧排序预算结果，所以 `Competitive` 的目标可见状态仍为 `!CutByBudget`。
+- `Unmanaged` 不进入 `PlayerVisibilityTargetSet`，因此不会进入 reconcile/executor。
+- `PlayerVisibilityReconciler` 改为接收 `PlayerVisibilityTargetSet`，不再直接消费 `PlayerVisibilityPlan`。
+- `PlayerVisibilityAction` 改为携带 `PlayerVisibilityTarget`，执行层只面对目标集合，不再读 plan entry。
+- `ObjectCuller` 只缓存 `latestPlayerVisibilityTargetSet` 和 `latestPlayerVisibilityReconciliation`，删除了已经不参与运行时的 `latestPlayerVisibilityPlan`。
+- preview 刷新改为读取 `PlayerVisibilityTargetSet`，保持现有展示语义。
+- 旧排序目标生成逻辑挪到 `PlayerVisibilityLegacyTargetBuilder.Build(...)`，后续 CP-SAT 只需要替换这一层的 target set 生成方式。
+- `PlayerVisibilityTargetSet` 生成时复制 scratch list，成为稳定快照，不再持有后续会被复用清空的临时列表。
+
+保留行为：
+
+- 暂未引入 worker，也没有接入 CP-SAT。
+- 目标集合仍在 Framework refresh 内同步生成。
+- show transition、fade、preview、hidden-player VFX、non-player visibility 路径仍保持现状。
+
+验证结果：
+
+- `dotnet csharpier format .`：已运行。
+- `dotnet build EventHorizon.sln`：通过，0 warning，0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning，0 error。
+
+下一步建议：
+
+- Phase 1 继续小步：整理 `ObjectCuller.Update` 的阶段命名，使 `分类快照 -> 目标集合 -> reconcile -> apply` 的顺序在代码中更直观。
+- 随后进入 Phase 2：建立不可变快照、generation、位置历史、速度预测、单 worker 和 latest-wins 提交机制。
+
+---
+实机反馈：
+
+性能补测结果，首次加载时间较长，后续计算速度正常。
+
+22:37:19.327 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe started on a background worker.
+22:37:19.341 | 信息 | [EventHorizon] [CP-SAT Phase 0] Loaded OR-Tools native dependencies from "C:\Users\Administrator\Documents\Repos\event-horizon\EventHorizon\bin\Debug\win-x64".
+22:37:19.374 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe finished status=Optimal objective=180 selected=2/3 model=10.908ms solve=32.918ms total=44.759ms wall=0.420ms parameters="num_search_workers:1 max_time_in_seconds:1.0"
+22:37:21.034 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe started on a background worker.
+22:37:21.035 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe finished status=Optimal objective=180 selected=2/3 model=0.034ms solve=0.417ms total=0.452ms wall=0.329ms parameters="num_search_workers:1 max_time_in_seconds:1.0"
+22:37:22.232 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe started on a background worker.
+22:37:22.233 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe finished status=Optimal objective=180 selected=2/3 model=0.020ms solve=0.401ms total=0.422ms wall=0.329ms parameters="num_search_workers:1 max_time_in_seconds:1.0"
+22:37:23.399 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe started on a background worker.
+22:37:23.399 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe finished status=Optimal objective=180 selected=2/3 model=0.013ms solve=0.401ms total=0.416ms wall=0.330ms parameters="num_search_workers:1 max_time_in_seconds:1.0"
+22:37:24.374 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe started on a background worker.
+22:37:24.374 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe finished status=Optimal objective=180 selected=2/3 model=0.013ms solve=0.407ms total=0.421ms wall=0.336ms parameters="num_search_workers:1 max_time_in_seconds:1.0"
+22:37:25.365 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe started on a background worker.
+22:37:25.366 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe finished status=Optimal objective=180 selected=2/3 model=0.022ms solve=0.539ms total=0.563ms wall=0.464ms parameters="num_search_workers:1 max_time_in_seconds:1.0"

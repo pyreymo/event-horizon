@@ -6,12 +6,12 @@ namespace EventHorizon.Culling.Visibility;
 
 internal sealed class PlayerVisibilityReconciler
 {
-    private readonly List<PlayerVisibilityIntent> toShow = [];
-    private readonly List<PlayerVisibilityIntent> toHide = [];
-    private readonly List<PlayerVisibilityIntent> unchanged = [];
+    private readonly List<PlayerVisibilityTarget> toShow = [];
+    private readonly List<PlayerVisibilityTarget> toHide = [];
+    private readonly List<PlayerVisibilityTarget> unchanged = [];
     private readonly List<PlayerVisibilityAction> actions = [];
 
-    public PlayerVisibilityReconciliation Reconcile(PlayerVisibilityPlan plan, HiddenObjectTracker hiddenObjectTracker)
+    public PlayerVisibilityReconciliation Reconcile(PlayerVisibilityTargetSet targetSet, HiddenObjectTracker hiddenObjectTracker)
     {
         toShow.Clear();
         toHide.Clear();
@@ -21,35 +21,30 @@ internal sealed class PlayerVisibilityReconciler
         var appliedVisibleCount = 0;
         var desiredVisibleCount = 0;
 
-        foreach (var intent in plan.Intents)
+        foreach (var target in targetSet.Targets)
         {
-            if (!intent.IsManaged)
-            {
-                continue;
-            }
-
-            var appliedVisible = !hiddenObjectTracker.IsHidden(intent.Identity);
+            var appliedVisible = !hiddenObjectTracker.IsHidden(target.Identity);
             if (appliedVisible)
             {
                 appliedVisibleCount++;
             }
 
-            if (intent.DesiredVisible)
+            if (target.DesiredVisible)
             {
                 desiredVisibleCount++;
             }
 
-            if (intent.DesiredVisible && !appliedVisible)
+            if (target.DesiredVisible && !appliedVisible)
             {
-                toShow.Add(intent);
+                toShow.Add(target);
             }
-            else if (!intent.DesiredVisible && appliedVisible)
+            else if (!target.DesiredVisible && appliedVisible)
             {
-                toHide.Add(intent);
+                toHide.Add(target);
             }
             else
             {
-                unchanged.Add(intent);
+                unchanged.Add(target);
             }
         }
 
@@ -60,7 +55,7 @@ internal sealed class PlayerVisibilityReconciler
         AddMaintainedVisibility(actions, unchanged);
 
         return new PlayerVisibilityReconciliation(
-            plan.Revision,
+            targetSet.Revision,
             actions,
             desiredVisibleCount,
             appliedVisibleCount,
@@ -71,8 +66,8 @@ internal sealed class PlayerVisibilityReconciler
 
     private static void AddTransitions(
         List<PlayerVisibilityAction> actions,
-        IReadOnlyList<PlayerVisibilityIntent> toShow,
-        IReadOnlyList<PlayerVisibilityIntent> toHide
+        IReadOnlyList<PlayerVisibilityTarget> toShow,
+        IReadOnlyList<PlayerVisibilityTarget> toHide
     )
     {
         var swapCount = Math.Min(toShow.Count, toHide.Count);
@@ -92,19 +87,19 @@ internal sealed class PlayerVisibilityReconciler
         }
     }
 
-    private static void AddMaintainedVisibility(List<PlayerVisibilityAction> actions, IReadOnlyList<PlayerVisibilityIntent> unchanged)
+    private static void AddMaintainedVisibility(List<PlayerVisibilityAction> actions, IReadOnlyList<PlayerVisibilityTarget> unchanged)
     {
-        foreach (var intent in unchanged)
+        foreach (var target in unchanged)
         {
             actions.Add(
-                intent.DesiredVisible
-                    ? PlayerVisibilityAction.Show(intent, PlayerVisibilityActionReason.Maintain)
-                    : PlayerVisibilityAction.Hide(intent, PlayerVisibilityActionReason.Maintain)
+                target.DesiredVisible
+                    ? PlayerVisibilityAction.Show(target, PlayerVisibilityActionReason.Maintain)
+                    : PlayerVisibilityAction.Hide(target, PlayerVisibilityActionReason.Maintain)
             );
         }
     }
 
-    private static int CompareShowPriority(PlayerVisibilityIntent left, PlayerVisibilityIntent right)
+    private static int CompareShowPriority(PlayerVisibilityTarget left, PlayerVisibilityTarget right)
     {
         var rankComparison = left.Decision.Rank.CompareTo(right.Decision.Rank);
         if (rankComparison != 0)
@@ -122,7 +117,7 @@ internal sealed class PlayerVisibilityReconciler
         return entityComparison != 0 ? entityComparison : left.Identity.Address.ToInt64().CompareTo(right.Identity.Address.ToInt64());
     }
 
-    private static int CompareHidePriority(PlayerVisibilityIntent left, PlayerVisibilityIntent right) => CompareShowPriority(right, left);
+    private static int CompareHidePriority(PlayerVisibilityTarget left, PlayerVisibilityTarget right) => CompareShowPriority(right, left);
 }
 
 internal sealed record PlayerVisibilityReconciliation(
@@ -137,17 +132,17 @@ internal sealed record PlayerVisibilityReconciliation(
 internal readonly record struct PlayerVisibilityAction(
     PlayerVisibilityActionKind Kind,
     PlayerVisibilityActionReason Reason,
-    PlayerVisibilityIntent Intent,
-    PlayerVisibilityIntent? PairedIntent
+    PlayerVisibilityTarget Target,
+    PlayerVisibilityTarget? PairedTarget
 )
 {
-    public static PlayerVisibilityAction Show(PlayerVisibilityIntent intent, PlayerVisibilityActionReason reason) =>
-        new(PlayerVisibilityActionKind.Show, reason, intent, null);
+    public static PlayerVisibilityAction Show(PlayerVisibilityTarget target, PlayerVisibilityActionReason reason) =>
+        new(PlayerVisibilityActionKind.Show, reason, target, null);
 
-    public static PlayerVisibilityAction Hide(PlayerVisibilityIntent intent, PlayerVisibilityActionReason reason) =>
-        new(PlayerVisibilityActionKind.Hide, reason, intent, null);
+    public static PlayerVisibilityAction Hide(PlayerVisibilityTarget target, PlayerVisibilityActionReason reason) =>
+        new(PlayerVisibilityActionKind.Hide, reason, target, null);
 
-    public static PlayerVisibilityAction Swap(PlayerVisibilityIntent outgoing, PlayerVisibilityIntent incoming) =>
+    public static PlayerVisibilityAction Swap(PlayerVisibilityTarget outgoing, PlayerVisibilityTarget incoming) =>
         new(PlayerVisibilityActionKind.Swap, PlayerVisibilityActionReason.Swap, incoming, outgoing);
 }
 

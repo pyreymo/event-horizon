@@ -10,19 +10,19 @@ internal sealed unsafe class PlayerVisibilityPlan
 {
     private PlayerVisibilityPlan(
         int revision,
-        IReadOnlyList<PlayerVisibilityIntent> intents,
+        IReadOnlyList<PlayerVisibilityPlanEntry> entries,
         PlayerKeepBudgetStats budgetStats,
         PlayerVisibilityClassificationCounts classificationCounts
     )
     {
         Revision = revision;
-        Intents = intents;
+        Entries = entries;
         BudgetStats = budgetStats;
         ClassificationCounts = classificationCounts;
     }
 
     public int Revision { get; }
-    public IReadOnlyList<PlayerVisibilityIntent> Intents { get; }
+    public IReadOnlyList<PlayerVisibilityPlanEntry> Entries { get; }
     public PlayerKeepBudgetStats BudgetStats { get; }
     public PlayerVisibilityClassificationCounts ClassificationCounts { get; }
 
@@ -32,10 +32,10 @@ internal sealed unsafe class PlayerVisibilityPlan
         GameObjectManager* manager,
         PlayerKeepPlan keepPlan,
         uint? previewVisibleEntityId,
-        List<PlayerVisibilityIntent> intents
+        List<PlayerVisibilityPlanEntry> entries
     )
     {
-        intents.Clear();
+        entries.Clear();
         var bypassVisibleCount = 0;
         var competitiveCount = 0;
         var forceHiddenCount = 0;
@@ -52,18 +52,16 @@ internal sealed unsafe class PlayerVisibilityPlan
             var address = (nint)gameObject;
             var keepDecision = keepPlan.GetDecision(address);
             var classification = Classify(index, keepDecision, previewVisibleEntityId == gameObject->EntityId);
-            var desiredVisible = GetDesiredVisible(classification, address, keepPlan);
             var cutByBudget = keepPlan.IsCutByBudget(address);
 
-            var intent = new PlayerVisibilityIntent(
+            var entry = new PlayerVisibilityPlanEntry(
                 PlayerObjectIdentity.From(gameObject),
                 index,
                 classification,
-                desiredVisible,
                 keepDecision,
                 cutByBudget
             );
-            intents.Add(intent);
+            entries.Add(entry);
 
             switch (classification)
             {
@@ -84,7 +82,7 @@ internal sealed unsafe class PlayerVisibilityPlan
 
         return new PlayerVisibilityPlan(
             revision,
-            intents,
+            entries,
             new PlayerKeepBudgetStats(
                 keepPlan.BudgetExemptPlayerCount,
                 keepPlan.VisibleBudgetedPlayerCount,
@@ -116,16 +114,6 @@ internal sealed unsafe class PlayerVisibilityPlan
         };
     }
 
-    private static bool GetDesiredVisible(PlayerVisibilityClassification classification, nint address, PlayerKeepPlan keepPlan) =>
-        classification switch
-        {
-            PlayerVisibilityClassification.BypassVisible => true,
-            PlayerVisibilityClassification.Competitive => !keepPlan.IsCutByBudget(address),
-            PlayerVisibilityClassification.ForceHidden => false,
-            PlayerVisibilityClassification.Unmanaged => true,
-            _ => true,
-        };
-
     private static bool IsPlayerRelatedSlot(int index) => index is >= 0 and <= 199;
 
     private static bool IsPlayerRelatedEvenSlot(int index) => IsPlayerRelatedSlot(index) && index % 2 == 0;
@@ -133,17 +121,81 @@ internal sealed unsafe class PlayerVisibilityPlan
     private static bool IsLocalPlayerReservedSlot(int index) => index is 0 or 1;
 }
 
-internal readonly record struct PlayerVisibilityIntent(
+internal readonly record struct PlayerVisibilityPlanEntry(
     PlayerObjectIdentity Identity,
     int ObjectIndex,
     PlayerVisibilityClassification Classification,
-    bool DesiredVisible,
     PlayerKeepDecision Decision,
     bool CutByBudget
 )
 {
     public bool IsManaged => Classification != PlayerVisibilityClassification.Unmanaged;
 }
+
+internal sealed class PlayerVisibilityTargetSet
+{
+    public PlayerVisibilityTargetSet(
+        int revision,
+        IReadOnlyList<PlayerVisibilityTarget> targets,
+        PlayerVisibilityClassificationCounts classificationCounts
+    )
+    {
+        Revision = revision;
+        Targets = targets;
+        ClassificationCounts = classificationCounts;
+    }
+
+    public int Revision { get; }
+    public IReadOnlyList<PlayerVisibilityTarget> Targets { get; }
+    public PlayerVisibilityClassificationCounts ClassificationCounts { get; }
+}
+
+internal static class PlayerVisibilityLegacyTargetBuilder
+{
+    public static PlayerVisibilityTargetSet Build(PlayerVisibilityPlan plan, List<PlayerVisibilityTarget> targets)
+    {
+        targets.Clear();
+        foreach (var entry in plan.Entries)
+        {
+            if (!entry.IsManaged)
+            {
+                continue;
+            }
+
+            targets.Add(
+                new PlayerVisibilityTarget(
+                    entry.Identity,
+                    entry.ObjectIndex,
+                    entry.Classification,
+                    GetDesiredVisible(entry),
+                    entry.Decision,
+                    entry.CutByBudget
+                )
+            );
+        }
+
+        return new PlayerVisibilityTargetSet(plan.Revision, [.. targets], plan.ClassificationCounts);
+    }
+
+    private static bool GetDesiredVisible(PlayerVisibilityPlanEntry entry) =>
+        entry.Classification switch
+        {
+            PlayerVisibilityClassification.BypassVisible => true,
+            PlayerVisibilityClassification.Competitive => !entry.CutByBudget,
+            PlayerVisibilityClassification.ForceHidden => false,
+            PlayerVisibilityClassification.Unmanaged => true,
+            _ => true,
+        };
+}
+
+internal readonly record struct PlayerVisibilityTarget(
+    PlayerObjectIdentity Identity,
+    int ObjectIndex,
+    PlayerVisibilityClassification Classification,
+    bool DesiredVisible,
+    PlayerKeepDecision Decision,
+    bool CutByBudget
+);
 
 internal readonly record struct PlayerVisibilityClassificationCounts(int BypassVisible, int Competitive, int ForceHidden, int Unmanaged);
 
