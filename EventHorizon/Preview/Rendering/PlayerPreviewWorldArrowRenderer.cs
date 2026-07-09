@@ -82,7 +82,7 @@ internal static unsafe class PlayerPreviewWorldArrowRenderer
         }
 
         var color = ImGui.GetColorU32(PlayerPreviewConstants.WorldArrowColor);
-        var drawList = ImGui.GetForegroundDrawList();
+        var drawList = ImGui.GetBackgroundDrawList();
 
         drawList.AddLine(sourceScreenPos, arrowEnd, color, PlayerPreviewConstants.WorldArrowLineThickness);
         DrawArrowHead(drawList, sourceScreenPos, arrowEnd, color);
