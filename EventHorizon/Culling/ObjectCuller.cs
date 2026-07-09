@@ -19,6 +19,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private const int MaxMaintainedPlayerActionsPerFrame = 24;
     private const int MaxHiddenPlayerVfxCreatesPerFrame = 8;
     private const int MaxPlayerRelatedObjectIndex = 199;
+    private const int MinUnattachedEventNpcIndex = 489;
+    private const int MaxUnattachedEventNpcIndex = 608;
     private const VisibilityFlags PluginCustomProbe = (VisibilityFlags)0x1000;
     private const VisibilityFlags InvisibleFlag = PluginCustomProbe | VisibilityFlags.Nameplate | VisibilityFlags.Model;
     private const string HiddenPlayerVfxPath = StaticVfxResourceRedirector.HiddenPlayerGroundMarkerPath;
@@ -41,6 +43,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly List<HiddenPlayerVfxCandidate> hiddenPlayerVfxCandidates = [];
     private readonly HashSet<ulong> liveHiddenPlayerVfxIds = [];
     private readonly HashSet<uint> hiddenPlayerOwnerEntityIds = [];
+    private readonly HashSet<uint> oddSlotPlayerOwnerIds = [];
     private PlayerKeepBudgetStats keepBudgetStats;
     private PlayerPreviewSnapshot playerPreviewSnapshot = PlayerPreviewSnapshot.Empty;
     private uint? previewSelectedPlayerEntityId;
@@ -559,8 +562,9 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private void ApplyNonPlayerVisibility(GameObjectManager* manager)
     {
         CollectHiddenPlayerOwnerEntityIds(manager);
+        CollectOddSlotPlayerOwnerIds(manager);
 
-        var maxIndex = Math.Min(MaxPlayerRelatedObjectIndex, manager->Objects.IndexSorted.Length - 1);
+        var maxIndex = Math.Min(MaxUnattachedEventNpcIndex, manager->Objects.IndexSorted.Length - 1);
         for (var index = 0; index <= maxIndex; index++)
         {
             var gameObject = manager->Objects.IndexSorted[index].Value;
@@ -580,6 +584,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         }
 
         hiddenPlayerOwnerEntityIds.Clear();
+        oddSlotPlayerOwnerIds.Clear();
     }
 
     private void CollectHiddenPlayerOwnerEntityIds(GameObjectManager* manager)
@@ -597,6 +602,38 @@ internal sealed unsafe class ObjectCuller : IDisposable
             if (gameObject != null && gameObject->ObjectKind == ObjectKind.Pc && hiddenObjectTracker.IsHidden(gameObject))
             {
                 hiddenPlayerOwnerEntityIds.Add(gameObject->EntityId);
+            }
+        }
+    }
+
+    private void CollectOddSlotPlayerOwnerIds(GameObjectManager* manager)
+    {
+        oddSlotPlayerOwnerIds.Clear();
+        if (!configuration.HideOtherPlayerBattlePets)
+        {
+            return;
+        }
+
+        var maxIndex = Math.Min(MaxPlayerRelatedObjectIndex, manager->Objects.IndexSorted.Length - 1);
+        for (var index = 0; index <= maxIndex; index++)
+        {
+            if (!IsPlayerRelatedOddSlot(index) || IsLocalPlayerReservedSlot(index))
+            {
+                continue;
+            }
+
+            var gameObject = manager->Objects.IndexSorted[index].Value;
+            if (gameObject == null || gameObject->ObjectKind != ObjectKind.Pc)
+            {
+                continue;
+            }
+
+            oddSlotPlayerOwnerIds.Add(gameObject->EntityId);
+
+            var gameObjectId = (ulong)gameObject->GetGameObjectId();
+            if (gameObjectId <= uint.MaxValue)
+            {
+                oddSlotPlayerOwnerIds.Add((uint)gameObjectId);
             }
         }
     }
@@ -801,6 +838,13 @@ internal sealed unsafe class ObjectCuller : IDisposable
             return false;
         }
 
+        if (IsUnattachedEventNpcSlot(index))
+        {
+            return configuration.HideUnattachedEventNpcs
+                && gameObject->ObjectKind == ObjectKind.EventNpc
+                && gameObject->EventHandler == null;
+        }
+
         if (IsPlayerRelatedEvenSlot(index))
         {
             return gameObject->ObjectKind == ObjectKind.BattleNpc
@@ -810,6 +854,16 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
         if (IsPlayerRelatedOddSlot(index))
         {
+            if (
+                configuration.HideOtherPlayerBattlePets
+                && gameObject->ObjectKind == ObjectKind.BattleNpc
+                && gameObject->OwnerId != 0
+                && oddSlotPlayerOwnerIds.Contains(gameObject->OwnerId)
+            )
+            {
+                return true;
+            }
+
             return gameObject->ObjectKind switch
             {
                 ObjectKind.Companion => configuration.HideOtherPlayerCompanions,
@@ -877,6 +931,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private static bool IsPlayerRelatedOddSlot(int index) => IsPlayerRelatedSlot(index) && index % 2 == 1;
 
     private static bool IsLocalPlayerReservedSlot(int index) => index is 0 or 1;
+
+    private static bool IsUnattachedEventNpcSlot(int index) => index is >= MinUnattachedEventNpcIndex and <= MaxUnattachedEventNpcIndex;
 
     private static GameObject* FindPlayerObject(GameObjectManager* manager, PlayerObjectIdentity identity, int expectedIndex)
     {

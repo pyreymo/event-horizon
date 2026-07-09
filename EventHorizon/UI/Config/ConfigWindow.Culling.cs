@@ -56,6 +56,8 @@ public partial class ConfigWindow
             {
                 DrawOtherPlayerCompanionRule();
                 DrawOtherPlayerOrnamentRule();
+                DrawOtherPlayerBattlePetRule();
+                DrawUnattachedEventNpcRule();
             }
         );
         var leftContentEndY = ImGui.GetCursorScreenPos().Y;
@@ -394,6 +396,26 @@ public partial class ConfigWindow
         if (DrawAutoFitCheckbox("HideOtherPlayerOrnaments", Loc.Text("Config.HideOtherPlayerOrnaments"), ref hideOtherPlayerOrnaments))
         {
             configuration.HideOtherPlayerOrnaments = hideOtherPlayerOrnaments;
+            SaveAndRefresh();
+        }
+    }
+
+    private void DrawOtherPlayerBattlePetRule()
+    {
+        var hideOtherPlayerBattlePets = configuration.HideOtherPlayerBattlePets;
+        if (DrawAutoFitCheckbox("HideOtherPlayerBattlePets", Loc.Text("Config.HideOtherPlayerBattlePets"), ref hideOtherPlayerBattlePets))
+        {
+            configuration.HideOtherPlayerBattlePets = hideOtherPlayerBattlePets;
+            SaveAndRefresh();
+        }
+    }
+
+    private void DrawUnattachedEventNpcRule()
+    {
+        var hideUnattachedEventNpcs = configuration.HideUnattachedEventNpcs;
+        if (DrawAutoFitCheckbox("HideUnattachedEventNpcs", Loc.Text("Config.HideUnattachedEventNpcs"), ref hideUnattachedEventNpcs))
+        {
+            configuration.HideUnattachedEventNpcs = hideUnattachedEventNpcs;
             SaveAndRefresh();
         }
     }

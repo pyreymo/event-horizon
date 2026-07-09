@@ -28,6 +28,8 @@ internal class Configuration : IPluginConfiguration
     public int VisiblePlayerCountLimit { get; set; } = 30;
     public bool HideOtherPlayerCompanions { get; set; } = true;
     public bool HideOtherPlayerOrnaments { get; set; } = false;
+    public bool HideOtherPlayerBattlePets { get; set; } = true;
+    public bool HideUnattachedEventNpcs { get; set; } = true;
     public bool ShowDtrBar { get; set; } = true;
     public bool ShowFrameRateInDtrBar { get; set; } = true;
     public bool EnableDtrBackground { get; set; } = false;

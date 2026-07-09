@@ -102,6 +102,8 @@
     "Config.Section.AttachedObjects": "附属对象清理",
     "Config.HideOtherPlayerCompanions": "隐藏宠物",
     "Config.HideOtherPlayerOrnaments": "隐藏时尚配饰",
+    "Config.HideOtherPlayerBattlePets": "隐藏战斗宠物",
+    "Config.HideUnattachedEventNpcs": "隐藏未挂接事件 NPC",
 
     "Config.Section.PlayerDisplay": "玩家显示",
     "Config.EnableFadeTransitions": "隐藏/显示玩家时淡入淡出",

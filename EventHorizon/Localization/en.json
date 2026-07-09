@@ -102,6 +102,8 @@
     "Config.Section.AttachedObjects": "Attached object cleanup",
     "Config.HideOtherPlayerCompanions": "Hide minions",
     "Config.HideOtherPlayerOrnaments": "Hide fashion accessories",
+    "Config.HideOtherPlayerBattlePets": "Hide battle pets",
+    "Config.HideUnattachedEventNpcs": "Hide unattached event NPCs",
 
     "Config.Section.PlayerDisplay": "Player display",
     "Config.EnableFadeTransitions": "Fade players in and out when visibility changes",
