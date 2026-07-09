@@ -55,7 +55,8 @@ internal sealed class PlayerVisibilityReconciler
         AddMaintainedVisibility(actions, unchanged);
 
         return new PlayerVisibilityReconciliation(
-            targetSet.Revision,
+            targetSet.Generation,
+            targetSet.CreatedAtTickCount64,
             actions,
             desiredVisibleCount,
             appliedVisibleCount,
@@ -121,7 +122,8 @@ internal sealed class PlayerVisibilityReconciler
 }
 
 internal sealed record PlayerVisibilityReconciliation(
-    int Revision,
+    int Generation,
+    long TargetSetCreatedAtTickCount64,
     IReadOnlyList<PlayerVisibilityAction> Actions,
     int DesiredVisibleCount,
     int AppliedVisibleCount,

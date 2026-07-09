@@ -9,25 +9,28 @@ namespace EventHorizon.Culling.Visibility;
 internal sealed unsafe class PlayerVisibilityPlan
 {
     private PlayerVisibilityPlan(
-        int revision,
+        int generation,
+        long createdAtTickCount64,
         IReadOnlyList<PlayerVisibilityPlanEntry> entries,
         PlayerKeepBudgetStats budgetStats,
         PlayerVisibilityClassificationCounts classificationCounts
     )
     {
-        Revision = revision;
+        Generation = generation;
+        CreatedAtTickCount64 = createdAtTickCount64;
         Entries = entries;
         BudgetStats = budgetStats;
         ClassificationCounts = classificationCounts;
     }
 
-    public int Revision { get; }
+    public int Generation { get; }
+    public long CreatedAtTickCount64 { get; }
     public IReadOnlyList<PlayerVisibilityPlanEntry> Entries { get; }
     public PlayerKeepBudgetStats BudgetStats { get; }
     public PlayerVisibilityClassificationCounts ClassificationCounts { get; }
 
     public static PlayerVisibilityPlan Build(
-        int revision,
+        int generation,
         Configuration configuration,
         GameObjectManager* manager,
         PlayerKeepPlan keepPlan,
@@ -81,8 +84,9 @@ internal sealed unsafe class PlayerVisibilityPlan
         }
 
         return new PlayerVisibilityPlan(
-            revision,
-            entries,
+            generation,
+            Environment.TickCount64,
+            [.. entries],
             new PlayerKeepBudgetStats(
                 keepPlan.BudgetExemptPlayerCount,
                 keepPlan.VisibleBudgetedPlayerCount,
@@ -135,19 +139,24 @@ internal readonly record struct PlayerVisibilityPlanEntry(
 internal sealed class PlayerVisibilityTargetSet
 {
     public PlayerVisibilityTargetSet(
-        int revision,
+        int generation,
+        long createdAtTickCount64,
         IReadOnlyList<PlayerVisibilityTarget> targets,
         PlayerVisibilityClassificationCounts classificationCounts
     )
     {
-        Revision = revision;
+        Generation = generation;
+        CreatedAtTickCount64 = createdAtTickCount64;
         Targets = targets;
         ClassificationCounts = classificationCounts;
     }
 
-    public int Revision { get; }
+    public int Generation { get; }
+    public long CreatedAtTickCount64 { get; }
     public IReadOnlyList<PlayerVisibilityTarget> Targets { get; }
     public PlayerVisibilityClassificationCounts ClassificationCounts { get; }
+
+    public long GetAgeMilliseconds(long nowTickCount64) => Math.Max(0, nowTickCount64 - CreatedAtTickCount64);
 }
 
 internal static class PlayerVisibilityLegacyTargetBuilder
@@ -174,7 +183,7 @@ internal static class PlayerVisibilityLegacyTargetBuilder
             );
         }
 
-        return new PlayerVisibilityTargetSet(plan.Revision, [.. targets], plan.ClassificationCounts);
+        return new PlayerVisibilityTargetSet(plan.Generation, plan.CreatedAtTickCount64, [.. targets], plan.ClassificationCounts);
     }
 
     private static bool GetDesiredVisible(PlayerVisibilityPlanEntry entry) =>

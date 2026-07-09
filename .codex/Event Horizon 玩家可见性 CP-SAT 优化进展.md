@@ -177,3 +177,71 @@
 22:37:24.374 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe finished status=Optimal objective=180 selected=2/3 model=0.013ms solve=0.407ms total=0.421ms wall=0.336ms parameters="num_search_workers:1 max_time_in_seconds:1.0"
 22:37:25.365 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe started on a background worker.
 22:37:25.366 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe finished status=Optimal objective=180 selected=2/3 model=0.022ms solve=0.539ms total=0.563ms wall=0.464ms parameters="num_search_workers:1 max_time_in_seconds:1.0"
+
+## 2026-07-09 22:44 +08:00
+
+实机状态：
+
+- 用户补充探针性能测试，首次 native/solver 热身约 `44.759ms`，后续热路径稳定在 `0.4-0.6ms` 左右。
+- 结论：Phase 0 性能风险目前没有明显问题，可以继续推进后台 worker 方向；后续仍需关注真实玩家集合模型下的结果年龄和求解成功率。
+
+本轮步长：进入 Phase 2 的最小快照骨架，不启动 worker，不接 CP-SAT 到主链路。
+
+完成内容：
+
+- `PlayerVisibilityPlan` 改用 `Generation` 命名，并记录 `CreatedAtTickCount64`。
+- `PlayerVisibilityPlan` 返回时复制 entries，避免返回对象继续持有会被下一轮复用的 scratch list。
+- `PlayerVisibilityTargetSet` 继承同一代 `Generation` 和 `CreatedAtTickCount64`，并提供 `GetAgeMilliseconds(...)`。
+- `PlayerVisibilityReconciliation` 继续携带目标集合的 generation 和创建时间，为后续异步结果采纳、过期丢弃、身份验证留出元数据通道。
+- 慢帧日志的 culling trace 增加 `resultAge=...ms`，当前同步路径通常接近 0；接入 worker 后可直接观察结果采用年龄。
+- `ObjectCuller` 内部计数器从 `nextPlayerVisibilityPlanRevision` 改为 `nextPlayerVisibilityGeneration`，语义与后续 latest-wins worker 更一致。
+
+保留行为：
+
+- 仍由旧排序预算生成 `PlayerVisibilityTargetSet`。
+- 仍在 Framework refresh 内同步生成目标集合并立即 reconcile/apply。
+- 未引入 worker、位置历史、速度预测或 CP-SAT 主链路求解。
+- fade、show transition、preview、hidden-player VFX、non-player visibility 路径保持现状。
+
+验证结果：
+
+- `dotnet csharpier format .`：已运行。
+- `dotnet build EventHorizon.sln`：通过，0 warning，0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning，0 error。
+- 备注：首次并行跑 Debug/Release 时 Release 的 DalamudPackager 撞到 `EventHorizon.json` 文件锁；串行重跑 Release 后通过。
+
+下一步建议：
+
+- Phase 2 继续小步：建立纯托管的 solver 输入快照，开始包含 competitive 玩家、当前目标状态、预算和后续预测所需的基础字段。
+- 再下一步引入位置历史/速度估计，并保持 worker 尚不采纳结果，先只做不可见的后台求解统计。
+
+## 2026-07-09 22:48 +08:00
+
+本轮步长：继续 Phase 2，建立第一版纯托管 solver 输入快照；仍不启动 worker，不改变显示行为。
+
+完成内容：
+
+- 新增 `PlayerVisibilitySolverSnapshot`，从当前分类快照生成 worker 将来可读取的纯托管输入。
+- solver 输入目前只包含 `Competitive` 玩家；`BypassVisible / ForceHidden / Unmanaged` 继续留在 Framework 线程目标集合语义里处理。
+- 每个 `PlayerVisibilitySolverPlayer` 携带对象身份、对象槽位、规则决策、上一轮目标可见状态、旧排序目标可见状态和旧预算裁剪标记。
+- 上一轮目标可见状态按身份从上一个 `PlayerVisibilityTargetSet` 继承；若没有上一轮目标，则回退到旧排序目标，保证首轮仍有确定输入。
+- solver 预算显式按配置计算：启用 `LimitVisiblePlayerCount` 时使用 `VisiblePlayerCountLimit`，未启用时预算等于当前 competitive 数量，避免把未启用限制误读成默认 30。
+- `ObjectCuller` 缓存最新 solver snapshot，并在 Clear 时一并清空。
+- 慢帧日志的 solver 段扩展为 `solver[input=... budget=... resultAge=...ms]`，可同时观察输入规模、预算和目标结果年龄。
+
+保留行为：
+
+- `PlayerVisibilityLegacyTargetBuilder` 仍然是实际目标集合来源。
+- solver snapshot 当前只用于建模和 trace，不参与 reconcile/apply。
+- 未引入 worker、位置历史、速度预测或 CP-SAT 主链路求解。
+
+验证结果：
+
+- `dotnet csharpier format .`：已运行。
+- `dotnet build EventHorizon.sln`：通过，0 warning，0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning，0 error。
+
+下一步建议：
+
+- Phase 2 继续：给 solver 输入补充位置样本和简单速度估计，形成预测层所需的纯托管数据。
+- 之后再引入单 worker latest-wins 骨架，先只做后台统计，不采纳结果。
