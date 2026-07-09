@@ -41,6 +41,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly List<PlayerVisibilityTarget> playerVisibilityTargets = [];
     private readonly List<PlayerVisibilitySolverPlayer> playerVisibilitySolverPlayers = [];
     private readonly PlayerVisibilityMotionTracker playerVisibilityMotionTracker = new();
+    private readonly PlayerVisibilitySolverWorker playerVisibilitySolverWorker = new();
     private readonly Dictionary<ulong, string> playerPreviewNames = [];
     private readonly List<nint> hiddenPlayerVfxAddresses = [];
     private readonly List<HiddenPlayerVfxCandidate> hiddenPlayerVfxCandidates = [];
@@ -204,6 +205,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
             playerVisibilitySolverPlayers
         );
         latestPlayerVisibilitySolverSnapshot = playerVisibilitySolverSnapshot;
+        playerVisibilitySolverWorker.Submit(playerVisibilitySolverSnapshot);
         var playerVisibilityTargetSet = PlayerVisibilityLegacyTargetBuilder.Build(playerVisibilityPlan, playerVisibilityTargets);
         latestPlayerVisibilityTargetSet = playerVisibilityTargetSet;
         var visibilityPlanTicks = Stopwatch.GetTimestamp() - phaseStart;
@@ -260,7 +262,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
             PlayerVisibilitySolverInputCount: playerVisibilitySolverSnapshot.CompetitivePlayers.Count,
             PlayerVisibilitySolverBudget: playerVisibilitySolverSnapshot.CompetitiveBudget,
             PlayerVisibilitySolverPositionSampleCount: playerVisibilitySolverSnapshot.PositionSampleCount,
-            PlayerVisibilityResultAgeMs: playerVisibilityTargetSet.GetAgeMilliseconds(Environment.TickCount64)
+            PlayerVisibilityResultAgeMs: playerVisibilityTargetSet.GetAgeMilliseconds(Environment.TickCount64),
+            PlayerVisibilitySolverWorker: playerVisibilitySolverWorker.GetStats()
         );
     }
 
@@ -344,7 +347,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
             PlayerVisibilitySolverInputCount: latestPlayerVisibilitySolverSnapshot?.CompetitivePlayers.Count ?? 0,
             PlayerVisibilitySolverBudget: latestPlayerVisibilitySolverSnapshot?.CompetitiveBudget ?? 0,
             PlayerVisibilitySolverPositionSampleCount: latestPlayerVisibilitySolverSnapshot?.PositionSampleCount ?? 0,
-            PlayerVisibilityResultAgeMs: latestPlayerVisibilityTargetSet?.GetAgeMilliseconds(Environment.TickCount64) ?? 0
+            PlayerVisibilityResultAgeMs: latestPlayerVisibilityTargetSet?.GetAgeMilliseconds(Environment.TickCount64) ?? 0,
+            PlayerVisibilitySolverWorker: playerVisibilitySolverWorker.GetStats()
         );
     }
 
@@ -409,6 +413,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
     public void Dispose()
     {
         Reset(GameObjectManager.Instance());
+        playerVisibilitySolverWorker.Dispose();
     }
 
     #endregion
@@ -584,7 +589,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
             PlayerVisibilitySolverInputCount: latestPlayerVisibilitySolverSnapshot?.CompetitivePlayers.Count ?? 0,
             PlayerVisibilitySolverBudget: latestPlayerVisibilitySolverSnapshot?.CompetitiveBudget ?? 0,
             PlayerVisibilitySolverPositionSampleCount: latestPlayerVisibilitySolverSnapshot?.PositionSampleCount ?? 0,
-            PlayerVisibilityResultAgeMs: latestPlayerVisibilityTargetSet?.GetAgeMilliseconds(Environment.TickCount64) ?? 0
+            PlayerVisibilityResultAgeMs: latestPlayerVisibilityTargetSet?.GetAgeMilliseconds(Environment.TickCount64) ?? 0,
+            PlayerVisibilitySolverWorker: playerVisibilitySolverWorker.GetStats()
         );
     }
 
@@ -837,6 +843,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         previewSelectionExpiresAt = 0;
         nextMaintainedVisibilityActionIndex = 0;
         playerVisibilityMotionTracker.Clear();
+        playerVisibilitySolverWorker.Clear();
         latestPlayerVisibilitySolverSnapshot = null;
         latestPlayerVisibilityTargetSet = null;
         latestPlayerVisibilityReconciliation = null;

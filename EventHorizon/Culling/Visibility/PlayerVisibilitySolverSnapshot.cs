@@ -57,6 +57,7 @@ internal sealed class PlayerVisibilitySolverSnapshot
             }
 
             var legacyTargetVisible = !entry.CutByBudget;
+            var hasVelocitySample = motionTracker.TryGetVelocityPerSecond(entry.Identity, out var velocityPerSecond);
             competitivePlayers.Add(
                 new PlayerVisibilitySolverPlayer(
                     entry.Identity,
@@ -66,7 +67,8 @@ internal sealed class PlayerVisibilitySolverSnapshot
                     legacyTargetVisible,
                     entry.CutByBudget,
                     entry.Position,
-                    motionTracker.GetVelocityPerSecond(entry.Identity),
+                    velocityPerSecond,
+                    hasVelocitySample,
                     entry.HasPosition
                 )
             );
@@ -118,6 +120,7 @@ internal readonly record struct PlayerVisibilitySolverPlayer(
     bool CutByBudget,
     Vector3 Position,
     Vector3 VelocityPerSecond,
+    bool HasVelocitySample,
     bool HasPosition
 );
 
@@ -142,23 +145,39 @@ internal sealed class PlayerVisibilityMotionTracker
             var gameObjectId = entry.Identity.GameObjectId;
             liveGameObjectIds.Add(gameObjectId);
             var velocityPerSecond = Vector3.Zero;
+            var hasVelocitySample = false;
             if (samples.TryGetValue(gameObjectId, out var previous))
             {
                 var elapsedMs = plan.CreatedAtTickCount64 - previous.CreatedAtTickCount64;
                 if (elapsedMs is > 0 and <= MaxVelocitySampleAgeMs)
                 {
                     velocityPerSecond = (entry.Position - previous.Position) * (1000f / elapsedMs);
+                    hasVelocitySample = true;
                 }
             }
 
-            samples[gameObjectId] = new PlayerVisibilityMotionSample(entry.Position, velocityPerSecond, plan.CreatedAtTickCount64);
+            samples[gameObjectId] = new PlayerVisibilityMotionSample(
+                entry.Position,
+                velocityPerSecond,
+                hasVelocitySample,
+                plan.CreatedAtTickCount64
+            );
         }
 
         PruneMissing();
     }
 
-    public Vector3 GetVelocityPerSecond(PlayerObjectIdentity identity) =>
-        identity.GameObjectId != 0 && samples.TryGetValue(identity.GameObjectId, out var sample) ? sample.VelocityPerSecond : Vector3.Zero;
+    public bool TryGetVelocityPerSecond(PlayerObjectIdentity identity, out Vector3 velocityPerSecond)
+    {
+        velocityPerSecond = Vector3.Zero;
+        if (identity.GameObjectId == 0 || !samples.TryGetValue(identity.GameObjectId, out var sample))
+        {
+            return false;
+        }
+
+        velocityPerSecond = sample.VelocityPerSecond;
+        return sample.HasVelocitySample;
+    }
 
     public void Clear()
     {
@@ -187,4 +206,9 @@ internal sealed class PlayerVisibilityMotionTracker
     }
 }
 
-internal readonly record struct PlayerVisibilityMotionSample(Vector3 Position, Vector3 VelocityPerSecond, long CreatedAtTickCount64);
+internal readonly record struct PlayerVisibilityMotionSample(
+    Vector3 Position,
+    Vector3 VelocityPerSecond,
+    bool HasVelocitySample,
+    long CreatedAtTickCount64
+);

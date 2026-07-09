@@ -435,7 +435,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         return string.Format(
-            "total={0:F3} guard={1:F3} keep={2:F3} plan={3:F3} reconcile={4:F3} preview={5:F3} solver[input={6} budget={7} pos={8} resultAge={9}ms] previewTrace[{10}] classes[{11}] actions={12} pendingShow={13} pendingHide={14} previewActive={15} tick[{16}]",
+            "total={0:F3} guard={1:F3} keep={2:F3} plan={3:F3} reconcile={4:F3} preview={5:F3} solver[input={6} budget={7} pos={8} resultAge={9}ms worker[{10}]] previewTrace[{11}] classes[{12}] actions={13} pendingShow={14} pendingHide={15} previewActive={16} tick[{17}]",
             ToMilliseconds(trace.TotalTicks),
             ToMilliseconds(trace.GuardTicks),
             ToMilliseconds(trace.KeepPlanTicks),
@@ -446,6 +446,7 @@ public sealed class Plugin : IDalamudPlugin
             trace.PlayerVisibilitySolverBudget,
             trace.PlayerVisibilitySolverPositionSampleCount,
             trace.PlayerVisibilityResultAgeMs,
+            FormatSolverWorkerStats(trace.PlayerVisibilitySolverWorker),
             FormatPreviewTrace(trace.Preview),
             FormatVisibilityClasses(trace.PlayerVisibilityClasses),
             trace.ActionCount,
@@ -453,6 +454,30 @@ public sealed class Plugin : IDalamudPlugin
             trace.PendingHideCount,
             trace.RefreshPlayerPreview,
             FormatTickTrace(trace.Tick)
+        );
+    }
+
+    private static string FormatSolverWorkerStats(PlayerVisibilitySolverWorkerStats stats)
+    {
+        if (!stats.HasValue)
+        {
+            return "n/a";
+        }
+
+        return string.Format(
+            "submitted={0} completed={1} replaced={2} exceptions={3} lastGen={4} lastInput={5} lastBudget={6} lastPos={7} lastVel={8} lastAge={9}ms lastWorker={10:F3}ms ok={11}",
+            stats.SubmittedCount,
+            stats.CompletedCount,
+            stats.PendingSnapshotReplacedCount,
+            stats.ExceptionCount,
+            stats.LastGeneration,
+            stats.LastInputCount,
+            stats.LastBudget,
+            stats.LastPositionSampleCount,
+            stats.LastVelocitySampleCount,
+            stats.LastResultAgeMs,
+            ToMilliseconds(stats.LastWorkerTicks),
+            stats.LastSucceeded
         );
     }
 
