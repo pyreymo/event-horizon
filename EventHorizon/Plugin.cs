@@ -10,6 +10,7 @@ using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using EventHorizon.Culling;
 using EventHorizon.Culling.Hooks;
+using EventHorizon.Culling.Optimization;
 using EventHorizon.Culling.Rules;
 using EventHorizon.Integration.Dtr;
 using EventHorizon.Integration.Layout;
@@ -108,6 +109,7 @@ public sealed class Plugin : IDalamudPlugin
     private LayoutGraphicsVisibilityController LayoutGraphicsVisibilityController { get; init; }
     private NamePlateTargetingMeMarkerController NamePlateTargetingMeMarkerController { get; init; }
     private CharacterAlphaController CharacterAlphaController { get; init; }
+    private CpSatPhase0Probe CpSatPhase0Probe { get; init; }
 
     private long nextDynamicCullingRefresh;
     private long nextDtrBarRefresh;
@@ -150,6 +152,7 @@ public sealed class Plugin : IDalamudPlugin
         DtrBarIntegration = new DtrBarIntegration(DtrBar, Configuration, GetDtrBarState, SetPlayerHidingEnabled, ToggleConfigUi);
         DtrBackgroundController = new DtrBackgroundController(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
         LayoutGraphicsVisibilityController = new LayoutGraphicsVisibilityController(GameInteropProvider, ClientState, Log);
+        CpSatPhase0Probe = new CpSatPhase0Probe(Log, PluginInterface.AssemblyLocation.DirectoryName!);
         NamePlateTargetingMeMarkerController = new NamePlateTargetingMeMarkerController(
             AddonLifecycle,
             GameGui,
@@ -197,6 +200,7 @@ public sealed class Plugin : IDalamudPlugin
         DtrBarIntegration.Dispose();
         DtrBackgroundController.Dispose();
         LayoutGraphicsVisibilityController.Dispose();
+        CpSatPhase0Probe.Dispose();
         NamePlateTargetingMeMarkerController.Dispose();
         CharacterAlphaController.Dispose();
         UpdateObjectArraysHook.Dispose();
@@ -227,6 +231,10 @@ public sealed class Plugin : IDalamudPlugin
                 break;
             case "preview":
                 TogglePlayerPreviewWindow();
+                break;
+            case "cpsat":
+            case "cp-sat":
+                CpSatPhase0Probe.TryStart();
                 break;
             default:
                 ToggleConfigUi();
