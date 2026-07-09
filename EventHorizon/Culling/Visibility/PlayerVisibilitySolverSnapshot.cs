@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using EventHorizon.Culling.Rules;
 using EventHorizon.Settings;
 
@@ -11,6 +12,7 @@ internal sealed class PlayerVisibilitySolverSnapshot
         int generation,
         long createdAtTickCount64,
         int competitiveBudget,
+        int positionSampleCount,
         IReadOnlyList<PlayerVisibilitySolverPlayer> competitivePlayers,
         PlayerVisibilityClassificationCounts classificationCounts
     )
@@ -18,6 +20,7 @@ internal sealed class PlayerVisibilitySolverSnapshot
         Generation = generation;
         CreatedAtTickCount64 = createdAtTickCount64;
         CompetitiveBudget = competitiveBudget;
+        PositionSampleCount = positionSampleCount;
         CompetitivePlayers = competitivePlayers;
         ClassificationCounts = classificationCounts;
     }
@@ -25,6 +28,7 @@ internal sealed class PlayerVisibilitySolverSnapshot
     public int Generation { get; }
     public long CreatedAtTickCount64 { get; }
     public int CompetitiveBudget { get; }
+    public int PositionSampleCount { get; }
     public IReadOnlyList<PlayerVisibilitySolverPlayer> CompetitivePlayers { get; }
     public PlayerVisibilityClassificationCounts ClassificationCounts { get; }
 
@@ -33,16 +37,23 @@ internal sealed class PlayerVisibilitySolverSnapshot
     public static PlayerVisibilitySolverSnapshot Build(
         Configuration configuration,
         PlayerVisibilityPlan plan,
+        PlayerVisibilityMotionTracker motionTracker,
         PlayerVisibilityTargetSet? previousTargetSet,
         List<PlayerVisibilitySolverPlayer> competitivePlayers
     )
     {
         competitivePlayers.Clear();
+        var positionSampleCount = 0;
         foreach (var entry in plan.Entries)
         {
             if (entry.Classification != PlayerVisibilityClassification.Competitive)
             {
                 continue;
+            }
+
+            if (entry.HasPosition)
+            {
+                positionSampleCount++;
             }
 
             var legacyTargetVisible = !entry.CutByBudget;
@@ -53,7 +64,10 @@ internal sealed class PlayerVisibilitySolverSnapshot
                     entry.Decision,
                     GetPreviousTargetVisible(previousTargetSet, entry.Identity, legacyTargetVisible),
                     legacyTargetVisible,
-                    entry.CutByBudget
+                    entry.CutByBudget,
+                    entry.Position,
+                    motionTracker.GetVelocityPerSecond(entry.Identity),
+                    entry.HasPosition
                 )
             );
         }
@@ -66,6 +80,7 @@ internal sealed class PlayerVisibilitySolverSnapshot
             plan.Generation,
             plan.CreatedAtTickCount64,
             Math.Min(budget, competitivePlayers.Count),
+            positionSampleCount,
             [.. competitivePlayers],
             plan.ClassificationCounts
         );
@@ -100,5 +115,76 @@ internal readonly record struct PlayerVisibilitySolverPlayer(
     PlayerKeepDecision Decision,
     bool PreviousTargetVisible,
     bool LegacyTargetVisible,
-    bool CutByBudget
+    bool CutByBudget,
+    Vector3 Position,
+    Vector3 VelocityPerSecond,
+    bool HasPosition
 );
+
+internal sealed class PlayerVisibilityMotionTracker
+{
+    private const long MaxVelocitySampleAgeMs = 1_000;
+
+    private readonly Dictionary<ulong, PlayerVisibilityMotionSample> samples = [];
+    private readonly HashSet<ulong> liveGameObjectIds = [];
+    private readonly List<ulong> staleGameObjectIds = [];
+
+    public void Update(PlayerVisibilityPlan plan)
+    {
+        liveGameObjectIds.Clear();
+        foreach (var entry in plan.Entries)
+        {
+            if (!entry.HasPosition || entry.Identity.GameObjectId == 0)
+            {
+                continue;
+            }
+
+            var gameObjectId = entry.Identity.GameObjectId;
+            liveGameObjectIds.Add(gameObjectId);
+            var velocityPerSecond = Vector3.Zero;
+            if (samples.TryGetValue(gameObjectId, out var previous))
+            {
+                var elapsedMs = plan.CreatedAtTickCount64 - previous.CreatedAtTickCount64;
+                if (elapsedMs is > 0 and <= MaxVelocitySampleAgeMs)
+                {
+                    velocityPerSecond = (entry.Position - previous.Position) * (1000f / elapsedMs);
+                }
+            }
+
+            samples[gameObjectId] = new PlayerVisibilityMotionSample(entry.Position, velocityPerSecond, plan.CreatedAtTickCount64);
+        }
+
+        PruneMissing();
+    }
+
+    public Vector3 GetVelocityPerSecond(PlayerObjectIdentity identity) =>
+        identity.GameObjectId != 0 && samples.TryGetValue(identity.GameObjectId, out var sample) ? sample.VelocityPerSecond : Vector3.Zero;
+
+    public void Clear()
+    {
+        samples.Clear();
+        liveGameObjectIds.Clear();
+        staleGameObjectIds.Clear();
+    }
+
+    private void PruneMissing()
+    {
+        staleGameObjectIds.Clear();
+        foreach (var gameObjectId in samples.Keys)
+        {
+            if (!liveGameObjectIds.Contains(gameObjectId))
+            {
+                staleGameObjectIds.Add(gameObjectId);
+            }
+        }
+
+        foreach (var gameObjectId in staleGameObjectIds)
+        {
+            samples.Remove(gameObjectId);
+        }
+
+        staleGameObjectIds.Clear();
+    }
+}
+
+internal readonly record struct PlayerVisibilityMotionSample(Vector3 Position, Vector3 VelocityPerSecond, long CreatedAtTickCount64);

@@ -245,3 +245,33 @@
 
 - Phase 2 继续：给 solver 输入补充位置样本和简单速度估计，形成预测层所需的纯托管数据。
 - 之后再引入单 worker latest-wins 骨架，先只做后台统计，不采纳结果。
+
+## 2026-07-09 22:56 +08:00
+
+本轮步长：继续 Phase 2，给 solver 输入补充位置样本和速度估计；仍不启动 worker，不改变显示行为。
+
+完成内容：
+
+- `PlayerVisibilityPlanEntry` 增加 `Position` 和 `HasPosition`，位置读取仍发生在 Framework 线程的 plan 构建阶段。
+- `PlayerVisibilitySolverPlayer` 增加 `Position`、`VelocityPerSecond` 和 `HasPosition`，worker 后续只会读取这些纯托管值。
+- 新增 `PlayerVisibilityMotionTracker`，按 `GameObjectId` 维护上一轮位置样本，并计算每秒速度向量。
+- 速度样本超过 `1000ms` 或没有上一轮样本时归零，避免使用过旧数据做预测。
+- motion tracker 会按当前 plan 中仍存在的对象裁剪历史，`ObjectCuller.Clear()` 时一并清空。
+- solver snapshot 记录 `PositionSampleCount`，慢帧日志 solver 段扩展为 `solver[input=... budget=... pos=... resultAge=...ms]`。
+
+保留行为：
+
+- 位置和速度只进入 solver snapshot，不参与旧排序目标生成。
+- `PlayerVisibilityLegacyTargetBuilder` 仍然是实际目标集合来源。
+- 未引入 worker、CP-SAT 主链路求解、预测效用或结果采纳。
+
+验证结果：
+
+- `dotnet csharpier format .`：已运行。
+- `dotnet build EventHorizon.sln`：通过，0 warning，0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning，0 error。
+
+下一步建议：
+
+- Phase 2 继续：引入单 worker/latest-wins 调度骨架，先只接收 solver snapshot 并发布统计，不采用结果。
+- worker 统计阶段应先验证 result age、pending snapshot 覆盖次数和异常隔离，再进入 CP-SAT 模型实现。

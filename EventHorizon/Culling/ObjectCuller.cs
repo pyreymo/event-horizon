@@ -40,6 +40,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly List<PlayerVisibilityPlanEntry> playerVisibilityPlanEntries = [];
     private readonly List<PlayerVisibilityTarget> playerVisibilityTargets = [];
     private readonly List<PlayerVisibilitySolverPlayer> playerVisibilitySolverPlayers = [];
+    private readonly PlayerVisibilityMotionTracker playerVisibilityMotionTracker = new();
     private readonly Dictionary<ulong, string> playerPreviewNames = [];
     private readonly List<nint> hiddenPlayerVfxAddresses = [];
     private readonly List<HiddenPlayerVfxCandidate> hiddenPlayerVfxCandidates = [];
@@ -194,9 +195,11 @@ internal sealed unsafe class ObjectCuller : IDisposable
             playerVisibilityPlanEntries
         );
         keepBudgetStats = playerVisibilityPlan.BudgetStats;
+        playerVisibilityMotionTracker.Update(playerVisibilityPlan);
         var playerVisibilitySolverSnapshot = PlayerVisibilitySolverSnapshot.Build(
             configuration,
             playerVisibilityPlan,
+            playerVisibilityMotionTracker,
             latestPlayerVisibilityTargetSet,
             playerVisibilitySolverPlayers
         );
@@ -256,6 +259,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
             PlayerVisibilityClasses: playerVisibilityTargetSet.ClassificationCounts,
             PlayerVisibilitySolverInputCount: playerVisibilitySolverSnapshot.CompetitivePlayers.Count,
             PlayerVisibilitySolverBudget: playerVisibilitySolverSnapshot.CompetitiveBudget,
+            PlayerVisibilitySolverPositionSampleCount: playerVisibilitySolverSnapshot.PositionSampleCount,
             PlayerVisibilityResultAgeMs: playerVisibilityTargetSet.GetAgeMilliseconds(Environment.TickCount64)
         );
     }
@@ -339,6 +343,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
             PlayerVisibilityClasses: latestPlayerVisibilityTargetSet?.ClassificationCounts ?? default,
             PlayerVisibilitySolverInputCount: latestPlayerVisibilitySolverSnapshot?.CompetitivePlayers.Count ?? 0,
             PlayerVisibilitySolverBudget: latestPlayerVisibilitySolverSnapshot?.CompetitiveBudget ?? 0,
+            PlayerVisibilitySolverPositionSampleCount: latestPlayerVisibilitySolverSnapshot?.PositionSampleCount ?? 0,
             PlayerVisibilityResultAgeMs: latestPlayerVisibilityTargetSet?.GetAgeMilliseconds(Environment.TickCount64) ?? 0
         );
     }
@@ -578,6 +583,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
             PlayerVisibilityClasses: latestPlayerVisibilityTargetSet?.ClassificationCounts ?? default,
             PlayerVisibilitySolverInputCount: latestPlayerVisibilitySolverSnapshot?.CompetitivePlayers.Count ?? 0,
             PlayerVisibilitySolverBudget: latestPlayerVisibilitySolverSnapshot?.CompetitiveBudget ?? 0,
+            PlayerVisibilitySolverPositionSampleCount: latestPlayerVisibilitySolverSnapshot?.PositionSampleCount ?? 0,
             PlayerVisibilityResultAgeMs: latestPlayerVisibilityTargetSet?.GetAgeMilliseconds(Environment.TickCount64) ?? 0
         );
     }
@@ -830,6 +836,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         previewSelectedPlayerEntityId = null;
         previewSelectionExpiresAt = 0;
         nextMaintainedVisibilityActionIndex = 0;
+        playerVisibilityMotionTracker.Clear();
         latestPlayerVisibilitySolverSnapshot = null;
         latestPlayerVisibilityTargetSet = null;
         latestPlayerVisibilityReconciliation = null;

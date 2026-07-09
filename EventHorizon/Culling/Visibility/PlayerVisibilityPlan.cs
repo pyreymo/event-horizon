@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using EventHorizon.Culling.Rules;
 using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
@@ -56,13 +57,16 @@ internal sealed unsafe class PlayerVisibilityPlan
             var keepDecision = keepPlan.GetDecision(address);
             var classification = Classify(index, keepDecision, previewVisibleEntityId == gameObject->EntityId);
             var cutByBudget = keepPlan.IsCutByBudget(address);
+            var hasPosition = TryGetPosition(gameObject, out var position);
 
             var entry = new PlayerVisibilityPlanEntry(
                 PlayerObjectIdentity.From(gameObject),
                 index,
                 classification,
                 keepDecision,
-                cutByBudget
+                cutByBudget,
+                position,
+                hasPosition
             );
             entries.Add(entry);
 
@@ -123,6 +127,24 @@ internal sealed unsafe class PlayerVisibilityPlan
     private static bool IsPlayerRelatedEvenSlot(int index) => IsPlayerRelatedSlot(index) && index % 2 == 0;
 
     private static bool IsLocalPlayerReservedSlot(int index) => index is 0 or 1;
+
+    private static bool TryGetPosition(GameObject* gameObject, out Vector3 position)
+    {
+        position = default;
+        if (gameObject == null || gameObject->VirtualTable == null)
+        {
+            return false;
+        }
+
+        var positionPtr = gameObject->GetPosition();
+        if (positionPtr == null)
+        {
+            return false;
+        }
+
+        position = (Vector3)(*positionPtr);
+        return true;
+    }
 }
 
 internal readonly record struct PlayerVisibilityPlanEntry(
@@ -130,7 +152,9 @@ internal readonly record struct PlayerVisibilityPlanEntry(
     int ObjectIndex,
     PlayerVisibilityClassification Classification,
     PlayerKeepDecision Decision,
-    bool CutByBudget
+    bool CutByBudget,
+    Vector3 Position,
+    bool HasPosition
 )
 {
     public bool IsManaged => Classification != PlayerVisibilityClassification.Unmanaged;

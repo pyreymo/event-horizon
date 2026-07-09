@@ -435,7 +435,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         return string.Format(
-            "total={0:F3} guard={1:F3} keep={2:F3} plan={3:F3} reconcile={4:F3} preview={5:F3} solver[input={6} budget={7} resultAge={8}ms] previewTrace[{9}] classes[{10}] actions={11} pendingShow={12} pendingHide={13} previewActive={14} tick[{15}]",
+            "total={0:F3} guard={1:F3} keep={2:F3} plan={3:F3} reconcile={4:F3} preview={5:F3} solver[input={6} budget={7} pos={8} resultAge={9}ms] previewTrace[{10}] classes[{11}] actions={12} pendingShow={13} pendingHide={14} previewActive={15} tick[{16}]",
             ToMilliseconds(trace.TotalTicks),
             ToMilliseconds(trace.GuardTicks),
             ToMilliseconds(trace.KeepPlanTicks),
@@ -444,6 +444,7 @@ public sealed class Plugin : IDalamudPlugin
             ToMilliseconds(trace.PreviewTicks),
             trace.PlayerVisibilitySolverInputCount,
             trace.PlayerVisibilitySolverBudget,
+            trace.PlayerVisibilitySolverPositionSampleCount,
             trace.PlayerVisibilityResultAgeMs,
             FormatPreviewTrace(trace.Preview),
             FormatVisibilityClasses(trace.PlayerVisibilityClasses),

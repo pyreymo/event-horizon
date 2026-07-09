@@ -19,6 +19,7 @@ internal readonly record struct CullingPerformanceTrace(
     PlayerVisibilityClassificationCounts PlayerVisibilityClasses = default,
     int PlayerVisibilitySolverInputCount = 0,
     int PlayerVisibilitySolverBudget = 0,
+    int PlayerVisibilitySolverPositionSampleCount = 0,
     long PlayerVisibilityResultAgeMs = 0
 )
 {
