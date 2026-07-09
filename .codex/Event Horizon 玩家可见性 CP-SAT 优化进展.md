@@ -89,3 +89,39 @@
 22:20:59.661 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe started on a background worker.
 22:20:59.684 | 信息 | [EventHorizon] [CP-SAT Phase 0] Loaded OR-Tools native dependencies from "C:\Users\Administrator\Documents\Repos\event-horizon\EventHorizon\bin\Debug\win-x64".
 22:20:59.720 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe finished status=Optimal objective=180 selected=2/3 model=10.665ms solve=35.480ms total=56.436ms wall=1.120ms parameters="num_search_workers:1 max_time_in_seconds:1.0"
+
+## 2026-07-09 22:26 +08:00
+
+实机状态：
+
+- 用户反馈 `/eh cpsat` 实机验证已通过，Phase 0 可继续向 Phase 1 推进。
+
+本轮步长：推进 Phase 1 的分类显式化和可观察性，不引入 worker，不接 CP-SAT 到主链路。
+
+完成内容：
+
+- `PlayerVisibilityPlan` 显式产出 `BypassVisible / Competitive / ForceHidden / Unmanaged` 分类。
+- `BypassVisible`：当前旧规则结果中 `Keep + Exempt`，以及临时 preview 可见覆盖。
+- `Competitive`：当前旧规则结果中 `Keep + Counted`，仍按旧排序和预算决定本轮目标可见状态。
+- `ForceHidden`：当前没有命中 keep rule 的玩家，由本系统明确目标隐藏。
+- `Unmanaged`：本系统不应处理的 PC 槽位，例如本地保留槽或非玩家预算竞争槽位。
+- `PlayerVisibilityReconciler` 跳过 `Unmanaged`，不再为它们生成 show/hide/maintain action。
+- 删除不再使用的旧入口 `PlayerKeepPlan.ShouldHide(...)`，避免后续同时维护两套目标判断语义。
+- `CullingPerformanceTrace` 增加分类计数；慢帧日志现在会输出 `classes[bypass=... competitive=... forceHidden=... unmanaged=...]`，方便后续接 worker/CP-SAT 前确认输入规模。
+
+保留行为：
+
+- 仍由旧 `PlayerKeepPlan` 排序和预算结果决定 `Competitive` 中哪些玩家目标可见。
+- 现有 RenderFlags 应用、show transition、fade、preview、hidden-player VFX、non-player visibility 路径未重构。
+- `ObjectCuller` 仍在 Framework refresh 中构造 plan 并立即 reconcile/apply；worker 尚未引入。
+
+验证结果：
+
+- `dotnet csharpier format .`：已运行。
+- `dotnet build EventHorizon.sln`：通过，0 warning，0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning，0 error。
+
+下一步建议：
+
+- Phase 1 继续：把“目标集合状态”从 `PlayerVisibilityPlan`/`PlayerVisibilityReconciler` 之间进一步独立出来，让后续 worker 只发布 immutable target result，Framework 线程负责采纳和执行。
+- 在实机打开慢帧日志或临时降低阈值时，先观察分类计数是否符合预期：默认目标/焦点/队友/好友应落入 `BypassVisible`，占预算规则命中者落入 `Competitive`，无 keep rule 的普通玩家落入 `ForceHidden`。

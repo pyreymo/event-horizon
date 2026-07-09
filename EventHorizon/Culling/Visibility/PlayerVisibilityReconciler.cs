@@ -23,6 +23,11 @@ internal sealed class PlayerVisibilityReconciler
 
         foreach (var intent in plan.Intents)
         {
+            if (!intent.IsManaged)
+            {
+                continue;
+            }
+
             var appliedVisible = !hiddenObjectTracker.IsHidden(intent.Identity);
             if (appliedVisible)
             {

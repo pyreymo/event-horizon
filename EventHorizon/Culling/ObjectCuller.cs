@@ -241,7 +241,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
             ReconcileTicks: reconcileTicks,
             PreviewTicks: previewTicks,
             Tick: tickTrace,
-            Preview: new CullingPreviewPerformanceTrace(previewBuilder?.Count ?? 0, previewBeginTicks, previewAddTicks, previewBuildTicks)
+            Preview: new CullingPreviewPerformanceTrace(previewBuilder?.Count ?? 0, previewBeginTicks, previewAddTicks, previewBuildTicks),
+            PlayerVisibilityClasses: playerVisibilityPlan.ClassificationCounts
         );
     }
 
@@ -320,7 +321,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
             VisibilityPlanTicks: 0,
             ReconcileTicks: 0,
             PreviewTicks: 0,
-            Tick: tickTrace
+            Tick: tickTrace,
+            PlayerVisibilityClasses: latestPlayerVisibilityPlan?.ClassificationCounts ?? default
         );
     }
 
@@ -555,7 +557,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
                 pruneFadesTicks,
                 hiddenVfxTicks,
                 hiddenVfxTrace
-            )
+            ),
+            PlayerVisibilityClasses: latestPlayerVisibilityPlan?.ClassificationCounts ?? default
         );
     }
 

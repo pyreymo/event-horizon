@@ -1,3 +1,5 @@
+using EventHorizon.Culling.Visibility;
+
 namespace EventHorizon.Culling;
 
 internal readonly record struct CullingPerformanceTrace(
@@ -13,7 +15,8 @@ internal readonly record struct CullingPerformanceTrace(
     long ReconcileTicks,
     long PreviewTicks,
     CullingTickPerformanceTrace Tick,
-    CullingPreviewPerformanceTrace Preview = default
+    CullingPreviewPerformanceTrace Preview = default,
+    PlayerVisibilityClassificationCounts PlayerVisibilityClasses = default
 )
 {
     public bool HasValue => TotalTicks > 0;

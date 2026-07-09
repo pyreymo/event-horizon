@@ -12,6 +12,7 @@ using EventHorizon.Culling;
 using EventHorizon.Culling.Hooks;
 using EventHorizon.Culling.Optimization;
 using EventHorizon.Culling.Rules;
+using EventHorizon.Culling.Visibility;
 using EventHorizon.Integration.Dtr;
 using EventHorizon.Integration.Layout;
 using EventHorizon.Integration.NamePlate;
@@ -434,7 +435,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         return string.Format(
-            "total={0:F3} guard={1:F3} keep={2:F3} plan={3:F3} reconcile={4:F3} preview={5:F3} previewTrace[{6}] actions={7} pendingShow={8} pendingHide={9} previewActive={10} tick[{11}]",
+            "total={0:F3} guard={1:F3} keep={2:F3} plan={3:F3} reconcile={4:F3} preview={5:F3} previewTrace[{6}] classes[{7}] actions={8} pendingShow={9} pendingHide={10} previewActive={11} tick[{12}]",
             ToMilliseconds(trace.TotalTicks),
             ToMilliseconds(trace.GuardTicks),
             ToMilliseconds(trace.KeepPlanTicks),
@@ -442,11 +443,23 @@ public sealed class Plugin : IDalamudPlugin
             ToMilliseconds(trace.ReconcileTicks),
             ToMilliseconds(trace.PreviewTicks),
             FormatPreviewTrace(trace.Preview),
+            FormatVisibilityClasses(trace.PlayerVisibilityClasses),
             trace.ActionCount,
             trace.PendingShowCount,
             trace.PendingHideCount,
             trace.RefreshPlayerPreview,
             FormatTickTrace(trace.Tick)
+        );
+    }
+
+    private static string FormatVisibilityClasses(PlayerVisibilityClassificationCounts counts)
+    {
+        return string.Format(
+            "bypass={0} competitive={1} forceHidden={2} unmanaged={3}",
+            counts.BypassVisible,
+            counts.Competitive,
+            counts.ForceHidden,
+            counts.Unmanaged
         );
     }
 

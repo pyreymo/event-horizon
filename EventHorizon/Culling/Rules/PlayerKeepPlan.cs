@@ -27,23 +27,6 @@ internal sealed class PlayerKeepPlan
         VisibleBudgetedPlayerCount = CountVisibleBudgetedPlayers(candidates);
     }
 
-    public bool ShouldHide(nint address)
-    {
-        var keepDecision = GetDecision(address);
-        if (keepDecision.Kind == PlayerKeepDecisionKind.None)
-        {
-            return true;
-        }
-
-        return keepDecision.Kind switch
-        {
-            PlayerKeepDecisionKind.Keep when keepDecision.BudgetPolicy == PlayerKeepBudgetPolicy.Exempt => false,
-            PlayerKeepDecisionKind.Keep when keepDecision.BudgetPolicy == PlayerKeepBudgetPolicy.Counted => limitVisibleBudgetedPlayers
-                && !visibleBudgetedPlayers.Contains(address),
-            _ => true,
-        };
-    }
-
     public PlayerKeepDecision GetDecision(nint address) => keepDecisions.GetValueOrDefault(address, PlayerKeepDecision.None);
 
     public bool IsCutByBudget(nint address)

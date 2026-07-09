@@ -8,16 +8,23 @@ namespace EventHorizon.Culling.Visibility;
 
 internal sealed unsafe class PlayerVisibilityPlan
 {
-    private PlayerVisibilityPlan(int revision, IReadOnlyList<PlayerVisibilityIntent> intents, PlayerKeepBudgetStats budgetStats)
+    private PlayerVisibilityPlan(
+        int revision,
+        IReadOnlyList<PlayerVisibilityIntent> intents,
+        PlayerKeepBudgetStats budgetStats,
+        PlayerVisibilityClassificationCounts classificationCounts
+    )
     {
         Revision = revision;
         Intents = intents;
         BudgetStats = budgetStats;
+        ClassificationCounts = classificationCounts;
     }
 
     public int Revision { get; }
     public IReadOnlyList<PlayerVisibilityIntent> Intents { get; }
     public PlayerKeepBudgetStats BudgetStats { get; }
+    public PlayerVisibilityClassificationCounts ClassificationCounts { get; }
 
     public static PlayerVisibilityPlan Build(
         int revision,
@@ -29,6 +36,10 @@ internal sealed unsafe class PlayerVisibilityPlan
     )
     {
         intents.Clear();
+        var bypassVisibleCount = 0;
+        var competitiveCount = 0;
+        var forceHiddenCount = 0;
+        var unmanagedCount = 0;
 
         for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
         {
@@ -40,20 +51,35 @@ internal sealed unsafe class PlayerVisibilityPlan
 
             var address = (nint)gameObject;
             var keepDecision = keepPlan.GetDecision(address);
-            var desiredVisible = !ShouldHidePlayerSlotObject(gameObject, index, keepPlan);
-            if (previewVisibleEntityId == gameObject->EntityId)
-            {
-                desiredVisible = true;
-            }
+            var classification = Classify(index, keepDecision, previewVisibleEntityId == gameObject->EntityId);
+            var desiredVisible = GetDesiredVisible(classification, address, keepPlan);
+            var cutByBudget = keepPlan.IsCutByBudget(address);
 
             var intent = new PlayerVisibilityIntent(
                 PlayerObjectIdentity.From(gameObject),
                 index,
+                classification,
                 desiredVisible,
                 keepDecision,
-                keepPlan.IsCutByBudget(address)
+                cutByBudget
             );
             intents.Add(intent);
+
+            switch (classification)
+            {
+                case PlayerVisibilityClassification.BypassVisible:
+                    bypassVisibleCount++;
+                    break;
+                case PlayerVisibilityClassification.Competitive:
+                    competitiveCount++;
+                    break;
+                case PlayerVisibilityClassification.ForceHidden:
+                    forceHiddenCount++;
+                    break;
+                case PlayerVisibilityClassification.Unmanaged:
+                    unmanagedCount++;
+                    break;
+            }
         }
 
         return new PlayerVisibilityPlan(
@@ -63,19 +89,42 @@ internal sealed unsafe class PlayerVisibilityPlan
                 keepPlan.BudgetExemptPlayerCount,
                 keepPlan.VisibleBudgetedPlayerCount,
                 Math.Clamp(configuration.VisiblePlayerCountLimit, 1, 100)
-            )
+            ),
+            new PlayerVisibilityClassificationCounts(bypassVisibleCount, competitiveCount, forceHiddenCount, unmanagedCount)
         );
     }
 
-    private static bool ShouldHidePlayerSlotObject(GameObject* gameObject, int index, PlayerKeepPlan keepPlan)
+    private static PlayerVisibilityClassification Classify(int index, PlayerKeepDecision keepDecision, bool previewVisible)
     {
         if (!IsPlayerRelatedEvenSlot(index) || IsLocalPlayerReservedSlot(index))
         {
-            return false;
+            return PlayerVisibilityClassification.Unmanaged;
         }
 
-        return keepPlan.ShouldHide((nint)gameObject);
+        if (previewVisible)
+        {
+            return PlayerVisibilityClassification.BypassVisible;
+        }
+
+        return keepDecision.Kind switch
+        {
+            PlayerKeepDecisionKind.Keep when keepDecision.BudgetPolicy == PlayerKeepBudgetPolicy.Exempt =>
+                PlayerVisibilityClassification.BypassVisible,
+            PlayerKeepDecisionKind.Keep when keepDecision.BudgetPolicy == PlayerKeepBudgetPolicy.Counted =>
+                PlayerVisibilityClassification.Competitive,
+            _ => PlayerVisibilityClassification.ForceHidden,
+        };
     }
+
+    private static bool GetDesiredVisible(PlayerVisibilityClassification classification, nint address, PlayerKeepPlan keepPlan) =>
+        classification switch
+        {
+            PlayerVisibilityClassification.BypassVisible => true,
+            PlayerVisibilityClassification.Competitive => !keepPlan.IsCutByBudget(address),
+            PlayerVisibilityClassification.ForceHidden => false,
+            PlayerVisibilityClassification.Unmanaged => true,
+            _ => true,
+        };
 
     private static bool IsPlayerRelatedSlot(int index) => index is >= 0 and <= 199;
 
@@ -87,10 +136,24 @@ internal sealed unsafe class PlayerVisibilityPlan
 internal readonly record struct PlayerVisibilityIntent(
     PlayerObjectIdentity Identity,
     int ObjectIndex,
+    PlayerVisibilityClassification Classification,
     bool DesiredVisible,
     PlayerKeepDecision Decision,
     bool CutByBudget
-);
+)
+{
+    public bool IsManaged => Classification != PlayerVisibilityClassification.Unmanaged;
+}
+
+internal readonly record struct PlayerVisibilityClassificationCounts(int BypassVisible, int Competitive, int ForceHidden, int Unmanaged);
+
+internal enum PlayerVisibilityClassification
+{
+    BypassVisible,
+    Competitive,
+    ForceHidden,
+    Unmanaged,
+}
 
 internal readonly record struct PlayerObjectIdentity(nint Address, ulong GameObjectId, uint EntityId)
 {
