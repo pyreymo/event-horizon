@@ -17,9 +17,6 @@ internal sealed class PlayerAdmissionGate
     private readonly Dictionary<PlayerObjectIdentity, List<int>> currentSlotsByIdentity = [];
     private int requestedResetGeneration;
     private int consumedResetGeneration;
-    private int holdCount;
-    private long admissionHideFailed;
-    private long admissionReasserted;
 
     public PlayerAdmissionUpdateResult Apply(
         IReadOnlyList<PlayerObjectIdentity?> currentSlots,
@@ -108,18 +105,14 @@ internal sealed class PlayerAdmissionGate
                     else
                     {
                         reassertedCount++;
-                        Interlocked.Increment(ref admissionReasserted);
                     }
                 }
                 catch
                 {
                     failedCount++;
-                    Interlocked.Increment(ref admissionHideFailed);
                 }
             }
         }
-
-        Volatile.Write(ref holdCount, admissionHolds.Count);
 
         return new PlayerAdmissionUpdateResult(
             changeCounts.BaselineEstablished,
@@ -134,13 +127,9 @@ internal sealed class PlayerAdmissionGate
         );
     }
 
-    public PlayerAdmissionDiagnostics GetDiagnostics() =>
-        new(Interlocked.Read(ref admissionHideFailed), Interlocked.Read(ref admissionReasserted), Volatile.Read(ref holdCount));
-
     public void RequestReset()
     {
         Interlocked.Increment(ref requestedResetGeneration);
-        Volatile.Write(ref holdCount, 0);
     }
 
     public void ResetTracking()
@@ -149,7 +138,6 @@ internal sealed class PlayerAdmissionGate
         admissionHolds.Clear();
         newHolds.Clear();
         currentSlotsByIdentity.Clear();
-        Volatile.Write(ref holdCount, 0);
     }
 
     private void BuildCurrentSlotMap(IReadOnlyList<PlayerObjectIdentity?> currentSlots)
@@ -341,5 +329,3 @@ internal readonly record struct PlayerAdmissionUpdateResult(
     int ReassertedCount,
     int HoldCount
 );
-
-internal readonly record struct PlayerAdmissionDiagnostics(long AdmissionHideFailed, long AdmissionReasserted, int AdmissionHoldCount);

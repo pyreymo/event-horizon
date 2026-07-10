@@ -33,7 +33,6 @@ public sealed class Plugin : IDalamudPlugin
     private const int DtrBarRefreshIntervalMs = 1_000;
     private const double SlowFrameworkUpdateLogThresholdMs = 2.0;
     private const int SlowFrameworkUpdateLogCooldownMs = 1_000;
-    private const int StableTopBLogIntervalMs = 2_000;
 
     #region Services
 
@@ -114,7 +113,6 @@ public sealed class Plugin : IDalamudPlugin
     private long nextDynamicCullingRefresh;
     private long nextDtrBarRefresh;
     private long nextSlowFrameworkUpdateLog;
-    private long nextStableTopBLog;
     public int HiddenPlayerCount => UpdateObjectArraysHook.HiddenPlayerCount;
     internal PlayerKeepBudgetStats KeepBudgetStats => UpdateObjectArraysHook.KeepBudgetStats;
     internal PlayerPreviewSnapshot PlayerPreviewSnapshot => UpdateObjectArraysHook.PlayerPreviewSnapshot;
@@ -306,7 +304,6 @@ public sealed class Plugin : IDalamudPlugin
         phaseStart = Stopwatch.GetTimestamp();
         PlayerPreviewHighlighter.Update();
         var highlightTicks = Stopwatch.GetTimestamp() - phaseStart;
-        LogStableTopBIfNeeded();
 
         CullingFrameSchedule schedule;
         long dynamicCheckTicks;
@@ -362,63 +359,6 @@ public sealed class Plugin : IDalamudPlugin
 
         RefreshDtrBar();
         nextDtrBarRefresh = Environment.TickCount64 + DtrBarRefreshIntervalMs;
-    }
-
-    private void LogStableTopBIfNeeded()
-    {
-        var now = Environment.TickCount64;
-        if (now < nextStableTopBLog)
-        {
-            return;
-        }
-
-        var trace = UpdateObjectArraysHook.LastRefreshTrace.Selection;
-        if (!trace.HasValue)
-        {
-            return;
-        }
-
-        nextStableTopBLog = now + StableTopBLogIntervalMs;
-        var admission = UpdateObjectArraysHook.PlayerAdmissionDiagnostics;
-        var message = string.Format(
-            "[StableTopB] applied={0} status={1} fallback={2} generation={3} candidates={4} budget={5} proposalSelected={6} appliedSelected={7} previous={8} proposalRetained={9} proposalEntered={10} proposalLeft={11} proposalMissing={12} proposalReplaced={13} localVelocity={14} tracked={15} speed={16:F3} motion={17:F3} bonus={18} snapshotMs={19:F3} selectorMs={20:F3} totalMs={21:F3} candidateRanks={22} reason={23} admissionHideFailed={24} admissionReasserted={25} admissionHoldCount={26}",
-            trace.AppliedSource,
-            trace.Status,
-            trace.FallbackReason,
-            trace.Generation,
-            trace.CandidateCount,
-            trace.Budget,
-            trace.ProposalSelectedCount,
-            trace.AppliedSelectedCount,
-            trace.PreviousSelectedCount,
-            trace.RetainedCount,
-            trace.EnteredCount,
-            trace.LeftCount,
-            trace.MissingPreviousCount,
-            trace.ActiveReplacedCount,
-            trace.HasLocalVelocityEstimate,
-            trace.TrackedPlayerVelocityCount,
-            trace.SmoothedLocalSpeed,
-            trace.MotionFactor,
-            trace.RetentionBonus,
-            ToMilliseconds(trace.SnapshotTicks),
-            ToMilliseconds(trace.SelectorTicks),
-            ToMilliseconds(trace.TotalTicks),
-            FormatRankHistogram(trace.CandidateRankHistogram),
-            trace.FailureReason ?? "n/a",
-            admission.AdmissionHideFailed,
-            admission.AdmissionReasserted,
-            admission.AdmissionHoldCount
-        );
-
-        if (trace.Status == PlayerVisibilitySelectionStatus.Failed)
-        {
-            Log.Error(message);
-        }
-        else
-        {
-            Log.Information(message);
-        }
     }
 
     private void LogSlowFrameworkUpdate(
@@ -497,9 +437,6 @@ public sealed class Plugin : IDalamudPlugin
                 ToMilliseconds(trace.SelectorTicks)
             )
             : "n/a";
-
-    private static string FormatRankHistogram(IReadOnlyList<int>? histogram) =>
-        histogram == null ? "[]" : $"[{string.Join(',', histogram)}]";
 
     private static string FormatVisibilityClasses(PlayerVisibilityClassificationCounts counts)
     {

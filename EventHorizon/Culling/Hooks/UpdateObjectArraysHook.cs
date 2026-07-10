@@ -29,7 +29,6 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
     public PlayerPreviewSnapshot PlayerPreviewSnapshot => objectCuller.GetPlayerPreviewSnapshot();
     public CullingPerformanceTrace LastRefreshTrace => objectCuller.LastUpdateTrace;
     public CullingPerformanceTrace LastTickTrace => objectCuller.LastTickTrace;
-    public PlayerAdmissionDiagnostics PlayerAdmissionDiagnostics => objectCuller.GetPlayerAdmissionDiagnostics();
 
     public UpdateObjectArraysHook(
         IGameInteropProvider gameInteropProvider,

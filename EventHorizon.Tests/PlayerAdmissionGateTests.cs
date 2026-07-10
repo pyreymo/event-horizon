@@ -183,8 +183,6 @@ public sealed class PlayerAdmissionGateTests
 
         var retry = gate.Apply(Slots((2, IdentityA)), State(), _ => { });
         Assert.AreEqual(1, retry.ReassertedCount);
-        Assert.AreEqual(1L, gate.GetDiagnostics().AdmissionHideFailed);
-        Assert.AreEqual(1L, gate.GetDiagnostics().AdmissionReasserted);
     }
 
     [TestMethod]

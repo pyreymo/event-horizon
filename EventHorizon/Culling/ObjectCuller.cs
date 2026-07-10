@@ -1102,8 +1102,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
     public bool ConsumePlayerTopologyDirty() => playerTopologyDirtySignal.Consume();
 
-    public PlayerAdmissionDiagnostics GetPlayerAdmissionDiagnostics() => playerAdmissionGate.GetDiagnostics();
-
     private CullingRuntimeMode DetermineRuntimeMode(GameObjectManager* manager)
     {
         if (!IsCullingEnabled())
