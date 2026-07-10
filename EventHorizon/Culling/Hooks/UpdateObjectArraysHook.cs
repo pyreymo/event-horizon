@@ -20,7 +20,6 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
 
     private readonly ObjectCuller objectCuller;
     private readonly Hook<UpdateObjectArraysDelegate> hook;
-    private readonly CullingThreadModelProbe threadModelProbe;
     private bool disposed;
 
     private delegate void* UpdateObjectArraysDelegate(GameObjectManager* objectManager);
@@ -55,7 +54,6 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
             log
         );
         hook = gameInteropProvider.HookFromSignature<UpdateObjectArraysDelegate>(Signature, Detour);
-        threadModelProbe = new(log);
     }
 
     public void Enable()
@@ -82,10 +80,6 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
     {
         objectCuller.Tick(GameObjectManager.Instance());
     }
-
-    public void BeginFrameworkFrame() => threadModelProbe.EnterFramework();
-
-    public void EndFrameworkFrame() => threadModelProbe.ExitFramework();
 
     public CullingRuntimeSynchronization SynchronizeRuntimeMode() => objectCuller.SynchronizeRuntimeMode(GameObjectManager.Instance());
 
@@ -125,17 +119,9 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
 
     private void* Detour(GameObjectManager* objectManager)
     {
-        threadModelProbe.EnterDetour();
-        try
-        {
-            var result = hook.Original(objectManager);
-            objectCuller.ApplyPlayerAdmissionGate(objectManager);
-            return result;
-        }
-        finally
-        {
-            threadModelProbe.ExitDetour();
-        }
+        var result = hook.Original(objectManager);
+        objectCuller.ApplyPlayerAdmissionGate(objectManager);
+        return result;
     }
 
     private void OnObjectArraysUpdated(GameObjectManager* objectManager, bool refreshPlayerPreview)

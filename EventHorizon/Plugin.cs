@@ -308,45 +308,37 @@ public sealed class Plugin : IDalamudPlugin
         var highlightTicks = Stopwatch.GetTimestamp() - phaseStart;
         LogStableTopBIfNeeded();
 
-        UpdateObjectArraysHook.BeginFrameworkFrame();
         CullingFrameSchedule schedule;
         long dynamicCheckTicks;
         long refreshTicks = 0;
         long tickTicks = 0;
         CullingPerformanceTrace tickTrace;
-        try
+        phaseStart = Stopwatch.GetTimestamp();
+        var runtime = UpdateObjectArraysHook.SynchronizeRuntimeMode();
+        var now = Environment.TickCount64;
+        var playerTopologyDirty = UpdateObjectArraysHook.ConsumePlayerTopologyDirty();
+        schedule = CullingFrameSchedule.Decide(
+            runtime.Mode,
+            runtime.RequiresRefresh || now >= nextDynamicCullingRefresh,
+            playerTopologyDirty
+        );
+        dynamicCheckTicks = Stopwatch.GetTimestamp() - phaseStart;
+
+        if (schedule.Refresh)
         {
             phaseStart = Stopwatch.GetTimestamp();
-            var runtime = UpdateObjectArraysHook.SynchronizeRuntimeMode();
-            var now = Environment.TickCount64;
-            var playerTopologyDirty = UpdateObjectArraysHook.ConsumePlayerTopologyDirty();
-            schedule = CullingFrameSchedule.Decide(
-                runtime.Mode,
-                runtime.RequiresRefresh || now >= nextDynamicCullingRefresh,
-                playerTopologyDirty
-            );
-            dynamicCheckTicks = Stopwatch.GetTimestamp() - phaseStart;
-
-            if (schedule.Refresh)
-            {
-                phaseStart = Stopwatch.GetTimestamp();
-                RefreshObjectCulling();
-                refreshTicks = Stopwatch.GetTimestamp() - phaseStart;
-                nextDynamicCullingRefresh = Environment.TickCount64 + DynamicCullingRefreshIntervalMs;
-            }
-
-            if (schedule.Tick)
-            {
-                phaseStart = Stopwatch.GetTimestamp();
-                UpdateObjectArraysHook.FrameworkTick();
-                tickTicks = Stopwatch.GetTimestamp() - phaseStart;
-            }
-            tickTrace = schedule.Tick ? UpdateObjectArraysHook.LastTickTrace : default;
+            RefreshObjectCulling();
+            refreshTicks = Stopwatch.GetTimestamp() - phaseStart;
+            nextDynamicCullingRefresh = Environment.TickCount64 + DynamicCullingRefreshIntervalMs;
         }
-        finally
+
+        if (schedule.Tick)
         {
-            UpdateObjectArraysHook.EndFrameworkFrame();
+            phaseStart = Stopwatch.GetTimestamp();
+            UpdateObjectArraysHook.FrameworkTick();
+            tickTicks = Stopwatch.GetTimestamp() - phaseStart;
         }
+        tickTrace = schedule.Tick ? UpdateObjectArraysHook.LastTickTrace : default;
         LogSlowFrameworkUpdate(
             start,
             dtrTicks,
