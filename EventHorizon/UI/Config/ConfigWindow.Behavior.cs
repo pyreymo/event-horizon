@@ -67,13 +67,6 @@ public partial class ConfigWindow
 
     private void DrawPlayerDisplayControls()
     {
-        var enableFadeTransitions = configuration.EnableFadeTransitions;
-        if (DrawAutoFitCheckbox("EnableFadeTransitions", Loc.Text("Config.EnableFadeTransitions"), ref enableFadeTransitions))
-        {
-            configuration.EnableFadeTransitions = enableFadeTransitions;
-            SaveAndRefresh();
-        }
-
         var enableHiddenPlayerGroundMarker = configuration.EnableHiddenPlayerGroundMarker;
         if (
             DrawAutoFitCheckbox(

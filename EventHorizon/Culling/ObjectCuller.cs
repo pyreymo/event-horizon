@@ -16,11 +16,8 @@ namespace EventHorizon.Culling;
 
 internal sealed unsafe class ObjectCuller : IDisposable
 {
-    private const int MaxMaintainedPlayerActionsPerFrame = 24;
     private const int MaxHiddenPlayerVfxCreatesPerFrame = 8;
     private const int MaxPlayerRelatedObjectIndex = 199;
-    private const int MinUnattachedEventNpcIndex = 489;
-    private const int MaxUnattachedEventNpcIndex = 608;
     private const VisibilityFlags PluginCustomProbe = (VisibilityFlags)0x1000;
     private const VisibilityFlags InvisibleFlag = PluginCustomProbe | VisibilityFlags.Nameplate | VisibilityFlags.Model;
     private const string HiddenPlayerVfxPath = StaticVfxResourceRedirector.HiddenPlayerGroundMarkerPath;
@@ -32,12 +29,11 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly IGameGui gameGui;
     private readonly StaticVfxController staticVfxController;
     private readonly PlayerKeepRules playerKeepRules;
+    private readonly EventNpcVisibilityRule eventNpcVisibilityRule = new();
     private readonly PlayerKeepPlan playerKeepPlan = new();
     private readonly List<PlayerKeepCandidate> playerKeepCandidates = [];
     private readonly HiddenObjectTracker hiddenObjectTracker;
-    private readonly ObjectFadeController fadeController;
     private readonly PlayerVisibilityPipeline playerVisibilityPipeline;
-    private readonly PlayerVisibilityExecutor playerVisibilityExecutor = new();
     private readonly ShowTransitionBudget showTransitionBudget = new();
     private readonly PlayerAdmissionGate playerAdmissionGate = new();
     private readonly PlayerTopologyDirtySignal playerTopologyDirtySignal = new();
@@ -56,7 +52,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private uint? previewSelectedPlayerEntityId;
     private long previewSelectionExpiresAt;
     private int nextPlayerVisibilityGeneration;
-    private int nextMaintainedVisibilityActionIndex;
     private PlayerVisibilityReconciliation? latestPlayerVisibilityReconciliation;
     private readonly CullingRuntimeModeTransition runtimeModeTransition = new();
 
@@ -83,7 +78,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
         playerVisibilityPipeline = new(exception => log.Error(exception, "Player visibility selection failed; using legacy fallback."));
         playerKeepRules = new(configuration, objectTable, targetManager);
         hiddenObjectTracker = new();
-        fadeController = new(hiddenObjectTracker, InvisibleFlag);
     }
 
     #region Lifecycle
@@ -152,7 +146,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
         {
             playerVisibilityPipeline.Reset();
             RestoreHiddenObjects(manager);
-            ResetFades(manager);
             LastUpdateTrace = CreateTrace(
                 isRefresh: true,
                 refreshPlayerPreview,
@@ -171,7 +164,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
         {
             playerVisibilityPipeline.Reset();
             RestoreHiddenObjects(manager);
-            ResetFades(manager);
             LastUpdateTrace = CreateTrace(
                 isRefresh: true,
                 refreshPlayerPreview,
@@ -191,7 +183,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
         {
             playerVisibilityPipeline.Reset();
             RestoreHiddenObjects(manager);
-            ResetFades(manager);
             LastUpdateTrace = CreateTrace(
                 isRefresh: true,
                 refreshPlayerPreview,
@@ -206,10 +197,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
             return;
         }
 
-        if (!configuration.EnableFadeTransitions && HasActiveFades)
-        {
-            ResetFades(manager);
-        }
+        eventNpcVisibilityRule.Refresh(manager, configuration.HideUnattachedEventNpcs);
 
         var guardTicks = Stopwatch.GetTimestamp() - phaseStart;
         phaseStart = Stopwatch.GetTimestamp();
@@ -345,11 +333,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
             return;
         }
 
-        if (!configuration.EnableFadeTransitions && HasActiveFades)
-        {
-            ResetFades(manager);
-        }
-
         var guardTicks = Stopwatch.GetTimestamp() - phaseStart;
         TickVisibility(manager);
         var tickTrace = LastTickTrace.Tick;
@@ -422,7 +405,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
         }
 
         RestoreHiddenObjects(manager);
-        ResetFades(manager);
         Clear();
     }
 
@@ -493,91 +475,10 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
     private void ApplyPlayerVisibilityReconciliation(GameObjectManager* manager, PlayerVisibilityReconciliation reconciliation)
     {
-        PlayerVisibilityExecutor.Execute(
-            reconciliation,
-            action => ApplyPlayerVisibilityAction(manager, action),
-            actions => ApplyMaintainedPlayerVisibilityActions(manager, actions)
-        );
-    }
-
-    private void ApplyMaintainedPlayerVisibilityActions(GameObjectManager* manager, IReadOnlyList<PlayerVisibilityAction> actions)
-    {
-        if (!HasActiveFades)
+        foreach (var action in reconciliation.Actions)
         {
-            nextMaintainedVisibilityActionIndex = 0;
-            return;
-        }
-
-        var maintainedCount = CountMaintainedPlayerVisibilityActions(actions);
-        if (maintainedCount == 0)
-        {
-            nextMaintainedVisibilityActionIndex = 0;
-            return;
-        }
-
-        var startIndex = nextMaintainedVisibilityActionIndex % maintainedCount;
-        var processedCount = 0;
-        ApplyMaintainedPlayerVisibilityActions(manager, actions, startIndex, ref processedCount);
-        if (processedCount < MaxMaintainedPlayerActionsPerFrame && startIndex > 0)
-        {
-            ApplyMaintainedPlayerVisibilityActions(manager, actions, 0, ref processedCount, stopBeforeMaintainedIndex: startIndex);
-        }
-
-        nextMaintainedVisibilityActionIndex = (startIndex + processedCount) % maintainedCount;
-    }
-
-    private void ApplyMaintainedPlayerVisibilityActions(
-        GameObjectManager* manager,
-        IReadOnlyList<PlayerVisibilityAction> actions,
-        int startMaintainedIndex,
-        ref int processedCount,
-        int? stopBeforeMaintainedIndex = null
-    )
-    {
-        var maintainedIndex = 0;
-        foreach (var action in actions)
-        {
-            if (action.Reason != PlayerVisibilityActionReason.Maintain)
-            {
-                continue;
-            }
-
-            if (stopBeforeMaintainedIndex.HasValue && maintainedIndex >= stopBeforeMaintainedIndex.Value)
-            {
-                return;
-            }
-
-            if (maintainedIndex++ < startMaintainedIndex)
-            {
-                continue;
-            }
-
-            if (!fadeController.IsFading(action.Target.Identity))
-            {
-                continue;
-            }
-
             ApplyPlayerVisibilityAction(manager, action);
-            processedCount++;
-            if (processedCount >= MaxMaintainedPlayerActionsPerFrame)
-            {
-                return;
-            }
         }
-    }
-
-    private static int CountMaintainedPlayerVisibilityActions(IReadOnlyList<PlayerVisibilityAction> actions)
-    {
-        var count = 0;
-        foreach (var action in actions)
-        {
-            if (action.Reason == PlayerVisibilityActionReason.Maintain)
-            {
-                count++;
-            }
-        }
-
-        return count;
     }
 
     private void ApplyPlayerVisibilityAction(GameObjectManager* manager, PlayerVisibilityAction action)
@@ -615,9 +516,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
         PruneMissingHiddenObjects(manager);
         var pruneHiddenTicks = Stopwatch.GetTimestamp() - phaseStart;
         phaseStart = Stopwatch.GetTimestamp();
-        PruneMissingFades(manager);
-        var pruneFadesTicks = Stopwatch.GetTimestamp() - phaseStart;
-        phaseStart = Stopwatch.GetTimestamp();
         var hiddenVfxTrace = UpdateHiddenPlayerVfx(manager);
         var hiddenVfxTicks = Stopwatch.GetTimestamp() - phaseStart;
         LastTickTrace = new CullingPerformanceTrace(
@@ -638,7 +536,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
                 playerActionsTicks,
                 nonPlayerTicks,
                 pruneHiddenTicks,
-                pruneFadesTicks,
                 hiddenVfxTicks,
                 hiddenVfxTrace
             ),
@@ -651,7 +548,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         CollectHiddenPlayerOwnerEntityIds(manager);
         CollectOddSlotPlayerOwnerIds(manager);
 
-        var maxIndex = Math.Min(MaxUnattachedEventNpcIndex, manager->Objects.IndexSorted.Length - 1);
+        var maxIndex = Math.Min(EventNpcVisibilityRule.LastSlot, manager->Objects.IndexSorted.Length - 1);
         for (var index = 0; index <= maxIndex; index++)
         {
             var gameObject = manager->Objects.IndexSorted[index].Value;
@@ -739,7 +636,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
             return;
         }
 
-        ApplyVisibility(gameObject, shouldHide: false, target.ObjectIndex);
+        RestoreIfHidden(gameObject);
         if (wasHidden && !hiddenObjectTracker.IsHidden(gameObject))
         {
             showTransitionBudget.ConsumeShow();
@@ -751,7 +648,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         var gameObject = FindPlayerObject(manager, target.Identity, target.ObjectIndex);
         if (gameObject != null)
         {
-            ApplyVisibility(gameObject, shouldHide: true, target.ObjectIndex);
+            Hide(gameObject, target.ObjectIndex);
         }
     }
 
@@ -779,30 +676,13 @@ internal sealed unsafe class ObjectCuller : IDisposable
         var outgoing = FindPlayerObject(manager, outgoingTarget.Identity, outgoingTarget.ObjectIndex);
         if (outgoing != null)
         {
-            ApplyVisibility(outgoing, shouldHide: true, outgoingTarget.ObjectIndex);
+            Hide(outgoing, outgoingTarget.ObjectIndex);
         }
 
-        ApplyVisibility(incoming, shouldHide: false, action.Target.ObjectIndex);
+        RestoreIfHidden(incoming);
         if (incomingWasHidden && !hiddenObjectTracker.IsHidden(incoming))
         {
             showTransitionBudget.ConsumeShow();
-        }
-    }
-
-    private void ApplyVisibility(GameObject* gameObject, bool shouldHide, int objectIndex)
-    {
-        if (UpdateFade(gameObject, shouldHide, objectIndex))
-        {
-            return;
-        }
-
-        if (shouldHide)
-        {
-            Hide(gameObject, objectIndex);
-        }
-        else
-        {
-            RestoreIfHidden(gameObject);
         }
     }
 
@@ -856,35 +736,14 @@ internal sealed unsafe class ObjectCuller : IDisposable
         return name.Length == 9 && name[0] == '#';
     }
 
-    private bool UpdateFade(GameObject* gameObject, bool shouldHide, int objectIndex)
-    {
-        if (!configuration.EnableFadeTransitions)
-        {
-            return false;
-        }
-
-        return fadeController.Update(gameObject, shouldHide, objectIndex);
-    }
-
     private void PruneMissingHiddenObjects(GameObjectManager* manager)
     {
         hiddenObjectTracker.PruneMissing(manager);
     }
 
-    private void PruneMissingFades(GameObjectManager* manager)
-    {
-        fadeController.PruneMissing(manager);
-    }
-
-    private void ResetFades(GameObjectManager* manager)
-    {
-        fadeController.Reset(manager);
-    }
-
     private void Clear()
     {
         hiddenObjectTracker.Clear();
-        fadeController.Clear();
         showTransitionBudget.Reset();
         ClearHiddenPlayerVfx();
         playerKeepRules.Clear();
@@ -893,12 +752,12 @@ internal sealed unsafe class ObjectCuller : IDisposable
         playerPreviewSnapshot = PlayerPreviewSnapshot.Empty;
         previewSelectedPlayerEntityId = null;
         previewSelectionExpiresAt = 0;
-        nextMaintainedVisibilityActionIndex = 0;
         playerAdmissionGate.RequestReset();
         playerTopologyDirtySignal.Clear();
         appliedVisibilityState.Clear();
         playerVisibilityPipeline.Reset();
         latestPlayerVisibilityReconciliation = null;
+        eventNpcVisibilityRule.Clear();
     }
 
     #endregion
@@ -928,11 +787,9 @@ internal sealed unsafe class ObjectCuller : IDisposable
             return false;
         }
 
-        if (IsUnattachedEventNpcSlot(index))
+        if (index is >= EventNpcVisibilityRule.FirstSlot and <= EventNpcVisibilityRule.LastSlot)
         {
-            return configuration.HideUnattachedEventNpcs
-                && gameObject->ObjectKind == ObjectKind.EventNpc
-                && gameObject->EventHandler == null;
+            return eventNpcVisibilityRule.ShouldHide(gameObject, index);
         }
 
         if (IsPlayerRelatedEvenSlot(index))
@@ -1021,8 +878,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private static bool IsPlayerRelatedOddSlot(int index) => IsPlayerRelatedSlot(index) && index % 2 == 1;
 
     private static bool IsLocalPlayerReservedSlot(int index) => index is 0 or 1;
-
-    private static bool IsUnattachedEventNpcSlot(int index) => index is >= MinUnattachedEventNpcIndex and <= MaxUnattachedEventNpcIndex;
 
     private static GameObject* FindPlayerObject(GameObjectManager* manager, PlayerObjectIdentity identity, int expectedIndex)
     {
@@ -1274,12 +1129,10 @@ internal sealed unsafe class ObjectCuller : IDisposable
         if (manager != null)
         {
             RestoreHiddenObjects(manager);
-            ResetFades(manager);
         }
         else
         {
             hiddenObjectTracker.Clear();
-            fadeController.Clear();
         }
 
         ClearPublishedPlayerVisibilityState();
@@ -1299,11 +1152,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
         showTransitionBudget.Reset();
         keepBudgetStats = default;
         playerPreviewSnapshot = PlayerPreviewSnapshot.Empty;
-        nextMaintainedVisibilityActionIndex = 0;
         ClearHiddenPlayerVfx();
     }
-
-    public bool HasActiveFades => fadeController.HasActiveFades;
 
     #endregion
 }

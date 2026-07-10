@@ -103,10 +103,9 @@
     "Config.HideOtherPlayerCompanions": "Hide minions",
     "Config.HideOtherPlayerOrnaments": "Hide fashion accessories",
     "Config.HideOtherPlayerBattlePets": "Hide battle pets",
-    "Config.HideUnattachedEventNpcs": "Hide unattached event NPCs",
+    "Config.HideUnattachedEventNpcs": "Hide useless NPCs (experimental)",
 
     "Config.Section.PlayerDisplay": "Player display",
-    "Config.EnableFadeTransitions": "Fade players in and out when visibility changes",
     "Config.Section.LayoutGraphics": "Layout graphics",
     "Config.HideBgPartGraphicsObjects": "Hide current area's BG part graphics",
     "Config.HideTerrainGraphicsObjects": "Hide terrain graphics",

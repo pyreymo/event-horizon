@@ -34,7 +34,6 @@ internal readonly record struct CullingTickPerformanceTrace(
     long PlayerActionsTicks,
     long NonPlayerTicks,
     long PruneHiddenTicks,
-    long PruneFadesTicks,
     long HiddenVfxTicks,
     CullingHiddenVfxPerformanceTrace HiddenVfx = default
 )

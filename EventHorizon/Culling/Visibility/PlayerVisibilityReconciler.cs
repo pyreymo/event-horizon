@@ -8,14 +8,12 @@ internal sealed class PlayerVisibilityReconciler
 {
     private readonly List<PlayerVisibilityTarget> toShow = [];
     private readonly List<PlayerVisibilityTarget> toHide = [];
-    private readonly List<PlayerVisibilityTarget> unchanged = [];
     private readonly List<PlayerVisibilityAction> actions = [];
 
     public PlayerVisibilityReconciliation Reconcile(PlayerVisibilityTargetSet targetSet, HiddenObjectTracker hiddenObjectTracker)
     {
         toShow.Clear();
         toHide.Clear();
-        unchanged.Clear();
         actions.Clear();
 
         var appliedVisibleCount = 0;
@@ -42,17 +40,12 @@ internal sealed class PlayerVisibilityReconciler
             {
                 toHide.Add(target);
             }
-            else
-            {
-                unchanged.Add(target);
-            }
         }
 
         toShow.Sort(CompareShowPriority);
         toHide.Sort(CompareHidePriority);
 
         AddTransitions(actions, toShow, toHide);
-        AddMaintainedVisibility(actions, unchanged);
 
         return new PlayerVisibilityReconciliation(
             targetSet.Generation,
@@ -85,18 +78,6 @@ internal sealed class PlayerVisibilityReconciler
         for (var index = swapCount; index < toShow.Count; index++)
         {
             actions.Add(PlayerVisibilityAction.Show(toShow[index], PlayerVisibilityActionReason.TargetExpanded));
-        }
-    }
-
-    private static void AddMaintainedVisibility(List<PlayerVisibilityAction> actions, IReadOnlyList<PlayerVisibilityTarget> unchanged)
-    {
-        foreach (var target in unchanged)
-        {
-            actions.Add(
-                target.DesiredVisible
-                    ? PlayerVisibilityAction.Show(target, PlayerVisibilityActionReason.Maintain)
-                    : PlayerVisibilityAction.Hide(target, PlayerVisibilityActionReason.Maintain)
-            );
         }
     }
 
@@ -157,7 +138,6 @@ internal enum PlayerVisibilityActionKind
 
 internal enum PlayerVisibilityActionReason
 {
-    Maintain,
     TargetExpanded,
     TargetReduced,
     Swap,

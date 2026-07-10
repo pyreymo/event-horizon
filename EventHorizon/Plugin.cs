@@ -543,16 +543,14 @@ public sealed class Plugin : IDalamudPlugin
             return "n/a";
         }
 
-        var accountedTicks =
-            trace.PlayerActionsTicks + trace.NonPlayerTicks + trace.PruneHiddenTicks + trace.PruneFadesTicks + trace.HiddenVfxTicks;
+        var accountedTicks = trace.PlayerActionsTicks + trace.NonPlayerTicks + trace.PruneHiddenTicks + trace.HiddenVfxTicks;
         var unaccountedTicks = Math.Max(0, trace.TotalTicks - accountedTicks);
         return string.Format(
-            "total={0:F3} playerActions={1:F3} nonPlayer={2:F3} pruneHidden={3:F3} pruneFades={4:F3} hiddenVfx={5:F3} hiddenVfxTrace[{6}] unaccounted={7:F3} actions={8}",
+            "total={0:F3} playerActions={1:F3} nonPlayer={2:F3} pruneHidden={3:F3} hiddenVfx={4:F3} hiddenVfxTrace[{5}] unaccounted={6:F3} actions={7}",
             ToMilliseconds(trace.TotalTicks),
             ToMilliseconds(trace.PlayerActionsTicks),
             ToMilliseconds(trace.NonPlayerTicks),
             ToMilliseconds(trace.PruneHiddenTicks),
-            ToMilliseconds(trace.PruneFadesTicks),
             ToMilliseconds(trace.HiddenVfxTicks),
             FormatHiddenVfxTrace(trace.HiddenVfx),
             ToMilliseconds(unaccountedTicks),

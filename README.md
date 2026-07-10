@@ -39,7 +39,7 @@ Players are kept visible when they match enabled keep rules. Those rules can be 
 
 Within the configured budget, a deterministic Stable Top-B selector favors relevant nearby players while retaining the current visible set when possible. Newly admitted player models are kept hidden until the active visibility target explicitly permits them, preventing slot churn from briefly bypassing the selection cycle.
 
-Everyone else may be hidden, faded out, or limited by your configured visibility settings. Visibility changes still pass through the shared reconciliation and transition path.
+Everyone else may be hidden or limited by your configured visibility settings. Visibility changes still pass through the shared reconciliation and transition path.
 
 Your own character is never hidden.
 
@@ -61,12 +61,6 @@ Keep rules include:
 - Selected race and sex combinations
 
 Keep rules can be reordered, enabled individually, and configured to either use or ignore the visible-player budget.
-
-### Smooth transitions
-
-Players can fade out and back in instead of disappearing abruptly.
-
-Fade transitions can be disabled if you prefer immediate visibility changes.
 
 ### Crowd limits
 
@@ -137,7 +131,7 @@ Experimental visual aids can show hidden-player ground markers, but these are op
 
 The plugin code is grouped by responsibility:
 
-- `EventHorizon/Culling` contains player selection, admission gating, visibility reconciliation, fade handling, and keep-rule decisions.
+- `EventHorizon/Culling` contains player selection, admission gating, visibility reconciliation, and keep-rule decisions.
 - `EventHorizon/Integration` contains native UI, nameplate marker, DTR, and VFX integrations.
 - `EventHorizon/Preview` contains preview snapshots, preview rendering, the floating preview window, world arrows, and selected-player highlights.
 - `EventHorizon/UI/Config` contains settings tabs and shared config-window layout helpers.

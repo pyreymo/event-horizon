@@ -103,10 +103,9 @@
     "Config.HideOtherPlayerCompanions": "隐藏宠物",
     "Config.HideOtherPlayerOrnaments": "隐藏时尚配饰",
     "Config.HideOtherPlayerBattlePets": "隐藏战斗宠物",
-    "Config.HideUnattachedEventNpcs": "隐藏未挂接事件 NPC",
+    "Config.HideUnattachedEventNpcs": "隐藏无用 NPC（实验性）",
 
     "Config.Section.PlayerDisplay": "玩家显示",
-    "Config.EnableFadeTransitions": "隐藏/显示玩家时淡入淡出",
     "Config.Section.LayoutGraphics": "场景图形",
     "Config.HideBgPartGraphicsObjects": "隐藏当前区域场景部件图形",
     "Config.HideTerrainGraphicsObjects": "隐藏地形图形",

@@ -132,14 +132,10 @@ public sealed class PlayerAdmissionGateTests
     {
         var gate = BaselineGate();
         var hardHideCount = 0;
-        var fadeCount = 0;
-        var showBudgetCount = 0;
 
         var result = gate.Apply(Slots((2, IdentityA)), State(), _ => hardHideCount++);
 
         Assert.AreEqual(1, hardHideCount);
-        Assert.AreEqual(0, fadeCount);
-        Assert.AreEqual(0, showBudgetCount);
         Assert.AreEqual(1, result.HiddenCount);
     }
 

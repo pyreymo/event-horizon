@@ -60,7 +60,6 @@ internal class Configuration : IPluginConfiguration
     public float DtrBackgroundPaddingTop { get; set; } = 10f;
     public float DtrBackgroundPaddingBottom { get; set; } = 1f;
     public byte DtrBackgroundAlpha { get; set; } = 128;
-    public bool EnableFadeTransitions { get; set; } = true;
     public bool KeepFriends { get; set; } = true;
     public bool KeepPartyAndAllianceMembers { get; set; } = true;
     public bool KeepRecruitingPlayers { get; set; } = true;
