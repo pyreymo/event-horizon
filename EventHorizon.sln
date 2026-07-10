@@ -5,8 +5,6 @@ VisualStudioVersion = 16.0.29709.97
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EventHorizon", "EventHorizon\EventHorizon.csproj", "{13C812E9-0D42-4B95-8646-40EEBF30636F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EventHorizon.Tests", "EventHorizon.Tests\EventHorizon.Tests.csproj", "{694C865D-0460-4D92-83D6-0B605935CF50}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -29,18 +27,6 @@ Global
 		{13C812E9-0D42-4B95-8646-40EEBF30636F}.Release|Any CPU.Build.0 = Release|Any CPU
 		{13C812E9-0D42-4B95-8646-40EEBF30636F}.Release|x86.ActiveCfg = Release|Any CPU
 		{13C812E9-0D42-4B95-8646-40EEBF30636F}.Release|x86.Build.0 = Release|Any CPU
-		{694C865D-0460-4D92-83D6-0B605935CF50}.Debug|x64.ActiveCfg = Debug|x64
-		{694C865D-0460-4D92-83D6-0B605935CF50}.Debug|x64.Build.0 = Debug|x64
-		{694C865D-0460-4D92-83D6-0B605935CF50}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{694C865D-0460-4D92-83D6-0B605935CF50}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{694C865D-0460-4D92-83D6-0B605935CF50}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{694C865D-0460-4D92-83D6-0B605935CF50}.Debug|x86.Build.0 = Debug|Any CPU
-		{694C865D-0460-4D92-83D6-0B605935CF50}.Release|x64.ActiveCfg = Release|x64
-		{694C865D-0460-4D92-83D6-0B605935CF50}.Release|x64.Build.0 = Release|x64
-		{694C865D-0460-4D92-83D6-0B605935CF50}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{694C865D-0460-4D92-83D6-0B605935CF50}.Release|Any CPU.Build.0 = Release|Any CPU
-		{694C865D-0460-4D92-83D6-0B605935CF50}.Release|x86.ActiveCfg = Release|Any CPU
-		{694C865D-0460-4D92-83D6-0B605935CF50}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
