@@ -161,8 +161,6 @@ internal sealed class PlayerVisibilityTargetSet(
     public long CreatedAtTickCount64 { get; } = createdAtTickCount64;
     public IReadOnlyList<PlayerVisibilityTarget> Targets { get; } = targets;
     public PlayerVisibilityClassificationCounts ClassificationCounts { get; } = classificationCounts;
-
-    public long GetAgeMilliseconds(long nowTickCount64) => Math.Max(0, nowTickCount64 - CreatedAtTickCount64);
 }
 
 internal static class PlayerVisibilityLegacyTargetBuilder

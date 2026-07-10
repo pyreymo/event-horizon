@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using System.Linq;
 using System.Numerics;
 using EventHorizon.Culling.Selection;
@@ -46,31 +45,30 @@ internal sealed class PlayerVisibilitySelectionController
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(legacyTargetSet);
 
-        var totalStart = Stopwatch.GetTimestamp();
         if (!localPosition.HasValue || !IsFinite(localPosition.Value))
         {
             return new PlayerVisibilitySelectionEvaluation(
-                CreateUnavailableTrace(plan.Generation, totalStart, "Local player position is unavailable."),
+                CreateUnavailableTrace(plan.Generation, "Local player position is unavailable."),
                 []
             );
         }
 
         try
         {
-            return EvaluateCore(plan, legacyTargetSet, limitVisiblePlayerCount, visiblePlayerCountLimit, localPosition.Value, totalStart);
+            return EvaluateCore(plan, legacyTargetSet, limitVisiblePlayerCount, visiblePlayerCountLimit, localPosition.Value);
         }
         catch (Exception exception)
         {
             reportFailure?.Invoke(exception);
-            return CreateFailedEvaluation(plan.Generation, totalStart, exception);
+            return CreateFailedEvaluation(plan.Generation, exception);
         }
     }
 
-    internal static PlayerVisibilitySelectionEvaluation CreateFailedEvaluation(int generation, long totalStart, Exception exception)
+    internal static PlayerVisibilitySelectionEvaluation CreateFailedEvaluation(int generation, Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
         return new PlayerVisibilitySelectionEvaluation(
-            CreateFailedTrace(generation, totalStart, $"{exception.GetType().Name}: {exception.Message}"),
+            CreateFailedTrace(generation, $"{exception.GetType().Name}: {exception.Message}"),
             []
         );
     }
@@ -104,11 +102,9 @@ internal sealed class PlayerVisibilitySelectionController
         PlayerVisibilityTargetSet legacyTargetSet,
         bool limitVisiblePlayerCount,
         int visiblePlayerCountLimit,
-        Vector3 localPosition,
-        long totalStart
+        Vector3 localPosition
     )
     {
-        var snapshotStart = Stopwatch.GetTimestamp();
         var timestamp = TimeSpan.FromMilliseconds(plan.CreatedAtTickCount64);
         localSpeedSmoother.AddSample(timestamp, localPosition);
 
@@ -167,11 +163,7 @@ internal sealed class PlayerVisibilitySelectionController
 
         var budget = limitVisiblePlayerCount ? Math.Clamp(visiblePlayerCountLimit, 1, 100) : candidates.Count;
         var snapshot = new PlayerVisibilitySelectionSnapshot(budget, localSpeedSmoother.SmoothedSpeed, candidates);
-        var snapshotTicks = Stopwatch.GetTimestamp() - snapshotStart;
-
-        var selectorStart = Stopwatch.GetTimestamp();
         var selection = PlayerVisibilitySelector.Select(snapshot, parameters);
-        var selectorTicks = Stopwatch.GetTimestamp() - selectorStart;
 
         var currentSelected = new HashSet<PlayerObjectIdentity>();
         var selectedKeys = new PlayerVisibilitySelectionKey[selection.SelectedSourceIndices.Count];
@@ -209,10 +201,7 @@ internal sealed class PlayerVisibilitySelectionController
             localSpeedSmoother.SmoothedSpeed,
             selection.MotionFactor,
             selection.RetentionBonus,
-            ReadOnly(candidateRankHistogram),
-            snapshotTicks,
-            selectorTicks,
-            Stopwatch.GetTimestamp() - totalStart
+            ReadOnly(candidateRankHistogram)
         );
 
         return new PlayerVisibilitySelectionEvaluation(trace, Array.AsReadOnly(selectedKeys));
@@ -269,21 +258,11 @@ internal sealed class PlayerVisibilitySelectionController
 
     private static ReadOnlyCollection<int> ReadOnly(int[] values) => Array.AsReadOnly(values);
 
-    private static PlayerVisibilitySelectionTrace CreateUnavailableTrace(int generation, long totalStart, string reason) =>
-        new(
-            Status: PlayerVisibilitySelectionStatus.Unavailable,
-            Generation: generation,
-            FailureReason: reason,
-            TotalTicks: Stopwatch.GetTimestamp() - totalStart
-        );
+    private static PlayerVisibilitySelectionTrace CreateUnavailableTrace(int generation, string reason) =>
+        new(Status: PlayerVisibilitySelectionStatus.Unavailable, Generation: generation, FailureReason: reason);
 
-    private static PlayerVisibilitySelectionTrace CreateFailedTrace(int generation, long totalStart, string reason) =>
-        new(
-            Status: PlayerVisibilitySelectionStatus.Failed,
-            Generation: generation,
-            FailureReason: reason,
-            TotalTicks: Stopwatch.GetTimestamp() - totalStart
-        );
+    private static PlayerVisibilitySelectionTrace CreateFailedTrace(int generation, string reason) =>
+        new(Status: PlayerVisibilitySelectionStatus.Failed, Generation: generation, FailureReason: reason);
 
     private static bool IsFinite(Vector3 value) => float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
 
@@ -323,9 +302,6 @@ internal readonly record struct PlayerVisibilitySelectionTrace(
     double MotionFactor = 0,
     long RetentionBonus = 0,
     IReadOnlyList<int>? CandidateRankHistogram = null,
-    long SnapshotTicks = 0,
-    long SelectorTicks = 0,
-    long TotalTicks = 0,
     PlayerVisibilityAppliedSource AppliedSource = PlayerVisibilityAppliedSource.LegacyFallback,
     PlayerVisibilityFallbackReason FallbackReason = PlayerVisibilityFallbackReason.None,
     int ProposalSelectedCount = 0,

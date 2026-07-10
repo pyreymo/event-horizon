@@ -17,7 +17,7 @@ internal sealed class PlayerVisibilityAppliedState
         Publish(
             new PlayerVisibilityFrameState(
                 activeTarget,
-                new PlayerVisibilityReconciliation(activeTarget.Generation, activeTarget.CreatedAtTickCount64, [], 0, 0, 0, 0),
+                new PlayerVisibilityReconciliation(activeTarget.Generation, [], 0, 0),
                 default,
                 default
             )

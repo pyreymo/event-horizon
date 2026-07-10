@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using Dalamud.Game.Chat;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Command;
@@ -11,7 +10,6 @@ using Dalamud.Plugin.Services;
 using EventHorizon.Culling;
 using EventHorizon.Culling.Hooks;
 using EventHorizon.Culling.Rules;
-using EventHorizon.Culling.Visibility;
 using EventHorizon.Integration.Dtr;
 using EventHorizon.Integration.Layout;
 using EventHorizon.Integration.NamePlate;
@@ -30,8 +28,6 @@ public sealed class Plugin : IDalamudPlugin
     private const string ShortCommandName = "/eh";
     private const int DynamicCullingRefreshIntervalMs = 200;
     private const int DtrBarRefreshIntervalMs = 1_000;
-    private const double SlowFrameworkUpdateLogThresholdMs = 2.0;
-    private const int SlowFrameworkUpdateLogCooldownMs = 1_000;
 
     #region Services
 
@@ -110,7 +106,6 @@ public sealed class Plugin : IDalamudPlugin
 
     private long nextDynamicCullingRefresh;
     private long nextDtrBarRefresh;
-    private long nextSlowFrameworkUpdateLog;
     public int HiddenPlayerCount => UpdateObjectArraysHook.HiddenPlayerCount;
     internal PlayerKeepBudgetStats KeepBudgetStats => UpdateObjectArraysHook.KeepBudgetStats;
     internal PlayerPreviewSnapshot PlayerPreviewSnapshot => UpdateObjectArraysHook.PlayerPreviewSnapshot;
@@ -176,8 +171,6 @@ public sealed class Plugin : IDalamudPlugin
         ChatGui.ChatMessage += OnChatMessage;
         Framework.Update += OnFrameworkUpdate;
         UpdateObjectArraysHook.Enable();
-
-        Log.Information("Loaded.", PluginInterface.Manifest.Name);
     }
 
     public void Dispose()
@@ -288,61 +281,29 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnFrameworkUpdate(IFramework framework)
     {
-        var start = Stopwatch.GetTimestamp();
-        var phaseStart = start;
         RefreshDtrBarIfNeeded();
-        var dtrTicks = Stopwatch.GetTimestamp() - phaseStart;
-
-        phaseStart = Stopwatch.GetTimestamp();
         LayoutGraphicsVisibilityController.Update(Configuration.HideBgPartGraphicsObjects, Configuration.HideTerrainGraphicsObjects);
-        var layoutGraphicsTicks = Stopwatch.GetTimestamp() - phaseStart;
-
-        phaseStart = Stopwatch.GetTimestamp();
         PlayerPreviewHighlighter.Update();
-        var highlightTicks = Stopwatch.GetTimestamp() - phaseStart;
 
-        CullingFrameSchedule schedule;
-        long dynamicCheckTicks;
-        long refreshTicks = 0;
-        long tickTicks = 0;
-        CullingPerformanceTrace tickTrace;
-        phaseStart = Stopwatch.GetTimestamp();
         var runtime = UpdateObjectArraysHook.SynchronizeRuntimeMode();
         var now = Environment.TickCount64;
         var playerTopologyDirty = UpdateObjectArraysHook.ConsumePlayerTopologyDirty();
-        schedule = CullingFrameSchedule.Decide(
+        var schedule = CullingFrameSchedule.Decide(
             runtime.Mode,
             runtime.RequiresRefresh || now >= nextDynamicCullingRefresh,
             playerTopologyDirty
         );
-        dynamicCheckTicks = Stopwatch.GetTimestamp() - phaseStart;
 
         if (schedule.Refresh)
         {
-            phaseStart = Stopwatch.GetTimestamp();
             RefreshObjectCulling();
-            refreshTicks = Stopwatch.GetTimestamp() - phaseStart;
             nextDynamicCullingRefresh = Environment.TickCount64 + DynamicCullingRefreshIntervalMs;
         }
 
         if (schedule.Tick)
         {
-            phaseStart = Stopwatch.GetTimestamp();
             UpdateObjectArraysHook.FrameworkTick();
-            tickTicks = Stopwatch.GetTimestamp() - phaseStart;
         }
-        tickTrace = schedule.Tick ? UpdateObjectArraysHook.LastTickTrace : default;
-        LogSlowFrameworkUpdate(
-            start,
-            dtrTicks,
-            layoutGraphicsTicks,
-            highlightTicks,
-            dynamicCheckTicks,
-            tickTicks,
-            refreshTicks,
-            didRefresh: schedule.Refresh,
-            tickTrace
-        );
     }
 
     private void RefreshDtrBarIfNeeded()
@@ -355,162 +316,6 @@ public sealed class Plugin : IDalamudPlugin
 
         RefreshDtrBar();
         nextDtrBarRefresh = Environment.TickCount64 + DtrBarRefreshIntervalMs;
-    }
-
-    private void LogSlowFrameworkUpdate(
-        long start,
-        long dtrTicks,
-        long layoutGraphicsTicks,
-        long highlightTicks,
-        long dynamicCheckTicks,
-        long tickTicks,
-        long refreshTicks,
-        bool didRefresh,
-        CullingPerformanceTrace tickTrace
-    )
-    {
-        var totalTicks = Stopwatch.GetTimestamp() - start;
-        if (ToMilliseconds(totalTicks) < SlowFrameworkUpdateLogThresholdMs)
-        {
-            return;
-        }
-
-        var now = Environment.TickCount64;
-        if (now < nextSlowFrameworkUpdateLog)
-        {
-            return;
-        }
-
-        nextSlowFrameworkUpdateLog = now + SlowFrameworkUpdateLogCooldownMs;
-        Log.Information(
-            "[Perf] Slow Plugin.OnFrameworkUpdate total={TotalMs:F3}ms dtr={DtrMs:F3}ms layoutGraphics={LayoutGraphicsMs:F3}ms highlight={HighlightMs:F3}ms dynamicCheck={DynamicCheckMs:F3}ms tick={TickMs:F3}ms refresh={RefreshMs:F3}ms didRefresh={DidRefresh} tickTrace={TickTrace} refreshTrace={RefreshTrace}",
-            ToMilliseconds(totalTicks),
-            ToMilliseconds(dtrTicks),
-            ToMilliseconds(layoutGraphicsTicks),
-            ToMilliseconds(highlightTicks),
-            ToMilliseconds(dynamicCheckTicks),
-            ToMilliseconds(tickTicks),
-            ToMilliseconds(refreshTicks),
-            didRefresh,
-            FormatCullingTrace(tickTrace),
-            didRefresh ? FormatCullingTrace(UpdateObjectArraysHook.LastRefreshTrace) : "n/a"
-        );
-    }
-
-    private static string FormatCullingTrace(CullingPerformanceTrace trace)
-    {
-        if (!trace.HasValue)
-        {
-            return "n/a";
-        }
-
-        return string.Format(
-            "total={0:F3} guard={1:F3} keep={2:F3} plan={3:F3} reconcile={4:F3} preview={5:F3} previewTrace[{6}] classes[{7}] actions={8} pendingShow={9} pendingHide={10} previewActive={11} tick[{12}] selection[{13}]",
-            ToMilliseconds(trace.TotalTicks),
-            ToMilliseconds(trace.GuardTicks),
-            ToMilliseconds(trace.KeepPlanTicks),
-            ToMilliseconds(trace.VisibilityPlanTicks),
-            ToMilliseconds(trace.ReconcileTicks),
-            ToMilliseconds(trace.PreviewTicks),
-            FormatPreviewTrace(trace.Preview),
-            FormatVisibilityClasses(trace.PlayerVisibilityClasses),
-            trace.ActionCount,
-            trace.PendingShowCount,
-            trace.PendingHideCount,
-            trace.RefreshPlayerPreview,
-            FormatTickTrace(trace.Tick),
-            FormatSelectionTrace(trace.Selection)
-        );
-    }
-
-    private static string FormatSelectionTrace(PlayerVisibilitySelectionTrace trace) =>
-        trace.HasValue
-            ? string.Format(
-                "status={0} total={1:F3} snapshot={2:F3} selector={3:F3}",
-                trace.Status,
-                ToMilliseconds(trace.TotalTicks),
-                ToMilliseconds(trace.SnapshotTicks),
-                ToMilliseconds(trace.SelectorTicks)
-            )
-            : "n/a";
-
-    private static string FormatVisibilityClasses(PlayerVisibilityClassificationCounts counts)
-    {
-        return string.Format(
-            "bypass={0} competitive={1} forceHidden={2} unmanaged={3}",
-            counts.BypassVisible,
-            counts.Competitive,
-            counts.ForceHidden,
-            counts.Unmanaged
-        );
-    }
-
-    private static string FormatPreviewTrace(CullingPreviewPerformanceTrace trace)
-    {
-        if (!trace.HasValue)
-        {
-            return "n/a";
-        }
-
-        return string.Format(
-            "begin={0:F3} add={1:F3} build={2:F3} entries={3}",
-            ToMilliseconds(trace.BeginTicks),
-            ToMilliseconds(trace.AddTicks),
-            ToMilliseconds(trace.BuildTicks),
-            trace.EntryCount
-        );
-    }
-
-    private static string FormatTickTrace(CullingTickPerformanceTrace trace)
-    {
-        if (!trace.HasValue)
-        {
-            return "n/a";
-        }
-
-        var accountedTicks = trace.PlayerActionsTicks + trace.NonPlayerTicks + trace.PruneHiddenTicks + trace.HiddenVfxTicks;
-        var unaccountedTicks = Math.Max(0, trace.TotalTicks - accountedTicks);
-        return string.Format(
-            "total={0:F3} playerActions={1:F3} nonPlayer={2:F3} pruneHidden={3:F3} hiddenVfx={4:F3} hiddenVfxTrace[{5}] unaccounted={6:F3} actions={7}",
-            ToMilliseconds(trace.TotalTicks),
-            ToMilliseconds(trace.PlayerActionsTicks),
-            ToMilliseconds(trace.NonPlayerTicks),
-            ToMilliseconds(trace.PruneHiddenTicks),
-            ToMilliseconds(trace.HiddenVfxTicks),
-            FormatHiddenVfxTrace(trace.HiddenVfx),
-            ToMilliseconds(unaccountedTicks),
-            trace.ActionCount
-        );
-    }
-
-    private static string FormatHiddenVfxTrace(CullingHiddenVfxPerformanceTrace trace)
-    {
-        if (!trace.HasValue)
-        {
-            return "n/a";
-        }
-
-        return string.Format(
-            "collect={0:F3} project={1:F3} show={2:F3} prune={3:F3} clear={4:F3} hidden={5} visible={6} active={7} created={8} updated={9} skipped={10} removed={11} deferred={12}",
-            ToMilliseconds(trace.CollectTicks),
-            ToMilliseconds(trace.ProjectTicks),
-            ToMilliseconds(trace.ShowTicks),
-            ToMilliseconds(trace.PruneTicks),
-            ToMilliseconds(trace.ClearTicks),
-            trace.HiddenCount,
-            trace.VisibleCount,
-            trace.ActiveCount,
-            trace.ShowCreatedCount,
-            trace.ShowUpdatedCount,
-            trace.ShowSkippedCount,
-            trace.ShowRemovedCount,
-            trace.ShowDeferredCount
-        );
-    }
-
-    private static double ToMilliseconds(long stopwatchTicks)
-    {
-        return stopwatchTicks * 1000.0 / Stopwatch.Frequency;
     }
 
     public void RefreshObjectCulling(bool resetRuleState = false)

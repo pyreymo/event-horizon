@@ -5,15 +5,12 @@ using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
 using FFXIVClientStructs.FFXIV.Client.LayoutEngine;
 using FFXIVClientStructs.FFXIV.Client.LayoutEngine.Layer;
-using FFXIVClientStructs.Interop;
-using FFXIVClientStructs.STD;
 
 namespace EventHorizon.Integration.Layout;
 
 internal sealed unsafe class LayoutGraphicsVisibilityController : IDisposable
 {
     private const int LayoutReadyState = 7;
-    private const int TerrainPatchStatsLogIntervalMs = 1_000;
     private const string TerrainPatchQueueRenderCommandsSignature = "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC 40 0F B7 79";
 
     private readonly IGameInteropProvider gameInteropProvider;
@@ -30,14 +27,6 @@ internal sealed unsafe class LayoutGraphicsVisibilityController : IDisposable
     private nint lastActiveLayout;
     private uint lastTerritoryType;
     private bool lastAreaReady;
-    private long terrainPatchFrameDetourCount;
-    private long terrainPatchFrameSuppressedCount;
-    private long terrainPatchTotalDetourCount;
-    private long terrainPatchTotalSuppressedCount;
-    private long terrainPatchMaxFrameDetourCount;
-    private long terrainPatchMaxFrameSuppressedCount;
-    private long terrainPatchStatsFrameCount;
-    private long nextTerrainPatchStatsLog;
 
     private delegate void BgObjectVisitor(BgObject* graphicsObject);
 
@@ -56,8 +45,6 @@ internal sealed unsafe class LayoutGraphicsVisibilityController : IDisposable
         this.hideTerrain = hideTerrain;
         var state = GetCurrentAreaState(clientState.TerritoryType);
         currentAreaReady = hideTerrain && state.IsReady;
-        RecordTerrainPatchStatsFrame();
-        ResetTerrainPatchStatsIfDisabled();
 
         if (!hideBgParts)
         {
@@ -143,28 +130,6 @@ internal sealed unsafe class LayoutGraphicsVisibilityController : IDisposable
         hiddenBgPartGraphicsObjects.Clear();
     }
 
-    private void ResetTerrainPatchStatsIfDisabled()
-    {
-        if (hideTerrain)
-        {
-            return;
-        }
-
-        ResetTerrainPatchStats();
-    }
-
-    private void ResetTerrainPatchStats()
-    {
-        terrainPatchFrameDetourCount = 0;
-        terrainPatchFrameSuppressedCount = 0;
-        terrainPatchTotalDetourCount = 0;
-        terrainPatchTotalSuppressedCount = 0;
-        terrainPatchMaxFrameDetourCount = 0;
-        terrainPatchMaxFrameSuppressedCount = 0;
-        terrainPatchStatsFrameCount = 0;
-        nextTerrainPatchStatsLog = 0;
-    }
-
     private void RememberState(LayoutAreaState state)
     {
         lastActiveLayout = state.ActiveLayout;
@@ -240,58 +205,12 @@ internal sealed unsafe class LayoutGraphicsVisibilityController : IDisposable
 
     private void TerrainPatchQueueRenderCommandsDetour(void* patch, int contextId)
     {
-        terrainPatchFrameDetourCount++;
         if (hideTerrain && currentAreaReady)
         {
-            terrainPatchFrameSuppressedCount++;
             return;
         }
 
         terrainPatchQueueRenderCommandsHook!.Original(patch, contextId);
-    }
-
-    private void RecordTerrainPatchStatsFrame()
-    {
-        if (!hideTerrain)
-        {
-            return;
-        }
-
-        terrainPatchStatsFrameCount++;
-        terrainPatchTotalDetourCount += terrainPatchFrameDetourCount;
-        terrainPatchTotalSuppressedCount += terrainPatchFrameSuppressedCount;
-        terrainPatchMaxFrameDetourCount = Math.Max(terrainPatchMaxFrameDetourCount, terrainPatchFrameDetourCount);
-        terrainPatchMaxFrameSuppressedCount = Math.Max(terrainPatchMaxFrameSuppressedCount, terrainPatchFrameSuppressedCount);
-        terrainPatchFrameDetourCount = 0;
-        terrainPatchFrameSuppressedCount = 0;
-
-        var now = Environment.TickCount64;
-        if (nextTerrainPatchStatsLog == 0)
-        {
-            nextTerrainPatchStatsLog = now + TerrainPatchStatsLogIntervalMs;
-            return;
-        }
-
-        if (now < nextTerrainPatchStatsLog)
-        {
-            return;
-        }
-
-        nextTerrainPatchStatsLog = now + TerrainPatchStatsLogIntervalMs;
-        log.Information(
-            "[LayoutGraphics] TerrainPatch::QueueRenderCommands frames={FrameCount} calls={CallCount} suppressed={SuppressedCount} maxFrameCalls={MaxFrameCalls} maxFrameSuppressed={MaxFrameSuppressed} areaReady={AreaReady}",
-            terrainPatchStatsFrameCount,
-            terrainPatchTotalDetourCount,
-            terrainPatchTotalSuppressedCount,
-            terrainPatchMaxFrameDetourCount,
-            terrainPatchMaxFrameSuppressedCount,
-            currentAreaReady
-        );
-        terrainPatchTotalDetourCount = 0;
-        terrainPatchTotalSuppressedCount = 0;
-        terrainPatchMaxFrameDetourCount = 0;
-        terrainPatchMaxFrameSuppressedCount = 0;
-        terrainPatchStatsFrameCount = 0;
     }
 
     private readonly record struct LayoutAreaState(nint ActiveLayout, uint TerritoryType, bool IsReady);

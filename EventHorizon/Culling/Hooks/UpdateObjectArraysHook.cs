@@ -3,7 +3,6 @@ using Dalamud.Game.Chat;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using EventHorizon.Culling.Rules;
-using EventHorizon.Culling.Visibility;
 using EventHorizon.Integration.Vfx;
 using EventHorizon.Preview;
 using EventHorizon.Settings;
@@ -13,9 +12,6 @@ namespace EventHorizon.Culling.Hooks;
 
 internal sealed unsafe class UpdateObjectArraysHook : IDisposable
 {
-    // I experimented with rejecting spawn creation at network side.
-    //   Signature: 40 53 48 83 EC 20 ?? ?? ?? 49 8B D8 44 8B C1
-    // It works, but rejected actors are truly absent and cannot be restored.
     private const string Signature = "40 57 48 83 EC ?? 48 89 5C 24 ?? 33 DB";
 
     private readonly ObjectCuller objectCuller;
@@ -27,8 +23,6 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
     public int HiddenPlayerCount => objectCuller.GetHiddenPlayerCount();
     public PlayerKeepBudgetStats KeepBudgetStats => objectCuller.GetKeepBudgetStats();
     public PlayerPreviewSnapshot PlayerPreviewSnapshot => objectCuller.GetPlayerPreviewSnapshot();
-    public CullingPerformanceTrace LastRefreshTrace => objectCuller.LastUpdateTrace;
-    public CullingPerformanceTrace LastTickTrace => objectCuller.LastTickTrace;
 
     public UpdateObjectArraysHook(
         IGameInteropProvider gameInteropProvider,
@@ -71,7 +65,7 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         var runtime = objectCuller.SynchronizeRuntimeMode(manager);
         if (runtime.Mode == CullingRuntimeMode.Active)
         {
-            OnObjectArraysUpdated(manager, refreshPlayerPreview);
+            objectCuller.Update(manager, refreshPlayerPreview);
         }
     }
 
@@ -121,10 +115,5 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         var result = hook.Original(objectManager);
         objectCuller.ApplyPlayerAdmissionGate(objectManager);
         return result;
-    }
-
-    private void OnObjectArraysUpdated(GameObjectManager* objectManager, bool refreshPlayerPreview)
-    {
-        objectCuller.Update(objectManager, refreshPlayerPreview);
     }
 }

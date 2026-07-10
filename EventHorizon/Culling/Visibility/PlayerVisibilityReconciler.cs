@@ -16,22 +16,9 @@ internal sealed class PlayerVisibilityReconciler
         toHide.Clear();
         actions.Clear();
 
-        var appliedVisibleCount = 0;
-        var desiredVisibleCount = 0;
-
         foreach (var target in targetSet.Targets)
         {
             var appliedVisible = !hiddenObjectTracker.IsHidden(target.Identity);
-            if (appliedVisible)
-            {
-                appliedVisibleCount++;
-            }
-
-            if (target.DesiredVisible)
-            {
-                desiredVisibleCount++;
-            }
-
             if (target.DesiredVisible && !appliedVisible)
             {
                 toShow.Add(target);
@@ -47,15 +34,7 @@ internal sealed class PlayerVisibilityReconciler
 
         AddTransitions(actions, toShow, toHide);
 
-        return new PlayerVisibilityReconciliation(
-            targetSet.Generation,
-            targetSet.CreatedAtTickCount64,
-            [.. actions],
-            desiredVisibleCount,
-            appliedVisibleCount,
-            toShow.Count,
-            toHide.Count
-        );
+        return new PlayerVisibilityReconciliation(targetSet.Generation, [.. actions], toShow.Count, toHide.Count);
     }
 
     private static void AddTransitions(
@@ -72,12 +51,12 @@ internal sealed class PlayerVisibilityReconciler
 
         for (var index = swapCount; index < toHide.Count; index++)
         {
-            actions.Add(PlayerVisibilityAction.Hide(toHide[index], PlayerVisibilityActionReason.TargetReduced));
+            actions.Add(PlayerVisibilityAction.Hide(toHide[index]));
         }
 
         for (var index = swapCount; index < toShow.Count; index++)
         {
-            actions.Add(PlayerVisibilityAction.Show(toShow[index], PlayerVisibilityActionReason.TargetExpanded));
+            actions.Add(PlayerVisibilityAction.Show(toShow[index]));
         }
     }
 
@@ -104,41 +83,28 @@ internal sealed class PlayerVisibilityReconciler
 
 internal sealed record PlayerVisibilityReconciliation(
     int Generation,
-    long TargetSetCreatedAtTickCount64,
     IReadOnlyList<PlayerVisibilityAction> Actions,
-    int DesiredVisibleCount,
-    int AppliedVisibleCount,
     int PendingShowCount,
     int PendingHideCount
 );
 
 internal readonly record struct PlayerVisibilityAction(
     PlayerVisibilityActionKind Kind,
-    PlayerVisibilityActionReason Reason,
     PlayerVisibilityTarget Target,
     PlayerVisibilityTarget? PairedTarget
 )
 {
-    public static PlayerVisibilityAction Show(PlayerVisibilityTarget target, PlayerVisibilityActionReason reason) =>
-        new(PlayerVisibilityActionKind.Show, reason, target, null);
+    public static PlayerVisibilityAction Show(PlayerVisibilityTarget target) => new(PlayerVisibilityActionKind.Show, target, null);
 
-    public static PlayerVisibilityAction Hide(PlayerVisibilityTarget target, PlayerVisibilityActionReason reason) =>
-        new(PlayerVisibilityActionKind.Hide, reason, target, null);
+    public static PlayerVisibilityAction Hide(PlayerVisibilityTarget target) => new(PlayerVisibilityActionKind.Hide, target, null);
 
     public static PlayerVisibilityAction Swap(PlayerVisibilityTarget outgoing, PlayerVisibilityTarget incoming) =>
-        new(PlayerVisibilityActionKind.Swap, PlayerVisibilityActionReason.Swap, incoming, outgoing);
+        new(PlayerVisibilityActionKind.Swap, incoming, outgoing);
 }
 
 internal enum PlayerVisibilityActionKind
 {
     Show,
     Hide,
-    Swap,
-}
-
-internal enum PlayerVisibilityActionReason
-{
-    TargetExpanded,
-    TargetReduced,
     Swap,
 }
