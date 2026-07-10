@@ -57,7 +57,7 @@ internal static class PlayerVisibilityStableTargetBuilder
                 PlayerVisibilityClassification.BypassVisible => true,
                 PlayerVisibilityClassification.Competitive => selected.Contains(sourceIndex),
                 PlayerVisibilityClassification.ForceHidden => false,
-                _ => throw new ArgumentOutOfRangeException(nameof(entry.Classification), entry.Classification, null),
+                _ => throw new InvalidOperationException($"Unsupported player visibility classification: {entry.Classification}."),
             };
             targets.Add(
                 new PlayerVisibilityTarget(

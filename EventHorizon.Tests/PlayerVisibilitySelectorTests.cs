@@ -11,6 +11,9 @@ namespace EventHorizon.Tests;
 public sealed class PlayerVisibilitySelectorTests
 {
     private static readonly PlayerVisibilitySelectionParameters DefaultParameters = PlayerVisibilitySelectionParameters.Default;
+    private static readonly int[] Expected = [0, 1];
+    private static readonly long[] SourceArray = [0L, 500L, 1_500L];
+    private static readonly int[] ExpectedArray = [2, 3, 4, 5];
 
     [TestMethod]
     public void Select_WhenCandidatesFitBudget_SelectsAll()
@@ -101,7 +104,7 @@ public sealed class PlayerVisibilitySelectorTests
 
         var result = Select(candidates, budget: 2, speed: double.PositiveInfinity);
 
-        CollectionAssert.AreEquivalent(new[] { 0, 1 }, result.SelectedSourceIndices.ToArray());
+        CollectionAssert.AreEquivalent(Expected, result.SelectedSourceIndices.ToArray());
         Assert.AreEqual(2, result.RetainedCount);
     }
 
@@ -135,7 +138,7 @@ public sealed class PlayerVisibilitySelectorTests
 
         var result = Select(candidates, budget: 2, speed: double.PositiveInfinity);
 
-        CollectionAssert.AreEqual(new[] { 0, 1 }, result.SelectedSourceIndices.ToArray());
+        CollectionAssert.AreEqual(Expected, result.SelectedSourceIndices.ToArray());
         Assert.AreEqual(1, result.RetainedCount);
         Assert.AreEqual(1, result.EnteredCount);
     }
@@ -150,7 +153,7 @@ public sealed class PlayerVisibilitySelectorTests
             Candidate(2, rank: 2, position: Vector3.Zero),
             Candidate(3, rank: 2, position: new Vector3(10, 0, 0)),
         };
-        var retainedCounts = new[] { 0L, 500L, 1_500L }
+        var retainedCounts = SourceArray
             .Select(bonus => Select(candidates, budget: 2, parameters: Parameters(restRetentionBonus: bonus)).RetainedCount)
             .ToArray();
 
@@ -174,7 +177,7 @@ public sealed class PlayerVisibilitySelectorTests
 
         var result = Select(candidates, budget: 4, parameters: parameters);
 
-        CollectionAssert.AreEqual(new[] { 2, 3, 4, 5 }, result.SelectedSourceIndices.ToArray());
+        CollectionAssert.AreEqual(ExpectedArray, result.SelectedSourceIndices.ToArray());
     }
 
     [TestMethod]

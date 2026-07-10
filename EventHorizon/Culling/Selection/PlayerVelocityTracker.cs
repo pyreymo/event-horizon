@@ -43,7 +43,7 @@ internal sealed class PlayerVelocityTracker<TKey>(PlayerVisibilitySelectionParam
 
         var instantaneousVelocity = displacement / (float)elapsedSeconds;
         var alpha = 1 - Math.Exp(-Ln2 * elapsedSeconds / parameters.LocalSpeedHalfLifeSeconds);
-        var smoothedVelocity = state.SmoothedVelocity + (float)alpha * (instantaneousVelocity - state.SmoothedVelocity);
+        var smoothedVelocity = state.SmoothedVelocity + ((float)alpha * (instantaneousVelocity - state.SmoothedVelocity));
         if (!IsFinite(smoothedVelocity))
         {
             states[identity] = new MotionState(timestamp, position, Vector3.Zero, false);

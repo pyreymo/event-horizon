@@ -57,7 +57,7 @@ internal sealed class PlayerVisibilityReconciler
         return new PlayerVisibilityReconciliation(
             targetSet.Generation,
             targetSet.CreatedAtTickCount64,
-            actions.ToArray(),
+            [.. actions],
             desiredVisibleCount,
             appliedVisibleCount,
             toShow.Count,
@@ -67,8 +67,8 @@ internal sealed class PlayerVisibilityReconciler
 
     private static void AddTransitions(
         List<PlayerVisibilityAction> actions,
-        IReadOnlyList<PlayerVisibilityTarget> toShow,
-        IReadOnlyList<PlayerVisibilityTarget> toHide
+        List<PlayerVisibilityTarget> toShow,
+        List<PlayerVisibilityTarget> toHide
     )
     {
         var swapCount = Math.Min(toShow.Count, toHide.Count);

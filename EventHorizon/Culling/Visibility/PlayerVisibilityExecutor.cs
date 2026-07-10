@@ -5,7 +5,7 @@ namespace EventHorizon.Culling.Visibility;
 
 internal sealed class PlayerVisibilityExecutor
 {
-    public void Execute(
+    public static void Execute(
         PlayerVisibilityReconciliation reconciliation,
         Action<PlayerVisibilityAction> executeTransition,
         Action<IReadOnlyList<PlayerVisibilityAction>> executeMaintained

@@ -51,21 +51,7 @@ public sealed class PlayerAdmissionGateTests
     [TestMethod]
     public void FullIdentity_AnyFieldChangeCountsAsReplacement()
     {
-        var variants = new[]
-        {
-            IdentityA with
-            {
-                Address = (nint)99,
-            },
-            IdentityA with
-            {
-                GameObjectId = 99,
-            },
-            IdentityA with
-            {
-                EntityId = 99,
-            },
-        };
+        var variants = new[] { IdentityA with { Address = 99 }, IdentityA with { GameObjectId = 99 }, IdentityA with { EntityId = 99 } };
 
         foreach (var variant in variants)
         {

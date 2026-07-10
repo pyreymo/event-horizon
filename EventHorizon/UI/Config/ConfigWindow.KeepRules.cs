@@ -189,12 +189,12 @@ public partial class ConfigWindow
             ImGui.SetMouseCursor(active ? ImGuiMouseCursor.ResizeNs : ImGuiMouseCursor.Hand);
         }
 
-        DrawHandleLines(min, max, hovered, active);
+        DrawHandleLines(min, max, hovered);
 
         return new ImGuiItemState(hovered, active);
     }
 
-    private static void DrawHandleLines(Vector2 min, Vector2 max, bool hovered, bool active)
+    private static void DrawHandleLines(Vector2 min, Vector2 max, bool hovered)
     {
         var drawList = ImGui.GetWindowDrawList();
         var color = ImGui.GetColorU32(hovered ? ImGuiCol.Text : ImGuiCol.TextDisabled);

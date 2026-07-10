@@ -15,6 +15,7 @@ public sealed class PlayerVisibilitySelectionControllerTests
     private static readonly PlayerObjectIdentity IdentityA = Identity(1);
     private static readonly PlayerObjectIdentity IdentityB = Identity(2);
     private static readonly PlayerObjectIdentity IdentityC = Identity(3);
+    private static readonly int[] Expected = [1, 0, 0, 0, 0, 0, 0, 2];
 
     [TestMethod]
     public void FirstEvaluation_SeedsPreviousSelectionFromLegacyOnce()
@@ -65,7 +66,7 @@ public sealed class PlayerVisibilitySelectionControllerTests
         var controller = new PlayerVisibilitySelectionController();
         var firstEntries = new[] { Entry(IdentityA, rank: 0) };
         Evaluate(controller, Plan(1, 0, firstEntries), Legacy(firstEntries, IdentityA), 1, Vector3.Zero);
-        var replacementIdentity = IdentityA with { Address = (nint)999 };
+        var replacementIdentity = IdentityA with { Address = 999 };
         var secondEntries = new[] { Entry(replacementIdentity, rank: 7), Entry(IdentityB, rank: 0) };
 
         var result = Evaluate(
@@ -122,7 +123,7 @@ public sealed class PlayerVisibilitySelectionControllerTests
 
         _ = Evaluate(controller, Plan(2, 1_000, secondEntries), Legacy(secondEntries, IdentityA), 1, Vector3.Zero);
 
-        CollectionAssert.AreEqual(new[] { 1, 0, 0, 0, 0, 0, 0, 2 }, firstCandidateHistogram);
+        CollectionAssert.AreEqual(Expected, firstCandidateHistogram);
         CollectionAssert.AreEqual(firstCandidateHistogram, first.Trace.CandidateRankHistogram!.ToArray());
     }
 

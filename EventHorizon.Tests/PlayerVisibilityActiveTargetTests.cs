@@ -49,7 +49,7 @@ public sealed class PlayerVisibilityActiveTargetTests
         var exception = Assert.Throws<ArgumentException>(() =>
             PlayerVisibilityStableTargetBuilder.Build(
                 Plan(1, entries),
-                new[] { new PlayerVisibilitySelectionKey(1, IdentityB, entries[1].ObjectIndex) },
+                [new PlayerVisibilitySelectionKey(1, IdentityB, entries[1].ObjectIndex)],
                 []
             )
         );
@@ -167,7 +167,7 @@ public sealed class PlayerVisibilityActiveTargetTests
         var applied = new PlayerVisibilityTargetSet(
             1,
             0,
-            new[] { Target(entries[0], true), Target(entries[1], true), Target(entries[2], false), Target(entries[3], false) },
+            [Target(entries[0], true), Target(entries[1], true), Target(entries[2], false), Target(entries[3], false)],
             default
         );
 
@@ -203,7 +203,7 @@ public sealed class PlayerVisibilityActiveTargetTests
     public void StableCommit_StoresActuallyAppliedStableSet()
     {
         var controller = new PlayerVisibilitySelectionController();
-        var plan = Plan(1, new[] { Entry(IdentityA, 0), Entry(IdentityB, 1) });
+        var plan = Plan(1, [Entry(IdentityA, 0), Entry(IdentityB, 1)]);
         var stable = PlayerVisibilityStableTargetBuilder.Build(plan, Keys(plan, IdentityB), []);
 
         controller.CommitAppliedTarget(stable);
@@ -267,7 +267,6 @@ public sealed class PlayerVisibilityActiveTargetTests
 
         Assert.AreEqual(PlayerVisibilitySelectionStatus.Failed, failedEvaluation.Trace.Status);
         Assert.AreSame(legacy, resolution.ActiveTarget);
-        Assert.IsNotNull(resolution.ActiveTarget);
     }
 
     private static PlayerVisibilitySelectionEvaluation Evaluation(
@@ -277,14 +276,14 @@ public sealed class PlayerVisibilityActiveTargetTests
     ) => new(new PlayerVisibilitySelectionTrace(status, 1), Keys(plan, selected));
 
     private static PlayerVisibilitySelectionKey[] Keys(PlayerVisibilityPlan plan, params PlayerObjectIdentity[] selected) =>
-        selected
-            .Select(identity =>
+        [
+            .. selected.Select(identity =>
             {
                 var sourceIndex = plan.Entries.ToList().FindIndex(entry => entry.Identity == identity);
                 var entry = sourceIndex >= 0 ? plan.Entries[sourceIndex] : default;
                 return new PlayerVisibilitySelectionKey(sourceIndex, identity, entry.ObjectIndex);
-            })
-            .ToArray();
+            }),
+        ];
 
     private static PlayerVisibilityPlan Plan(int generation, IReadOnlyList<PlayerVisibilityPlanEntry> entries, long milliseconds = 100) =>
         new(generation, milliseconds, entries, default);

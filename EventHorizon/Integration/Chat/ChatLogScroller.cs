@@ -149,7 +149,7 @@ internal sealed unsafe class ChatLogScroller(IGameGui gameGui, IFramework framew
             }
         }
 
-        return matchingMessageIndices.ToArray();
+        return [.. matchingMessageIndices];
     }
 
     private static string ExtractText(byte[] bytes)

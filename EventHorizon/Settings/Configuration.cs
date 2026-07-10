@@ -83,14 +83,14 @@ internal class Configuration : IPluginConfiguration
     [JsonIgnore]
     public bool EnableTargetingMeNamePlateMarker
     {
-        get => enableTargetingMeNamePlateMarker ?? TargetingMeMarkerVisualStyle == TargetingMeMarkerVisualStyle.GazeMarker;
+        get => enableTargetingMeNamePlateMarker ?? (TargetingMeMarkerVisualStyle == TargetingMeMarkerVisualStyle.GazeMarker);
         set => enableTargetingMeNamePlateMarker = value;
     }
 
     [JsonIgnore]
     public bool EnableTargetingMeVfxMarker
     {
-        get => enableTargetingMeVfxMarker ?? TargetingMeMarkerVisualStyle == TargetingMeMarkerVisualStyle.Vfx;
+        get => enableTargetingMeVfxMarker ?? (TargetingMeMarkerVisualStyle == TargetingMeMarkerVisualStyle.Vfx);
         set => enableTargetingMeVfxMarker = value;
     }
 

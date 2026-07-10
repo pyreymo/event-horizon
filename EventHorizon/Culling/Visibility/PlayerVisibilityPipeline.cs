@@ -6,20 +6,14 @@ using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.Culling.Visibility;
 
-internal sealed class PlayerVisibilityPipeline
+internal sealed class PlayerVisibilityPipeline(Action<Exception> reportSelectionFailure)
 {
-    private readonly PlayerVisibilitySelectionController selectionController;
+    private readonly PlayerVisibilitySelectionController selectionController = new(reportFailure: reportSelectionFailure);
     private readonly PlayerVisibilityReconciler reconciler = new();
-    private readonly Action<Exception> reportFailure;
+    private readonly Action<Exception> reportFailure = reportSelectionFailure;
     private readonly List<PlayerVisibilityPlanEntry> planEntryBuffer = [];
     private readonly List<PlayerVisibilityTarget> legacyTargetBuffer = [];
     private readonly List<PlayerVisibilityTarget> stableTargetBuffer = [];
-
-    public PlayerVisibilityPipeline(Action<Exception> reportSelectionFailure)
-    {
-        reportFailure = reportSelectionFailure;
-        selectionController = new(reportFailure: reportSelectionFailure);
-    }
 
     public PlayerVisibilityFrameState BuildFrame(
         PlayerVisibilityPlan plan,

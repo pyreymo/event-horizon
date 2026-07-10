@@ -51,7 +51,7 @@ internal sealed class PlayerVisibilitySelectionParameters
             throw new ArgumentOutOfRangeException(nameof(restRetentionBonus), restRetentionBonus, "RestRetentionBonus cannot be negative.");
         }
 
-        if ((decimal)rankStep <= (decimal)softScoreScale + restRetentionBonus)
+        if (rankStep <= (decimal)softScoreScale + restRetentionBonus)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(rankStep),
@@ -60,8 +60,8 @@ internal sealed class PlayerVisibilitySelectionParameters
             );
         }
 
-        var maxBaseScore = (decimal)(rankCount - 1) * rankStep + softScoreScale;
-        if ((decimal)moveRetentionBonus <= maxBaseScore)
+        var maxBaseScore = ((decimal)(rankCount - 1) * rankStep) + softScoreScale;
+        if (moveRetentionBonus <= maxBaseScore)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(moveRetentionBonus),

@@ -21,14 +21,18 @@ namespace EventHorizon.Integration.NamePlate;
 /// Marker identity, atlas coordinates, and layer selection live in <see cref="MarkerAssetDefinition"/>.
 /// Do not subclass or copy this class when adding another PNG; create another definition and instance instead.
 /// </summary>
-internal sealed unsafe class EmbeddedMarkerTextureResources : IDisposable
+internal sealed unsafe class EmbeddedMarkerTextureResources(
+    ITextureProvider textureProvider,
+    IPluginLog log,
+    MarkerAssetDefinition definition
+) : IDisposable
 {
     private const ulong Alignment = 8;
     private static readonly ulong PartsListSize = (ulong)sizeof(AtkUldPartsList);
     private static readonly ulong AssetSize = (ulong)sizeof(AtkUldAsset);
 
-    private readonly ITextureProvider textureProvider;
-    private readonly IPluginLog log;
+    private readonly ITextureProvider textureProvider = textureProvider;
+    private readonly IPluginLog log = log;
 
     private IDalamudTextureWrap? textureWrap;
     private Texture* kernelTexture;
@@ -41,14 +45,7 @@ internal sealed unsafe class EmbeddedMarkerTextureResources : IDisposable
     // finish after a new cycle starts; it must dispose its result instead of attaching it.
     private int loadGeneration;
 
-    public EmbeddedMarkerTextureResources(ITextureProvider textureProvider, IPluginLog log, MarkerAssetDefinition definition)
-    {
-        this.textureProvider = textureProvider;
-        this.log = log;
-        Definition = definition;
-    }
-
-    public MarkerAssetDefinition Definition { get; }
+    public MarkerAssetDefinition Definition { get; } = definition;
 
     public AtkUldPartsList* PartsList { get; private set; }
 

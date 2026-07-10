@@ -493,7 +493,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
     private void ApplyPlayerVisibilityReconciliation(GameObjectManager* manager, PlayerVisibilityReconciliation reconciliation)
     {
-        playerVisibilityExecutor.Execute(
+        PlayerVisibilityExecutor.Execute(
             reconciliation,
             action => ApplyPlayerVisibilityAction(manager, action),
             actions => ApplyMaintainedPlayerVisibilityActions(manager, actions)

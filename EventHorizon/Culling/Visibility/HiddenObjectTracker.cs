@@ -5,7 +5,7 @@ namespace EventHorizon.Culling.Visibility;
 
 internal sealed unsafe class HiddenObjectTracker
 {
-    internal unsafe delegate PlayerObjectIdentity IdentityReader(GameObject* gameObject);
+    internal delegate PlayerObjectIdentity IdentityReader(GameObject* gameObject);
 
     private readonly Dictionary<nint, HiddenObjectRecord> hiddenObjects = [];
     private readonly List<nint> staleAddresses = [];

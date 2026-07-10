@@ -383,7 +383,7 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
         return false;
     }
 
-    private void PruneExpiredKeepState(Dictionary<ulong, long> keepAlivePlayers, long now, List<ulong> expiredIds)
+    private static void PruneExpiredKeepState(Dictionary<ulong, long> keepAlivePlayers, long now, List<ulong> expiredIds)
     {
         if (keepAlivePlayers.Count == 0)
         {

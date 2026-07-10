@@ -150,25 +150,17 @@ internal readonly record struct PlayerVisibilityPlanEntry(
     public bool IsManaged => Classification != PlayerVisibilityClassification.Unmanaged;
 }
 
-internal sealed class PlayerVisibilityTargetSet
+internal sealed class PlayerVisibilityTargetSet(
+    int generation,
+    long createdAtTickCount64,
+    IReadOnlyList<PlayerVisibilityTarget> targets,
+    PlayerVisibilityClassificationCounts classificationCounts
+)
 {
-    public PlayerVisibilityTargetSet(
-        int generation,
-        long createdAtTickCount64,
-        IReadOnlyList<PlayerVisibilityTarget> targets,
-        PlayerVisibilityClassificationCounts classificationCounts
-    )
-    {
-        Generation = generation;
-        CreatedAtTickCount64 = createdAtTickCount64;
-        Targets = targets;
-        ClassificationCounts = classificationCounts;
-    }
-
-    public int Generation { get; }
-    public long CreatedAtTickCount64 { get; }
-    public IReadOnlyList<PlayerVisibilityTarget> Targets { get; }
-    public PlayerVisibilityClassificationCounts ClassificationCounts { get; }
+    public int Generation { get; } = generation;
+    public long CreatedAtTickCount64 { get; } = createdAtTickCount64;
+    public IReadOnlyList<PlayerVisibilityTarget> Targets { get; } = targets;
+    public PlayerVisibilityClassificationCounts ClassificationCounts { get; } = classificationCounts;
 
     public long GetAgeMilliseconds(long nowTickCount64) => Math.Max(0, nowTickCount64 - CreatedAtTickCount64);
 }

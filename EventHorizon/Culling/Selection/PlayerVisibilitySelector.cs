@@ -27,7 +27,7 @@ internal static class PlayerVisibilitySelector
             var softScore = CalculateSoftScore(candidate.RelativePosition, candidate.RelativeVelocity, parameters);
             var softPoints = checked((long)Math.Round(parameters.SoftScoreScale * softScore, MidpointRounding.AwayFromZero));
             var priorityLevel = parameters.RankCount - 1 - candidate.Rank;
-            var baseScore = checked(parameters.RankStep * priorityLevel + softPoints);
+            var baseScore = checked((parameters.RankStep * priorityLevel) + softPoints);
             var adjustedScore = checked(baseScore + (candidate.WasPreviouslySelected ? retentionBonus : 0));
             if (candidate.WasPreviouslySelected)
             {
@@ -99,7 +99,7 @@ internal static class PlayerVisibilitySelector
         for (var step = 0; step < parameters.PredictionSteps; step++)
         {
             var time = step * parameters.PredictionStepSeconds;
-            var predictedPosition = relativePosition + relativeVelocity * (float)time;
+            var predictedPosition = relativePosition + (relativeVelocity * (float)time);
             if (!IsFinite(predictedPosition))
             {
                 return 0;
@@ -112,7 +112,7 @@ internal static class PlayerVisibilitySelector
             }
 
             var normalizedDistance = distance / parameters.DistanceSigma;
-            var distanceScore = 1.0 / (1.0 + normalizedDistance * normalizedDistance);
+            var distanceScore = 1.0 / (1.0 + (normalizedDistance * normalizedDistance));
             weightedScore += weight * distanceScore;
             totalWeight += weight;
             weight *= parameters.PredictionGamma;
@@ -132,23 +132,27 @@ internal static class PlayerVisibilitySelector
         int rankCount
     )
     {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rankCount);
+
         var candidates = new PlayerVisibilitySelectionCandidate[source.Count];
         var sourceIndices = new HashSet<int>();
+
         for (var i = 0; i < source.Count; i++)
         {
             var candidate = source[i];
+
             if (candidate.Rank < 0 || candidate.Rank >= rankCount)
             {
-                throw new ArgumentOutOfRangeException(
-                    nameof(candidate.Rank),
-                    candidate.Rank,
-                    $"Candidate rank must be in [0, {rankCount - 1}]."
+                throw new ArgumentException(
+                    $"Candidate at index {i} has rank {candidate.Rank}; rank must be in [0, {rankCount - 1}].",
+                    nameof(source)
                 );
             }
 
             if (!sourceIndices.Add(candidate.SourceIndex))
             {
-                throw new ArgumentException($"SourceIndex {candidate.SourceIndex} is not unique.", nameof(source));
+                throw new ArgumentException($"Candidate at index {i} has duplicate SourceIndex {candidate.SourceIndex}.", nameof(source));
             }
 
             candidates[i] = candidate;
@@ -169,12 +173,12 @@ internal static class PlayerVisibilitySelector
         }
 
         var t = Math.Clamp((speed - parameters.MotionStartSpeed) / (parameters.MotionFullSpeed - parameters.MotionStartSpeed), 0, 1);
-        return t * t * (3 - 2 * t);
+        return t * t * (3 - (2 * t));
     }
 
     private static long CalculateRetentionBonus(double motionFactor, PlayerVisibilitySelectionParameters parameters)
     {
-        var bonus = parameters.RestRetentionBonus + (parameters.MoveRetentionBonus - parameters.RestRetentionBonus) * motionFactor;
+        var bonus = parameters.RestRetentionBonus + ((parameters.MoveRetentionBonus - parameters.RestRetentionBonus) * motionFactor);
         return checked((long)Math.Round(bonus, MidpointRounding.AwayFromZero));
     }
 

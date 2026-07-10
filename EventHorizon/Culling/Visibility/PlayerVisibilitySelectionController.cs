@@ -51,7 +51,7 @@ internal sealed class PlayerVisibilitySelectionController
         {
             return new PlayerVisibilitySelectionEvaluation(
                 CreateUnavailableTrace(plan.Generation, totalStart, "Local player position is unavailable."),
-                Array.Empty<PlayerVisibilitySelectionKey>()
+                []
             );
         }
 
@@ -66,12 +66,12 @@ internal sealed class PlayerVisibilitySelectionController
         }
     }
 
-    internal PlayerVisibilitySelectionEvaluation CreateFailedEvaluation(int generation, long totalStart, Exception exception)
+    internal static PlayerVisibilitySelectionEvaluation CreateFailedEvaluation(int generation, long totalStart, Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
         return new PlayerVisibilitySelectionEvaluation(
             CreateFailedTrace(generation, totalStart, $"{exception.GetType().Name}: {exception.Message}"),
-            Array.Empty<PlayerVisibilitySelectionKey>()
+            []
         );
     }
 
@@ -134,7 +134,7 @@ internal sealed class PlayerVisibilitySelectionController
 
         playerVelocityTracker.PruneExcept(competitiveIdentities);
 
-        var previousSelected = seeded ? new HashSet<PlayerObjectIdentity>(selectedHistory) : GetLegacySelectedIdentities(legacyTargetSet);
+        var previousSelected = seeded ? [.. selectedHistory] : GetLegacySelectedIdentities(legacyTargetSet);
         var candidates = new List<PlayerVisibilitySelectionCandidate>(competitiveCount);
         for (var sourceIndex = 0; sourceIndex < plan.Entries.Count; sourceIndex++)
         {
@@ -246,13 +246,13 @@ internal sealed class PlayerVisibilitySelectionController
         return count;
     }
 
-    private static int CountExcept(IReadOnlySet<PlayerObjectIdentity> left, IReadOnlySet<PlayerObjectIdentity> right) =>
+    private static int CountExcept(HashSet<PlayerObjectIdentity> left, IReadOnlySet<PlayerObjectIdentity> right) =>
         left.Count - CountIntersection(left, right);
 
     private static int CountActiveReplaced(
         IReadOnlySet<PlayerObjectIdentity> previous,
-        IReadOnlySet<PlayerObjectIdentity> competitive,
-        IReadOnlySet<PlayerObjectIdentity> current
+        HashSet<PlayerObjectIdentity> competitive,
+        HashSet<PlayerObjectIdentity> current
     )
     {
         var count = 0;
@@ -300,7 +300,7 @@ internal sealed record PlayerVisibilitySelectionEvaluation(
     IReadOnlyList<PlayerVisibilitySelectionKey> SelectedKeys
 )
 {
-    public IReadOnlyList<PlayerObjectIdentity> SelectedIdentities => SelectedKeys.Select(static key => key.Identity).ToArray();
+    public IReadOnlyList<PlayerObjectIdentity> SelectedIdentities => [.. SelectedKeys.Select(static key => key.Identity)];
 }
 
 internal readonly record struct PlayerVisibilitySelectionKey(int SourceIndex, PlayerObjectIdentity Identity, int ObjectIndex);

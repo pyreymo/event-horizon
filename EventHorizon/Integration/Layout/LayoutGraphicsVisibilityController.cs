@@ -199,11 +199,7 @@ internal sealed unsafe class LayoutGraphicsVisibilityController : IDisposable
         }
 
         if (
-            !layout->InstancesByType.TryGetValue(
-                InstanceType.BgPart,
-                out Pointer<StdMap<ulong, Pointer<ILayoutInstance>>> bgPartInstances,
-                copyCtor: false
-            )
+            !layout->InstancesByType.TryGetValue(InstanceType.BgPart, out var bgPartInstances, copyCtor: false)
             || bgPartInstances.Value == null
         )
         {

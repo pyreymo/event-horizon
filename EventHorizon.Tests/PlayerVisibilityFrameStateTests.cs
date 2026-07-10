@@ -32,7 +32,7 @@ public sealed class PlayerVisibilityFrameStateTests
         };
         var plan = new PlayerVisibilityPlan(1, 0, entries, default);
 
-        var target = PlayerVisibilityStableTargetBuilder.Build(plan, new[] { new PlayerVisibilitySelectionKey(1, identity, 40) }, []);
+        var target = PlayerVisibilityStableTargetBuilder.Build(plan, [new PlayerVisibilitySelectionKey(1, identity, 40)], []);
 
         Assert.IsFalse(target.Targets.Single(value => value.ObjectIndex == 20).DesiredVisible);
         Assert.IsTrue(target.Targets.Single(value => value.ObjectIndex == 40).DesiredVisible);
@@ -42,7 +42,7 @@ public sealed class PlayerVisibilityFrameStateTests
         new(
             generation,
             0,
-            new[] { new PlayerVisibilityTarget(identity, 2, PlayerVisibilityClassification.Competitive, false, default, true) },
+            [new PlayerVisibilityTarget(identity, 2, PlayerVisibilityClassification.Competitive, false, default, true)],
             default
         );
 
