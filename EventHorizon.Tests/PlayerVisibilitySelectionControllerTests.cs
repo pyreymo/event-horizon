@@ -43,7 +43,6 @@ public sealed class PlayerVisibilitySelectionControllerTests
         Assert.AreEqual(PlayerVisibilitySelectionStatus.Ready, second.Trace.Status);
         Assert.AreEqual(IdentityB, second.SelectedIdentities.Single());
         Assert.AreEqual(1, second.Trace.RetainedCount);
-        Assert.AreEqual(2, second.Trace.SymmetricDifference);
     }
 
     [TestMethod]
@@ -113,19 +112,6 @@ public sealed class PlayerVisibilitySelectionControllerTests
     }
 
     [TestMethod]
-    public void LegacyProposalDifference_IsCalculatedFromCompleteIdentitySets()
-    {
-        var controller = new PlayerVisibilitySelectionController();
-        var entries = new[] { Entry(IdentityA, 7), Entry(IdentityB, 0) };
-
-        var result = Evaluate(controller, Plan(1, 0, entries), Legacy(entries, IdentityA), 1, Vector3.Zero);
-
-        Assert.AreEqual(1, result.Trace.LegacyOnlyCount);
-        Assert.AreEqual(1, result.Trace.ProposalOnlyCount);
-        Assert.AreEqual(2, result.Trace.SymmetricDifference);
-    }
-
-    [TestMethod]
     public void RankHistograms_AreCorrectAndIndependentAcrossEvaluations()
     {
         var controller = new PlayerVisibilitySelectionController();
@@ -138,8 +124,6 @@ public sealed class PlayerVisibilitySelectionControllerTests
 
         CollectionAssert.AreEqual(new[] { 1, 0, 0, 0, 0, 0, 0, 2 }, firstCandidateHistogram);
         CollectionAssert.AreEqual(firstCandidateHistogram, first.Trace.CandidateRankHistogram!.ToArray());
-        Assert.AreEqual(2, first.Trace.ProposalRankHistogram!.Sum());
-        Assert.AreEqual(1, first.Trace.LegacyRankHistogram!.Sum());
     }
 
     [TestMethod]
@@ -345,7 +329,7 @@ public sealed class PlayerVisibilitySelectionControllerTests
     }
 
     private static PlayerVisibilityPlan Plan(int generation, long milliseconds, IReadOnlyList<PlayerVisibilityPlanEntry> entries) =>
-        new(generation, milliseconds, entries, default, default);
+        new(generation, milliseconds, entries, default);
 
     private static PlayerVisibilityPlanEntry Entry(
         PlayerObjectIdentity identity,

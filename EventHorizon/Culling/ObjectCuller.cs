@@ -16,7 +16,6 @@ namespace EventHorizon.Culling;
 
 internal sealed unsafe class ObjectCuller : IDisposable
 {
-    private const PlayerVisibilityTargetSource DefaultPlayerVisibilityTargetSource = PlayerVisibilityTargetSource.StableTopB;
     private const int MaxMaintainedPlayerActionsPerFrame = 24;
     private const int MaxHiddenPlayerVfxCreatesPerFrame = 8;
     private const int MaxPlayerRelatedObjectIndex = 199;
@@ -198,7 +197,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
         phaseStart = Stopwatch.GetTimestamp();
         var playerVisibilityPlan = PlayerVisibilityPlan.Build(
             ++nextPlayerVisibilityGeneration,
-            configuration,
             manager,
             playerKeepPlan,
             GetActivePreviewSelectedPlayerEntityId(),
@@ -233,7 +231,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
             playerVisibilityPlan,
             legacyTargetSet,
             selectionEvaluation,
-            DefaultPlayerVisibilityTargetSource,
             stablePlayerVisibilityTargets
         );
         var activeTargetSet = activeResolution.ActiveTarget;

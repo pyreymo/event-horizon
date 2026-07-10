@@ -462,3 +462,37 @@ PlayerAdmissionGate explicit-visible identity lookup
 
 - 新增/调整测试覆盖：Unchanged hold 每轮 reassert、explicit-visible 释放、Disappeared 释放、baseline 有 active target 时 fail-closed、hide failure 保留并重试、reassert/failure 诊断，以及 dirty consume 后的新 wakeup 保留。
 - 全套测试增加到 87 个。
+
+## 2026-07-10：Phase 4.1 detour 职责收敛
+
+- 从 `UpdateObjectArraysHook.Detour(...)` 删除 `ObjectCuller.Tick(objectManager)`；detour 不再推进 reconciliation、fade、VFX、maintained actions、ShowTransitionBudget 或普通可见性执行。
+- detour 当前固定职责只有：先执行 original，再运行必须抢在下一次 Framework refresh 前生效的 player admission gate。admission 产生的 topology change 只通过 dirty signal 请求下一帧提前 refresh。
+- 原公开 `Tick()` 接口重命名为 `FrameworkTick()`，并且只从 `Plugin.OnFrameworkUpdate(...)` 调用，使正常可见性推进的线程所有权在代码命名和调用链上明确归属于 Framework update。
+- admission gate 的即时 hard hide 是 detour 中唯一保留的 RenderFlags 写入例外；它不运行 selector/reconciler，也不改变 selection history。
+- Framework update 现在唯一负责：每帧 tick、消费 topology dirty、按 deadline 或 dirty 执行完整 refresh，以及推进 active target 的平滑收敛。
+
+## 2026-07-10：Phase 5 清理
+
+### legacy 对照与临时 source 开关
+
+- 删除 `DefaultPlayerVisibilityTargetSource`、`PlayerVisibilityTargetSource` 的配置分支和 `ConfiguredLegacy` fallback；生产路径不再存在手动 Legacy/StableTopB 双模式开关。
+- `Ready` proposal 固定采用 Stable Top-B；`Warmup`、`Unavailable`、selection failure 和 stable target build failure 仍自动采用本轮先构建的 legacy target。该 legacy builder 仅作为运行时失败安全路径保留，不再充当 shadow 对照或可选正式模式。
+- applied source 收敛为 `StableTopB` 或 `LegacyFallback`，trace/log 不再输出已失去意义的 configured source。
+- 删除 legacy/proposal symmetric difference、legacy-only、proposal-only、legacy/proposal selected rank histogram 及其日志、测试；proposal churn 仍描述选择器自身历史变化，active applied source 仍独立记录。
+
+### 未使用数据结构与文档
+
+- 删除不再被 active 统计消费的 `PlayerVisibilityPlan.BudgetStats` 及其 legacy keep-plan 统计构造；DTR/UI 继续只读取 active target 计算出的 `PlayerVisibilityActiveBudgetStats`。
+- 删除 resolver 结果中无人消费的 source decision 副本；source policy 仍作为纯函数保留并有 Ready/非 Ready 测试覆盖。
+- Phase 2 的同步不可变 selection snapshot 仍是 selector 的实际输入，并非未使用结构；旧 CP-SAT snapshot、worker 和专属统计已在 Phase 0/1 删除，本轮残留扫描未发现其回归。
+- 更新 `README.md` 的工作原理和项目结构，说明 Stable Top-B、player admission gate 和统一 reconciliation 路径。
+
+### 验证
+
+- `dotnet csharpier format .`：通过，格式化/检查 67 个文件。
+- `dotnet build EventHorizon.sln -c Debug`：通过，0 warning、0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning、0 error。
+- `dotnet test EventHorizon.sln -c Debug --no-build`：实际发现并通过 83/83。
+- `dotnet test EventHorizon.sln -c Release --no-build`：实际发现并通过 83/83。
+- 测试数由 87 调整为 83：删除 3 个只验证临时 Legacy 模式/默认开关的测试和 1 个 legacy proposal diff 测试；其余 selector、fallback、admission、applied state、reconciler 和 detour 边界测试全部保留。
+- 未增加配置 UI、命令、worker、后台线程、OR-Tools 或新 hook；automatic legacy fallback、admission hard-hide 例外和 Framework-owned 正常可见性推进保持不变。

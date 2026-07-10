@@ -3,16 +3,15 @@ using System.Collections.Generic;
 
 namespace EventHorizon.Culling.Visibility;
 
-internal enum PlayerVisibilityTargetSource
+internal enum PlayerVisibilityAppliedSource
 {
-    Legacy,
+    LegacyFallback,
     StableTopB,
 }
 
 internal enum PlayerVisibilityFallbackReason
 {
     None,
-    ConfiguredLegacy,
     Warmup,
     Unavailable,
     SelectionFailed,
@@ -20,43 +19,27 @@ internal enum PlayerVisibilityFallbackReason
 }
 
 internal readonly record struct PlayerVisibilityTargetSourceDecision(
-    PlayerVisibilityTargetSource ConfiguredSource,
-    PlayerVisibilityTargetSource AppliedSource,
+    PlayerVisibilityAppliedSource AppliedSource,
     PlayerVisibilityFallbackReason FallbackReason
 );
 
 internal static class PlayerVisibilityTargetSourcePolicy
 {
-    public static PlayerVisibilityTargetSourceDecision DecideTargetSource(
-        PlayerVisibilityTargetSource configuredSource,
-        PlayerVisibilitySelectionStatus selectionStatus
-    )
+    public static PlayerVisibilityTargetSourceDecision DecideTargetSource(PlayerVisibilitySelectionStatus selectionStatus)
     {
-        if (configuredSource == PlayerVisibilityTargetSource.Legacy)
-        {
-            return new(configuredSource, PlayerVisibilityTargetSource.Legacy, PlayerVisibilityFallbackReason.ConfiguredLegacy);
-        }
-
         return selectionStatus switch
         {
-            PlayerVisibilitySelectionStatus.Ready => new(
-                configuredSource,
-                PlayerVisibilityTargetSource.StableTopB,
-                PlayerVisibilityFallbackReason.None
-            ),
+            PlayerVisibilitySelectionStatus.Ready => new(PlayerVisibilityAppliedSource.StableTopB, PlayerVisibilityFallbackReason.None),
             PlayerVisibilitySelectionStatus.Warmup => new(
-                configuredSource,
-                PlayerVisibilityTargetSource.Legacy,
+                PlayerVisibilityAppliedSource.LegacyFallback,
                 PlayerVisibilityFallbackReason.Warmup
             ),
             PlayerVisibilitySelectionStatus.Unavailable => new(
-                configuredSource,
-                PlayerVisibilityTargetSource.Legacy,
+                PlayerVisibilityAppliedSource.LegacyFallback,
                 PlayerVisibilityFallbackReason.Unavailable
             ),
             PlayerVisibilitySelectionStatus.Failed => new(
-                configuredSource,
-                PlayerVisibilityTargetSource.Legacy,
+                PlayerVisibilityAppliedSource.LegacyFallback,
                 PlayerVisibilityFallbackReason.SelectionFailed
             ),
             _ => throw new ArgumentOutOfRangeException(
@@ -70,7 +53,6 @@ internal static class PlayerVisibilityTargetSourcePolicy
 
 internal sealed record PlayerVisibilityActiveTargetResolution(
     PlayerVisibilityTargetSet ActiveTarget,
-    PlayerVisibilityTargetSourceDecision SourceDecision,
     PlayerVisibilitySelectionEvaluation Evaluation
 );
 
@@ -80,7 +62,6 @@ internal static class PlayerVisibilityActiveTargetResolver
         PlayerVisibilityPlan plan,
         PlayerVisibilityTargetSet legacyTarget,
         PlayerVisibilitySelectionEvaluation evaluation,
-        PlayerVisibilityTargetSource configuredSource,
         List<PlayerVisibilityTarget> stableTargetBuffer
     )
     {
@@ -92,16 +73,16 @@ internal static class PlayerVisibilityActiveTargetResolver
         PlayerVisibilityTargetSourceDecision decision;
         try
         {
-            decision = PlayerVisibilityTargetSourcePolicy.DecideTargetSource(configuredSource, evaluation.Trace.Status);
+            decision = PlayerVisibilityTargetSourcePolicy.DecideTargetSource(evaluation.Trace.Status);
         }
         catch (Exception exception)
         {
-            decision = new(configuredSource, PlayerVisibilityTargetSource.Legacy, PlayerVisibilityFallbackReason.SelectionFailed);
+            decision = new(PlayerVisibilityAppliedSource.LegacyFallback, PlayerVisibilityFallbackReason.SelectionFailed);
             evaluation = MarkFailed(evaluation, exception);
         }
 
         var activeTarget = legacyTarget;
-        if (decision.AppliedSource == PlayerVisibilityTargetSource.StableTopB)
+        if (decision.AppliedSource == PlayerVisibilityAppliedSource.StableTopB)
         {
             try
             {
@@ -109,7 +90,7 @@ internal static class PlayerVisibilityActiveTargetResolver
             }
             catch (Exception exception)
             {
-                decision = new(configuredSource, PlayerVisibilityTargetSource.Legacy, PlayerVisibilityFallbackReason.TargetBuildFailed);
+                decision = new(PlayerVisibilityAppliedSource.LegacyFallback, PlayerVisibilityFallbackReason.TargetBuildFailed);
                 evaluation = MarkFailed(evaluation, exception);
                 activeTarget = legacyTarget;
             }
@@ -119,14 +100,13 @@ internal static class PlayerVisibilityActiveTargetResolver
         {
             Trace = evaluation.Trace with
             {
-                ConfiguredSource = decision.ConfiguredSource,
                 AppliedSource = decision.AppliedSource,
                 FallbackReason = decision.FallbackReason,
                 ProposalSelectedCount = evaluation.SelectedIdentities.Count,
                 AppliedSelectedCount = PlayerVisibilityActiveBudgetStats.Calculate(activeTarget, 1).VisibleBudgetedPlayerCount,
             },
         };
-        return new PlayerVisibilityActiveTargetResolution(activeTarget, decision, evaluation);
+        return new PlayerVisibilityActiveTargetResolution(activeTarget, evaluation);
     }
 
     private static PlayerVisibilitySelectionEvaluation MarkFailed(PlayerVisibilitySelectionEvaluation evaluation, Exception exception) =>

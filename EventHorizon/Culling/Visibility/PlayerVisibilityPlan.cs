@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using EventHorizon.Culling.Rules;
-using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.Culling.Visibility;
@@ -13,26 +12,22 @@ internal sealed unsafe class PlayerVisibilityPlan
         int generation,
         long createdAtTickCount64,
         IReadOnlyList<PlayerVisibilityPlanEntry> entries,
-        PlayerKeepBudgetStats budgetStats,
         PlayerVisibilityClassificationCounts classificationCounts
     )
     {
         Generation = generation;
         CreatedAtTickCount64 = createdAtTickCount64;
         Entries = entries;
-        BudgetStats = budgetStats;
         ClassificationCounts = classificationCounts;
     }
 
     public int Generation { get; }
     public long CreatedAtTickCount64 { get; }
     public IReadOnlyList<PlayerVisibilityPlanEntry> Entries { get; }
-    public PlayerKeepBudgetStats BudgetStats { get; }
     public PlayerVisibilityClassificationCounts ClassificationCounts { get; }
 
     public static PlayerVisibilityPlan Build(
         int generation,
-        Configuration configuration,
         GameObjectManager* manager,
         PlayerKeepPlan keepPlan,
         uint? previewVisibleEntityId,
@@ -91,11 +86,6 @@ internal sealed unsafe class PlayerVisibilityPlan
             generation,
             Environment.TickCount64,
             [.. entries],
-            new PlayerKeepBudgetStats(
-                keepPlan.BudgetExemptPlayerCount,
-                keepPlan.VisibleBudgetedPlayerCount,
-                Math.Clamp(configuration.VisiblePlayerCountLimit, 1, 100)
-            ),
             new PlayerVisibilityClassificationCounts(bypassVisibleCount, competitiveCount, forceHiddenCount, unmanagedCount)
         );
     }

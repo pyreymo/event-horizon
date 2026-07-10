@@ -168,25 +168,19 @@ internal sealed class PlayerVisibilitySelectionController
 
         var currentSelected = new HashSet<PlayerObjectIdentity>();
         var selectedIdentities = new PlayerObjectIdentity[selection.SelectedSourceIndices.Count];
-        var proposalRankHistogram = new int[parameters.RankCount];
         for (var selectedIndex = 0; selectedIndex < selection.SelectedSourceIndices.Count; selectedIndex++)
         {
             var sourceIndex = selection.SelectedSourceIndices[selectedIndex];
             var entry = plan.Entries[sourceIndex];
             selectedIdentities[selectedIndex] = entry.Identity;
             currentSelected.Add(entry.Identity);
-            proposalRankHistogram[entry.Decision.Rank]++;
         }
 
-        var legacySelected = GetLegacySelectedIdentities(legacyTargetSet);
-        var legacyRankHistogram = BuildLegacyRankHistogram(legacyTargetSet);
         var retainedCount = CountIntersection(currentSelected, previousSelected);
         var enteredCount = CountExcept(currentSelected, previousSelected);
         var leftCount = CountExcept(previousSelected, currentSelected);
         var missingPreviousCount = CountExcept(previousSelected, competitiveIdentities);
         var activeReplacedCount = CountActiveReplaced(previousSelected, competitiveIdentities, currentSelected);
-        var legacyOnlyCount = CountExcept(legacySelected, currentSelected);
-        var proposalOnlyCount = CountExcept(currentSelected, legacySelected);
 
         var status = localSpeedSmoother.HasVelocityEstimate
             ? PlayerVisibilitySelectionStatus.Ready
@@ -203,18 +197,12 @@ internal sealed class PlayerVisibilitySelectionController
             leftCount,
             missingPreviousCount,
             activeReplacedCount,
-            legacySelected.Count,
-            legacyOnlyCount,
-            proposalOnlyCount,
-            legacyOnlyCount + proposalOnlyCount,
             localSpeedSmoother.HasVelocityEstimate,
             playerVelocityTracker.Count,
             localSpeedSmoother.SmoothedSpeed,
             selection.MotionFactor,
             selection.RetentionBonus,
             ReadOnly(candidateRankHistogram),
-            ReadOnly(proposalRankHistogram),
-            ReadOnly(legacyRankHistogram),
             snapshotTicks,
             selectorTicks,
             Stopwatch.GetTimestamp() - totalStart
@@ -235,20 +223,6 @@ internal sealed class PlayerVisibilitySelectionController
         }
 
         return identities;
-    }
-
-    private int[] BuildLegacyRankHistogram(PlayerVisibilityTargetSet targetSet)
-    {
-        var histogram = new int[parameters.RankCount];
-        foreach (var target in targetSet.Targets)
-        {
-            if (target.Classification == PlayerVisibilityClassification.Competitive && target.DesiredVisible)
-            {
-                histogram[target.Decision.Rank]++;
-            }
-        }
-
-        return histogram;
     }
 
     private static int CountIntersection(IReadOnlySet<PlayerObjectIdentity> left, IReadOnlySet<PlayerObjectIdentity> right)
@@ -331,23 +305,16 @@ internal readonly record struct PlayerVisibilitySelectionTrace(
     int LeftCount = 0,
     int MissingPreviousCount = 0,
     int ActiveReplacedCount = 0,
-    int LegacySelectedCount = 0,
-    int LegacyOnlyCount = 0,
-    int ProposalOnlyCount = 0,
-    int SymmetricDifference = 0,
     bool HasLocalVelocityEstimate = false,
     int TrackedPlayerVelocityCount = 0,
     double SmoothedLocalSpeed = 0,
     double MotionFactor = 0,
     long RetentionBonus = 0,
     IReadOnlyList<int>? CandidateRankHistogram = null,
-    IReadOnlyList<int>? ProposalRankHistogram = null,
-    IReadOnlyList<int>? LegacyRankHistogram = null,
     long SnapshotTicks = 0,
     long SelectorTicks = 0,
     long TotalTicks = 0,
-    PlayerVisibilityTargetSource ConfiguredSource = PlayerVisibilityTargetSource.Legacy,
-    PlayerVisibilityTargetSource AppliedSource = PlayerVisibilityTargetSource.Legacy,
+    PlayerVisibilityAppliedSource AppliedSource = PlayerVisibilityAppliedSource.LegacyFallback,
     PlayerVisibilityFallbackReason FallbackReason = PlayerVisibilityFallbackReason.None,
     int ProposalSelectedCount = 0,
     int AppliedSelectedCount = 0,

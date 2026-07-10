@@ -61,7 +61,7 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         OnObjectArraysUpdated(GameObjectManager.Instance(), refreshPlayerPreview);
     }
 
-    public void Tick()
+    public void FrameworkTick()
     {
         objectCuller.Tick(GameObjectManager.Instance());
     }
@@ -93,7 +93,6 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
     {
         var result = hook.Original(objectManager);
         objectCuller.ApplyPlayerAdmissionGate(objectManager);
-        objectCuller.Tick(objectManager);
 
         return result;
     }

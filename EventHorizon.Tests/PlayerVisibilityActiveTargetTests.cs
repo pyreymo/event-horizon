@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using System.Reflection;
-using EventHorizon.Culling;
 using EventHorizon.Culling.Rules;
 using EventHorizon.Culling.Visibility;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -74,27 +72,11 @@ public sealed class PlayerVisibilityActiveTargetTests
     }
 
     [TestMethod]
-    public void SourcePolicy_ConfiguredLegacyAlwaysUsesLegacy()
-    {
-        foreach (
-            var status in Enum.GetValues<PlayerVisibilitySelectionStatus>().Where(value => value != PlayerVisibilitySelectionStatus.None)
-        )
-        {
-            var decision = PlayerVisibilityTargetSourcePolicy.DecideTargetSource(PlayerVisibilityTargetSource.Legacy, status);
-            Assert.AreEqual(PlayerVisibilityTargetSource.Legacy, decision.AppliedSource);
-            Assert.AreEqual(PlayerVisibilityFallbackReason.ConfiguredLegacy, decision.FallbackReason);
-        }
-    }
-
-    [TestMethod]
     public void SourcePolicy_StableReadyUsesStableTarget()
     {
-        var decision = PlayerVisibilityTargetSourcePolicy.DecideTargetSource(
-            PlayerVisibilityTargetSource.StableTopB,
-            PlayerVisibilitySelectionStatus.Ready
-        );
+        var decision = PlayerVisibilityTargetSourcePolicy.DecideTargetSource(PlayerVisibilitySelectionStatus.Ready);
 
-        Assert.AreEqual(PlayerVisibilityTargetSource.StableTopB, decision.AppliedSource);
+        Assert.AreEqual(PlayerVisibilityAppliedSource.StableTopB, decision.AppliedSource);
         Assert.AreEqual(PlayerVisibilityFallbackReason.None, decision.FallbackReason);
     }
 
@@ -110,8 +92,8 @@ public sealed class PlayerVisibilityActiveTargetTests
 
         foreach (var (status, expectedReason) in cases)
         {
-            var decision = PlayerVisibilityTargetSourcePolicy.DecideTargetSource(PlayerVisibilityTargetSource.StableTopB, status);
-            Assert.AreEqual(PlayerVisibilityTargetSource.Legacy, decision.AppliedSource);
+            var decision = PlayerVisibilityTargetSourcePolicy.DecideTargetSource(status);
+            Assert.AreEqual(PlayerVisibilityAppliedSource.LegacyFallback, decision.AppliedSource);
             Assert.AreEqual(expectedReason, decision.FallbackReason);
         }
     }
@@ -124,16 +106,10 @@ public sealed class PlayerVisibilityActiveTargetTests
         var legacy = Legacy(plan, IdentityA);
         var evaluation = Evaluation(PlayerVisibilitySelectionStatus.Ready, IdentityB);
 
-        var resolution = PlayerVisibilityActiveTargetResolver.Resolve(
-            plan,
-            legacy,
-            evaluation,
-            PlayerVisibilityTargetSource.StableTopB,
-            []
-        );
+        var resolution = PlayerVisibilityActiveTargetResolver.Resolve(plan, legacy, evaluation, []);
 
         Assert.AreSame(legacy, resolution.ActiveTarget);
-        Assert.AreEqual(PlayerVisibilityTargetSource.Legacy, resolution.Evaluation.Trace.AppliedSource);
+        Assert.AreEqual(PlayerVisibilityAppliedSource.LegacyFallback, resolution.Evaluation.Trace.AppliedSource);
         Assert.AreEqual(PlayerVisibilityFallbackReason.TargetBuildFailed, resolution.Evaluation.Trace.FallbackReason);
         Assert.AreEqual(PlayerVisibilitySelectionStatus.Failed, resolution.Evaluation.Trace.Status);
     }
@@ -149,34 +125,13 @@ public sealed class PlayerVisibilityActiveTargetTests
             plan,
             legacy,
             Evaluation(PlayerVisibilitySelectionStatus.Ready, IdentityB),
-            PlayerVisibilityTargetSource.StableTopB,
             []
         );
 
         Assert.AreEqual(73, resolution.ActiveTarget.Generation);
         Assert.AreNotSame(legacy, resolution.ActiveTarget);
         AssertTarget(resolution.ActiveTarget, IdentityB, true, false);
-        Assert.AreEqual(PlayerVisibilityTargetSource.StableTopB, resolution.Evaluation.Trace.AppliedSource);
-    }
-
-    [TestMethod]
-    public void ActiveResolver_LegacyModeIgnoresStableProposalAndReturnsSameLegacyInstance()
-    {
-        var entries = new[] { Entry(IdentityA, 0), Entry(IdentityB, 1) };
-        var plan = Plan(1, entries);
-        var legacy = Legacy(plan, IdentityA);
-
-        var resolution = PlayerVisibilityActiveTargetResolver.Resolve(
-            plan,
-            legacy,
-            Evaluation(PlayerVisibilitySelectionStatus.Ready, IdentityB),
-            PlayerVisibilityTargetSource.Legacy,
-            []
-        );
-
-        Assert.AreSame(legacy, resolution.ActiveTarget);
-        AssertTarget(resolution.ActiveTarget, IdentityA, true, false);
-        Assert.AreEqual(PlayerVisibilityFallbackReason.ConfiguredLegacy, resolution.Evaluation.Trace.FallbackReason);
+        Assert.AreEqual(PlayerVisibilityAppliedSource.StableTopB, resolution.Evaluation.Trace.AppliedSource);
     }
 
     [TestMethod]
@@ -228,13 +183,7 @@ public sealed class PlayerVisibilityActiveTargetTests
         var legacy = Legacy(firstPlan, IdentityA);
         var firstEvaluation = controller.Evaluate(firstPlan, legacy, true, 1, Vector3.Zero);
         Assert.AreEqual(IdentityB, firstEvaluation.SelectedIdentities.Single());
-        var fallback = PlayerVisibilityActiveTargetResolver.Resolve(
-            firstPlan,
-            legacy,
-            firstEvaluation,
-            PlayerVisibilityTargetSource.StableTopB,
-            []
-        );
+        var fallback = PlayerVisibilityActiveTargetResolver.Resolve(firstPlan, legacy, firstEvaluation, []);
         Assert.AreEqual(PlayerVisibilityFallbackReason.Warmup, fallback.Evaluation.Trace.FallbackReason);
         controller.CommitAppliedTarget(fallback.ActiveTarget);
 
@@ -289,7 +238,6 @@ public sealed class PlayerVisibilityActiveTargetTests
             plan,
             legacy,
             new PlayerVisibilitySelectionEvaluation(trace, new[] { IdentityB }),
-            PlayerVisibilityTargetSource.StableTopB,
             []
         );
 
@@ -297,7 +245,7 @@ public sealed class PlayerVisibilityActiveTargetTests
         Assert.AreEqual(1, resolution.Evaluation.Trace.AppliedSelectedCount);
         Assert.AreEqual(1, resolution.Evaluation.Trace.EnteredCount);
         Assert.AreEqual(1, resolution.Evaluation.Trace.LeftCount);
-        Assert.AreEqual(PlayerVisibilityTargetSource.Legacy, resolution.Evaluation.Trace.AppliedSource);
+        Assert.AreEqual(PlayerVisibilityAppliedSource.LegacyFallback, resolution.Evaluation.Trace.AppliedSource);
     }
 
     [TestMethod]
@@ -309,26 +257,11 @@ public sealed class PlayerVisibilityActiveTargetTests
         var controller = new PlayerVisibilitySelectionController();
         var failedEvaluation = controller.Evaluate(plan, legacy, true, 1, Vector3.Zero);
 
-        var resolution = PlayerVisibilityActiveTargetResolver.Resolve(
-            plan,
-            legacy,
-            failedEvaluation,
-            PlayerVisibilityTargetSource.StableTopB,
-            []
-        );
+        var resolution = PlayerVisibilityActiveTargetResolver.Resolve(plan, legacy, failedEvaluation, []);
 
         Assert.AreEqual(PlayerVisibilitySelectionStatus.Failed, failedEvaluation.Trace.Status);
         Assert.AreSame(legacy, resolution.ActiveTarget);
         Assert.IsNotNull(resolution.ActiveTarget);
-    }
-
-    [TestMethod]
-    public void ObjectCuller_DefaultTargetSourceIsStableTopB()
-    {
-        var field = typeof(ObjectCuller).GetField("DefaultPlayerVisibilityTargetSource", BindingFlags.Static | BindingFlags.NonPublic);
-
-        Assert.IsNotNull(field);
-        Assert.AreEqual(PlayerVisibilityTargetSource.StableTopB, (PlayerVisibilityTargetSource)(int)field.GetRawConstantValue()!);
     }
 
     private static PlayerVisibilitySelectionEvaluation Evaluation(
@@ -337,7 +270,7 @@ public sealed class PlayerVisibilityActiveTargetTests
     ) => new(new PlayerVisibilitySelectionTrace(status, 1), selected);
 
     private static PlayerVisibilityPlan Plan(int generation, IReadOnlyList<PlayerVisibilityPlanEntry> entries, long milliseconds = 100) =>
-        new(generation, milliseconds, entries, default, default);
+        new(generation, milliseconds, entries, default);
 
     private static PlayerVisibilityPlanEntry Entry(
         PlayerObjectIdentity identity,

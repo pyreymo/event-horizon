@@ -327,7 +327,7 @@ public sealed class Plugin : IDalamudPlugin
         var dynamicCheckTicks = Stopwatch.GetTimestamp() - phaseStart;
 
         phaseStart = Stopwatch.GetTimestamp();
-        UpdateObjectArraysHook.Tick();
+        UpdateObjectArraysHook.FrameworkTick();
         var tickTicks = Stopwatch.GetTimestamp() - phaseStart;
         var tickTrace = UpdateObjectArraysHook.LastTickTrace;
 
@@ -395,8 +395,7 @@ public sealed class Plugin : IDalamudPlugin
         nextStableTopBLog = now + StableTopBLogIntervalMs;
         var admission = UpdateObjectArraysHook.PlayerAdmissionDiagnostics;
         var message = string.Format(
-            "[StableTopB] configured={0} applied={1} status={2} fallback={3} generation={4} candidates={5} budget={6} proposalSelected={7} appliedSelected={8} previous={9} proposalRetained={10} proposalEntered={11} proposalLeft={12} proposalMissing={13} proposalReplaced={14} legacySelected={15} legacyOnly={16} proposalOnly={17} proposalLegacyDiff={18} localVelocity={19} tracked={20} speed={21:F3} motion={22:F3} bonus={23} snapshotMs={24:F3} selectorMs={25:F3} totalMs={26:F3} candidateRanks={27} proposalRanks={28} legacyRanks={29} reason={30} admissionHideFailed={31} admissionReasserted={32} admissionHoldCount={33}",
-            trace.ConfiguredSource,
+            "[StableTopB] applied={0} status={1} fallback={2} generation={3} candidates={4} budget={5} proposalSelected={6} appliedSelected={7} previous={8} proposalRetained={9} proposalEntered={10} proposalLeft={11} proposalMissing={12} proposalReplaced={13} localVelocity={14} tracked={15} speed={16:F3} motion={17:F3} bonus={18} snapshotMs={19:F3} selectorMs={20:F3} totalMs={21:F3} candidateRanks={22} reason={23} admissionHideFailed={24} admissionReasserted={25} admissionHoldCount={26}",
             trace.AppliedSource,
             trace.Status,
             trace.FallbackReason,
@@ -411,10 +410,6 @@ public sealed class Plugin : IDalamudPlugin
             trace.LeftCount,
             trace.MissingPreviousCount,
             trace.ActiveReplacedCount,
-            trace.LegacySelectedCount,
-            trace.LegacyOnlyCount,
-            trace.ProposalOnlyCount,
-            trace.SymmetricDifference,
             trace.HasLocalVelocityEstimate,
             trace.TrackedPlayerVelocityCount,
             trace.SmoothedLocalSpeed,
@@ -424,8 +419,6 @@ public sealed class Plugin : IDalamudPlugin
             ToMilliseconds(trace.SelectorTicks),
             ToMilliseconds(trace.TotalTicks),
             FormatRankHistogram(trace.CandidateRankHistogram),
-            FormatRankHistogram(trace.ProposalRankHistogram),
-            FormatRankHistogram(trace.LegacyRankHistogram),
             trace.FailureReason ?? "n/a",
             admission.AdmissionHideFailed,
             admission.AdmissionReasserted,
