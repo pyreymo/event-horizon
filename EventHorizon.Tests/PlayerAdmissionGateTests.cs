@@ -312,7 +312,7 @@ public sealed class PlayerAdmissionGateTests
         var targets = values
             .Select(value => new PlayerVisibilityTarget(
                 value.Identity,
-                (int)value.Identity.EntityId,
+                (int)value.Identity.EntityId * 2,
                 PlayerVisibilityClassification.Competitive,
                 value.DesiredVisible,
                 default,

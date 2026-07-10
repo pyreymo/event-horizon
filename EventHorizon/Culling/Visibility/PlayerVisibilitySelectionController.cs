@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Linq;
 using System.Numerics;
 using EventHorizon.Culling.Selection;
 
@@ -13,14 +14,19 @@ internal sealed class PlayerVisibilitySelectionController
     private readonly PlayerVisibilitySelectionParameters parameters;
     private readonly LocalSpeedSmoother localSpeedSmoother;
     private readonly PlayerVelocityTracker<PlayerObjectIdentity> playerVelocityTracker;
+    private readonly Action<Exception>? reportFailure;
     private HashSet<PlayerObjectIdentity> selectedHistory = [];
     private bool seeded;
 
-    public PlayerVisibilitySelectionController(PlayerVisibilitySelectionParameters? parameters = null)
+    public PlayerVisibilitySelectionController(
+        PlayerVisibilitySelectionParameters? parameters = null,
+        Action<Exception>? reportFailure = null
+    )
     {
         this.parameters = parameters ?? PlayerVisibilitySelectionParameters.Default;
         localSpeedSmoother = new LocalSpeedSmoother(this.parameters);
         playerVelocityTracker = new PlayerVelocityTracker<PlayerObjectIdentity>(this.parameters);
+        this.reportFailure = reportFailure;
     }
 
     internal bool IsSeeded => seeded;
@@ -45,7 +51,7 @@ internal sealed class PlayerVisibilitySelectionController
         {
             return new PlayerVisibilitySelectionEvaluation(
                 CreateUnavailableTrace(plan.Generation, totalStart, "Local player position is unavailable."),
-                Array.Empty<PlayerObjectIdentity>()
+                Array.Empty<PlayerVisibilitySelectionKey>()
             );
         }
 
@@ -55,6 +61,7 @@ internal sealed class PlayerVisibilitySelectionController
         }
         catch (Exception exception)
         {
+            reportFailure?.Invoke(exception);
             return CreateFailedEvaluation(plan.Generation, totalStart, exception);
         }
     }
@@ -64,7 +71,7 @@ internal sealed class PlayerVisibilitySelectionController
         ArgumentNullException.ThrowIfNull(exception);
         return new PlayerVisibilitySelectionEvaluation(
             CreateFailedTrace(generation, totalStart, $"{exception.GetType().Name}: {exception.Message}"),
-            Array.Empty<PlayerObjectIdentity>()
+            Array.Empty<PlayerVisibilitySelectionKey>()
         );
     }
 
@@ -167,12 +174,12 @@ internal sealed class PlayerVisibilitySelectionController
         var selectorTicks = Stopwatch.GetTimestamp() - selectorStart;
 
         var currentSelected = new HashSet<PlayerObjectIdentity>();
-        var selectedIdentities = new PlayerObjectIdentity[selection.SelectedSourceIndices.Count];
+        var selectedKeys = new PlayerVisibilitySelectionKey[selection.SelectedSourceIndices.Count];
         for (var selectedIndex = 0; selectedIndex < selection.SelectedSourceIndices.Count; selectedIndex++)
         {
             var sourceIndex = selection.SelectedSourceIndices[selectedIndex];
             var entry = plan.Entries[sourceIndex];
-            selectedIdentities[selectedIndex] = entry.Identity;
+            selectedKeys[selectedIndex] = new(sourceIndex, entry.Identity, entry.ObjectIndex);
             currentSelected.Add(entry.Identity);
         }
 
@@ -208,7 +215,7 @@ internal sealed class PlayerVisibilitySelectionController
             Stopwatch.GetTimestamp() - totalStart
         );
 
-        return new PlayerVisibilitySelectionEvaluation(trace, Array.AsReadOnly(selectedIdentities));
+        return new PlayerVisibilitySelectionEvaluation(trace, Array.AsReadOnly(selectedKeys));
     }
 
     private static HashSet<PlayerObjectIdentity> GetLegacySelectedIdentities(PlayerVisibilityTargetSet targetSet)
@@ -290,8 +297,13 @@ internal sealed class PlayerVisibilitySelectionController
 
 internal sealed record PlayerVisibilitySelectionEvaluation(
     PlayerVisibilitySelectionTrace Trace,
-    IReadOnlyList<PlayerObjectIdentity> SelectedIdentities
-);
+    IReadOnlyList<PlayerVisibilitySelectionKey> SelectedKeys
+)
+{
+    public IReadOnlyList<PlayerObjectIdentity> SelectedIdentities => SelectedKeys.Select(static key => key.Identity).ToArray();
+}
+
+internal readonly record struct PlayerVisibilitySelectionKey(int SourceIndex, PlayerObjectIdentity Identity, int ObjectIndex);
 
 internal readonly record struct PlayerVisibilitySelectionTrace(
     PlayerVisibilitySelectionStatus Status,

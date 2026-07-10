@@ -5,8 +5,19 @@ namespace EventHorizon.Culling.Visibility;
 
 internal sealed unsafe class HiddenObjectTracker
 {
+    internal unsafe delegate PlayerObjectIdentity IdentityReader(GameObject* gameObject);
+
     private readonly Dictionary<nint, HiddenObjectRecord> hiddenObjects = [];
     private readonly List<nint> staleAddresses = [];
+    private readonly IdentityReader readIdentity;
+
+    public HiddenObjectTracker()
+        : this(PlayerObjectIdentity.From) { }
+
+    internal HiddenObjectTracker(IdentityReader readIdentity)
+    {
+        this.readIdentity = readIdentity;
+    }
 
     public int HiddenPlayerCount
     {
@@ -38,9 +49,14 @@ internal sealed unsafe class HiddenObjectTracker
             return;
         }
 
-        if (!hiddenObjects.TryGetValue(address, out var record) || !record.IsSameObject(gameObject))
+        var identity = readIdentity(gameObject);
+        if (!hiddenObjects.TryGetValue(address, out var record) || !record.IsSameObject(identity))
         {
-            hiddenObjects[address] = HiddenObjectRecord.From(gameObject, targetFlags, objectIndex);
+            hiddenObjects[address] = HiddenObjectRecord.From(gameObject, identity, targetFlags, objectIndex);
+        }
+        else
+        {
+            hiddenObjects[address] = record with { ObjectIndex = objectIndex };
         }
 
         gameObject->RenderFlags |= targetFlags;
@@ -60,7 +76,7 @@ internal sealed unsafe class HiddenObjectTracker
         }
 
         hiddenObjects.Remove(address);
-        if (record.IsSameObject(gameObject))
+        if (record.IsSameObject(readIdentity(gameObject)))
         {
             gameObject->RenderFlags &= ~record.AddedFlags;
         }
@@ -99,12 +115,15 @@ internal sealed unsafe class HiddenObjectTracker
 
         foreach (var (address, record) in hiddenObjects)
         {
-            if (!record.IsLiveAtRecordedIndex(manager, address))
+            if (!record.IsLiveAtRecordedIndex(manager, address, readIdentity))
             {
-                var movedObject = FindLiveObjectByAddress(manager, address, record);
-                if (movedObject != null)
+                var movedIndex = FindLiveObjectIndexByAddress(manager, address, record, readIdentity);
+                if (movedIndex >= 0)
                 {
-                    movedObject->RenderFlags &= ~record.AddedFlags;
+                    var movedObject = manager->Objects.IndexSorted[movedIndex].Value;
+                    movedObject->RenderFlags |= record.AddedFlags;
+                    hiddenObjects[address] = record with { ObjectIndex = movedIndex };
+                    continue;
                 }
 
                 staleAddresses.Add(address);
@@ -126,7 +145,9 @@ internal sealed unsafe class HiddenObjectTracker
 
     public bool IsHidden(GameObject* gameObject)
     {
-        return gameObject != null && hiddenObjects.TryGetValue((nint)gameObject, out var record) && record.IsSameObject(gameObject);
+        return gameObject != null
+            && hiddenObjects.TryGetValue((nint)gameObject, out var record)
+            && record.IsSameObject(readIdentity(gameObject));
     }
 
     public bool IsHidden(PlayerObjectIdentity identity)
@@ -143,7 +164,7 @@ internal sealed unsafe class HiddenObjectTracker
 
         foreach (var (address, record) in hiddenObjects)
         {
-            if (record.ObjectKind != ObjectKind.Pc || !record.IsLiveAtRecordedIndex(manager, address))
+            if (record.ObjectKind != ObjectKind.Pc || !record.IsLiveAtRecordedIndex(manager, address, readIdentity))
             {
                 continue;
             }
@@ -160,26 +181,34 @@ internal sealed unsafe class HiddenObjectTracker
             return false;
         }
 
-        return hiddenObjects.TryGetValue((nint)gameObject, out record) && record.IsSameObject(gameObject);
+        return hiddenObjects.TryGetValue((nint)gameObject, out record) && record.IsSameObject(readIdentity(gameObject));
     }
 
-    private static GameObject* FindLiveObjectByAddress(GameObjectManager* manager, nint address, HiddenObjectRecord record)
+    internal int? GetRecordedObjectIndex(PlayerObjectIdentity identity) =>
+        hiddenObjects.TryGetValue(identity.Address, out var record) && record.IsSameObject(identity) ? record.ObjectIndex : null;
+
+    private static int FindLiveObjectIndexByAddress(
+        GameObjectManager* manager,
+        nint address,
+        HiddenObjectRecord record,
+        IdentityReader readIdentity
+    )
     {
         if (manager == null || address == nint.Zero)
         {
-            return null;
+            return -1;
         }
 
         for (var i = 0; i < manager->Objects.IndexSorted.Length; i++)
         {
             var gameObject = manager->Objects.IndexSorted[i].Value;
-            if ((nint)gameObject == address && record.IsSameObject(gameObject))
+            if ((nint)gameObject == address && gameObject != null && record.IsSameObject(readIdentity(gameObject)))
             {
-                return gameObject;
+                return i;
             }
         }
 
-        return null;
+        return -1;
     }
 
     private readonly record struct HiddenObjectRecord(
@@ -190,13 +219,18 @@ internal sealed unsafe class HiddenObjectTracker
         int ObjectIndex
     )
     {
-        public static HiddenObjectRecord From(GameObject* gameObject, VisibilityFlags targetFlags, int objectIndex)
+        public static HiddenObjectRecord From(
+            GameObject* gameObject,
+            PlayerObjectIdentity identity,
+            VisibilityFlags targetFlags,
+            int objectIndex
+        )
         {
             var addedFlags = targetFlags & ~gameObject->RenderFlags;
-            return new((ulong)gameObject->GetGameObjectId(), gameObject->EntityId, gameObject->ObjectKind, addedFlags, objectIndex);
+            return new(identity.GameObjectId, identity.EntityId, gameObject->ObjectKind, addedFlags, objectIndex);
         }
 
-        public bool IsLiveAtRecordedIndex(GameObjectManager* manager, nint address)
+        public bool IsLiveAtRecordedIndex(GameObjectManager* manager, nint address, IdentityReader readIdentity)
         {
             if (manager == null || ObjectIndex < 0 || ObjectIndex >= manager->Objects.IndexSorted.Length)
             {
@@ -204,11 +238,8 @@ internal sealed unsafe class HiddenObjectTracker
             }
 
             var gameObject = manager->Objects.IndexSorted[ObjectIndex].Value;
-            return (nint)gameObject == address && IsSameObject(gameObject);
+            return (nint)gameObject == address && gameObject != null && IsSameObject(readIdentity(gameObject));
         }
-
-        public bool IsSameObject(GameObject* gameObject) =>
-            gameObject != null && (ulong)gameObject->GetGameObjectId() == GameObjectId && gameObject->EntityId == EntityId;
 
         public bool IsSameObject(PlayerObjectIdentity identity) => identity.GameObjectId == GameObjectId && identity.EntityId == EntityId;
     }

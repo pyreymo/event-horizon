@@ -29,7 +29,8 @@ public sealed class PlayerVisibilityActiveTargetTests
             Entry(IdentityE, 4, PlayerVisibilityClassification.Unmanaged),
         };
 
-        var target = PlayerVisibilityStableTargetBuilder.Build(Plan(42, entries), new[] { IdentityB }, []);
+        var plan = Plan(42, entries);
+        var target = PlayerVisibilityStableTargetBuilder.Build(plan, Keys(plan, IdentityB), []);
 
         Assert.AreEqual(42, target.Generation);
         Assert.AreEqual(4, target.Targets.Count);
@@ -46,11 +47,15 @@ public sealed class PlayerVisibilityActiveTargetTests
         var entries = new[] { Entry(IdentityA, 0), Entry(IdentityB, 1, PlayerVisibilityClassification.ForceHidden) };
 
         var exception = Assert.Throws<ArgumentException>(() =>
-            PlayerVisibilityStableTargetBuilder.Build(Plan(1, entries), new[] { IdentityB }, [])
+            PlayerVisibilityStableTargetBuilder.Build(
+                Plan(1, entries),
+                new[] { new PlayerVisibilitySelectionKey(1, IdentityB, entries[1].ObjectIndex) },
+                []
+            )
         );
 
-        Assert.AreEqual("selectedCompetitiveIdentities", exception.ParamName);
-        StringAssert.Contains(exception.Message, "does not map to a Competitive entry");
+        Assert.AreEqual("selectedCompetitiveKeys", exception.ParamName);
+        StringAssert.Contains(exception.Message, "does not map to the same Competitive entry");
     }
 
     [TestMethod]
@@ -58,7 +63,7 @@ public sealed class PlayerVisibilityActiveTargetTests
     {
         var entries = new[] { Entry(IdentityA, 0), Entry(IdentityB, 1) };
         var plan = Plan(7, entries);
-        var selected = new List<PlayerObjectIdentity> { IdentityA };
+        var selected = Keys(plan, IdentityA);
         var buffer = new List<PlayerVisibilityTarget>();
         var originalEntries = plan.Entries.ToArray();
         var originalSelected = selected.ToArray();
@@ -104,7 +109,7 @@ public sealed class PlayerVisibilityActiveTargetTests
         var entries = new[] { Entry(IdentityA, 0) };
         var plan = Plan(1, entries);
         var legacy = Legacy(plan, IdentityA);
-        var evaluation = Evaluation(PlayerVisibilitySelectionStatus.Ready, IdentityB);
+        var evaluation = Evaluation(plan, PlayerVisibilitySelectionStatus.Ready, IdentityB);
 
         var resolution = PlayerVisibilityActiveTargetResolver.Resolve(plan, legacy, evaluation, []);
 
@@ -124,7 +129,7 @@ public sealed class PlayerVisibilityActiveTargetTests
         var resolution = PlayerVisibilityActiveTargetResolver.Resolve(
             plan,
             legacy,
-            Evaluation(PlayerVisibilitySelectionStatus.Ready, IdentityB),
+            Evaluation(plan, PlayerVisibilitySelectionStatus.Ready, IdentityB),
             []
         );
 
@@ -199,7 +204,7 @@ public sealed class PlayerVisibilityActiveTargetTests
     {
         var controller = new PlayerVisibilitySelectionController();
         var plan = Plan(1, new[] { Entry(IdentityA, 0), Entry(IdentityB, 1) });
-        var stable = PlayerVisibilityStableTargetBuilder.Build(plan, new[] { IdentityB }, []);
+        var stable = PlayerVisibilityStableTargetBuilder.Build(plan, Keys(plan, IdentityB), []);
 
         controller.CommitAppliedTarget(stable);
 
@@ -211,7 +216,8 @@ public sealed class PlayerVisibilityActiveTargetTests
     public void ActiveBudgetStats_AreCalculatedFromActiveTarget()
     {
         var entries = new[] { Entry(IdentityA, 0, PlayerVisibilityClassification.BypassVisible), Entry(IdentityB, 1), Entry(IdentityC, 2) };
-        var active = PlayerVisibilityStableTargetBuilder.Build(Plan(1, entries), new[] { IdentityC }, []);
+        var plan = Plan(1, entries);
+        var active = PlayerVisibilityStableTargetBuilder.Build(plan, Keys(plan, IdentityC), []);
 
         var stats = PlayerVisibilityActiveBudgetStats.Calculate(active, 200);
 
@@ -237,12 +243,12 @@ public sealed class PlayerVisibilityActiveTargetTests
         var resolution = PlayerVisibilityActiveTargetResolver.Resolve(
             plan,
             legacy,
-            new PlayerVisibilitySelectionEvaluation(trace, new[] { IdentityB }),
+            new PlayerVisibilitySelectionEvaluation(trace, Keys(plan, IdentityB)),
             []
         );
 
         Assert.AreEqual(1, resolution.Evaluation.Trace.ProposalSelectedCount);
-        Assert.AreEqual(1, resolution.Evaluation.Trace.AppliedSelectedCount);
+        Assert.AreEqual(0, resolution.Evaluation.Trace.AppliedSelectedCount);
         Assert.AreEqual(1, resolution.Evaluation.Trace.EnteredCount);
         Assert.AreEqual(1, resolution.Evaluation.Trace.LeftCount);
         Assert.AreEqual(PlayerVisibilityAppliedSource.LegacyFallback, resolution.Evaluation.Trace.AppliedSource);
@@ -265,9 +271,20 @@ public sealed class PlayerVisibilityActiveTargetTests
     }
 
     private static PlayerVisibilitySelectionEvaluation Evaluation(
+        PlayerVisibilityPlan plan,
         PlayerVisibilitySelectionStatus status,
         params PlayerObjectIdentity[] selected
-    ) => new(new PlayerVisibilitySelectionTrace(status, 1), selected);
+    ) => new(new PlayerVisibilitySelectionTrace(status, 1), Keys(plan, selected));
+
+    private static PlayerVisibilitySelectionKey[] Keys(PlayerVisibilityPlan plan, params PlayerObjectIdentity[] selected) =>
+        selected
+            .Select(identity =>
+            {
+                var sourceIndex = plan.Entries.ToList().FindIndex(entry => entry.Identity == identity);
+                var entry = sourceIndex >= 0 ? plan.Entries[sourceIndex] : default;
+                return new PlayerVisibilitySelectionKey(sourceIndex, identity, entry.ObjectIndex);
+            })
+            .ToArray();
 
     private static PlayerVisibilityPlan Plan(int generation, IReadOnlyList<PlayerVisibilityPlanEntry> entries, long milliseconds = 100) =>
         new(generation, milliseconds, entries, default);

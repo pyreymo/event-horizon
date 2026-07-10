@@ -14,7 +14,10 @@ internal sealed class PlayerAdmissionGate
     private readonly List<PlayerAdmissionChange> changes = [];
     private readonly HashSet<PlayerObjectIdentity> admissionHolds = [];
     private readonly HashSet<PlayerObjectIdentity> newHolds = [];
-    private readonly Dictionary<PlayerObjectIdentity, int> currentSlotsByIdentity = [];
+    private readonly Dictionary<PlayerObjectIdentity, List<int>> currentSlotsByIdentity = [];
+    private int requestedResetGeneration;
+    private int consumedResetGeneration;
+    private int holdCount;
     private long admissionHideFailed;
     private long admissionReasserted;
 
@@ -27,6 +30,7 @@ internal sealed class PlayerAdmissionGate
         ArgumentNullException.ThrowIfNull(currentSlots);
         ArgumentNullException.ThrowIfNull(appliedState);
         ArgumentNullException.ThrowIfNull(hardHide);
+        ConsumeRequestedReset();
         var changeCounts = slotTracker.Evaluate(currentSlots, changes);
         var approvedCount = 0;
         var hiddenCount = 0;
@@ -51,7 +55,7 @@ internal sealed class PlayerAdmissionGate
             }
 
             var currentIdentity = change.CurrentIdentity!.Value;
-            if (appliedState.IsExplicitlyVisible(currentIdentity))
+            if (appliedState.IsExplicitlyVisible(currentIdentity, change.Slot))
             {
                 admissionHolds.Remove(currentIdentity);
                 approvedCount++;
@@ -68,7 +72,7 @@ internal sealed class PlayerAdmissionGate
         {
             foreach (var identity in currentSlotsByIdentity.Keys)
             {
-                if (!appliedState.IsExplicitlyVisible(identity) && admissionHolds.Add(identity))
+                if (!IsVisibleAtEveryCurrentSlot(appliedState, identity) && admissionHolds.Add(identity))
                 {
                     newHolds.Add(identity);
                 }
@@ -78,7 +82,7 @@ internal sealed class PlayerAdmissionGate
         admissionHolds.RemoveWhere(identity => !currentSlotsByIdentity.ContainsKey(identity));
         foreach (var identity in currentSlotsByIdentity.Keys)
         {
-            if (appliedState.IsExplicitlyVisible(identity))
+            if (IsVisibleAtEveryCurrentSlot(appliedState, identity))
             {
                 admissionHolds.Remove(identity);
             }
@@ -86,31 +90,36 @@ internal sealed class PlayerAdmissionGate
 
         foreach (var identity in admissionHolds)
         {
-            var change = new PlayerAdmissionChange(
-                currentSlotsByIdentity[identity],
-                newHolds.Contains(identity) ? PlayerAdmissionChangeKind.Appeared : PlayerAdmissionChangeKind.Unchanged,
-                identity,
-                identity
-            );
-            try
+            foreach (var slot in currentSlotsByIdentity[identity])
             {
-                hardHide(change);
-                if (newHolds.Contains(identity))
+                var change = new PlayerAdmissionChange(
+                    slot,
+                    newHolds.Contains(identity) ? PlayerAdmissionChangeKind.Appeared : PlayerAdmissionChangeKind.Unchanged,
+                    identity,
+                    identity
+                );
+                try
                 {
-                    hiddenCount++;
+                    hardHide(change);
+                    if (newHolds.Contains(identity))
+                    {
+                        hiddenCount++;
+                    }
+                    else
+                    {
+                        reassertedCount++;
+                        Interlocked.Increment(ref admissionReasserted);
+                    }
                 }
-                else
+                catch
                 {
-                    reassertedCount++;
-                    admissionReasserted++;
+                    failedCount++;
+                    Interlocked.Increment(ref admissionHideFailed);
                 }
-            }
-            catch
-            {
-                failedCount++;
-                admissionHideFailed++;
             }
         }
+
+        Volatile.Write(ref holdCount, admissionHolds.Count);
 
         return new PlayerAdmissionUpdateResult(
             changeCounts.BaselineEstablished,
@@ -125,7 +134,14 @@ internal sealed class PlayerAdmissionGate
         );
     }
 
-    public PlayerAdmissionDiagnostics GetDiagnostics() => new(admissionHideFailed, admissionReasserted, admissionHolds.Count);
+    public PlayerAdmissionDiagnostics GetDiagnostics() =>
+        new(Interlocked.Read(ref admissionHideFailed), Interlocked.Read(ref admissionReasserted), Volatile.Read(ref holdCount));
+
+    public void RequestReset()
+    {
+        Interlocked.Increment(ref requestedResetGeneration);
+        Volatile.Write(ref holdCount, 0);
+    }
 
     public void ResetTracking()
     {
@@ -133,6 +149,7 @@ internal sealed class PlayerAdmissionGate
         admissionHolds.Clear();
         newHolds.Clear();
         currentSlotsByIdentity.Clear();
+        Volatile.Write(ref holdCount, 0);
     }
 
     private void BuildCurrentSlotMap(IReadOnlyList<PlayerObjectIdentity?> currentSlots)
@@ -142,9 +159,41 @@ internal sealed class PlayerAdmissionGate
         {
             if (currentSlots[slot].HasValue)
             {
-                currentSlotsByIdentity[currentSlots[slot]!.Value] = slot;
+                var identity = currentSlots[slot]!.Value;
+                if (!currentSlotsByIdentity.TryGetValue(identity, out var slots))
+                {
+                    slots = [];
+                    currentSlotsByIdentity.Add(identity, slots);
+                }
+
+                slots.Add(slot);
             }
         }
+    }
+
+    private void ConsumeRequestedReset()
+    {
+        var requested = Volatile.Read(ref requestedResetGeneration);
+        if (requested == consumedResetGeneration)
+        {
+            return;
+        }
+
+        ResetTracking();
+        consumedResetGeneration = requested;
+    }
+
+    private bool IsVisibleAtEveryCurrentSlot(PlayerVisibilityAppliedState appliedState, PlayerObjectIdentity identity)
+    {
+        foreach (var slot in currentSlotsByIdentity[identity])
+        {
+            if (!appliedState.IsExplicitlyVisible(identity, slot))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
 

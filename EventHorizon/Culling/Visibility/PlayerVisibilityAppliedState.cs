@@ -1,34 +1,39 @@
 using System;
+using System.Linq;
+using System.Threading;
 
 namespace EventHorizon.Culling.Visibility;
 
 internal sealed class PlayerVisibilityAppliedState
 {
-    public PlayerVisibilityTargetSet? ActiveTarget { get; private set; }
+    private PlayerVisibilityFrameState? activeFrame;
+
+    public PlayerVisibilityFrameState? ActiveFrame => Volatile.Read(ref activeFrame);
+    public PlayerVisibilityTargetSet? ActiveTarget => ActiveFrame?.ActiveTarget;
 
     public void SetActiveTarget(PlayerVisibilityTargetSet activeTarget)
     {
         ArgumentNullException.ThrowIfNull(activeTarget);
-        ActiveTarget = activeTarget;
+        Publish(
+            new PlayerVisibilityFrameState(
+                activeTarget,
+                new PlayerVisibilityReconciliation(activeTarget.Generation, activeTarget.CreatedAtTickCount64, [], 0, 0, 0, 0),
+                default,
+                default
+            )
+        );
     }
 
-    public bool IsExplicitlyVisible(PlayerObjectIdentity identity)
+    public void Publish(PlayerVisibilityFrameState frame) => Volatile.Write(ref activeFrame, frame);
+
+    public bool IsExplicitlyVisible(PlayerObjectIdentity identity, int objectIndex)
     {
-        if (ActiveTarget == null)
-        {
-            return false;
-        }
-
-        foreach (var target in ActiveTarget.Targets)
-        {
-            if (target.Identity == identity && target.DesiredVisible)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        var snapshot = ActiveFrame;
+        return snapshot != null && snapshot.VisibleSlots.Contains((identity, objectIndex));
     }
 
-    public void Clear() => ActiveTarget = null;
+    public bool IsExplicitlyVisible(PlayerObjectIdentity identity) =>
+        ActiveFrame?.VisibleSlots.Any(key => key.Identity == identity) == true;
+
+    public void Clear() => Volatile.Write(ref activeFrame, null);
 }

@@ -321,7 +321,7 @@ public sealed class PlayerVisibilitySelectionControllerTests
         var evaluation = controller.Evaluate(plan, legacy, true, budget, localPosition);
         if (evaluation.Trace.Status is PlayerVisibilitySelectionStatus.Ready or PlayerVisibilitySelectionStatus.Warmup)
         {
-            var appliedTarget = PlayerVisibilityStableTargetBuilder.Build(plan, evaluation.SelectedIdentities, []);
+            var appliedTarget = PlayerVisibilityStableTargetBuilder.Build(plan, evaluation.SelectedKeys, []);
             controller.CommitAppliedTarget(appliedTarget);
         }
 

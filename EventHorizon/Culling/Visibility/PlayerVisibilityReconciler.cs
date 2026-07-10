@@ -57,7 +57,7 @@ internal sealed class PlayerVisibilityReconciler
         return new PlayerVisibilityReconciliation(
             targetSet.Generation,
             targetSet.CreatedAtTickCount64,
-            actions,
+            actions.ToArray(),
             desiredVisibleCount,
             appliedVisibleCount,
             toShow.Count,

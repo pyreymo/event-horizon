@@ -36,12 +36,9 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly List<PlayerKeepCandidate> playerKeepCandidates = [];
     private readonly HiddenObjectTracker hiddenObjectTracker;
     private readonly ObjectFadeController fadeController;
-    private readonly PlayerVisibilityReconciler playerVisibilityReconciler = new();
+    private readonly PlayerVisibilityPipeline playerVisibilityPipeline;
+    private readonly PlayerVisibilityExecutor playerVisibilityExecutor = new();
     private readonly ShowTransitionBudget showTransitionBudget = new();
-    private readonly List<PlayerVisibilityPlanEntry> playerVisibilityPlanEntries = [];
-    private readonly List<PlayerVisibilityTarget> playerVisibilityTargets = [];
-    private readonly List<PlayerVisibilityTarget> stablePlayerVisibilityTargets = [];
-    private readonly PlayerVisibilitySelectionController playerVisibilitySelectionController = new();
     private readonly PlayerAdmissionGate playerAdmissionGate = new();
     private readonly PlayerTopologyDirtySignal playerTopologyDirtySignal = new();
     private readonly PlayerVisibilityAppliedState appliedVisibilityState = new();
@@ -61,6 +58,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private int nextPlayerVisibilityGeneration;
     private int nextMaintainedVisibilityActionIndex;
     private PlayerVisibilityReconciliation? latestPlayerVisibilityReconciliation;
+    private readonly CullingRuntimeModeTransition runtimeModeTransition = new();
 
     public CullingPerformanceTrace LastUpdateTrace { get; private set; }
     public CullingPerformanceTrace LastTickTrace { get; private set; }
@@ -72,7 +70,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
         IObjectTable objectTable,
         ITargetManager targetManager,
         IGameGui gameGui,
-        StaticVfxController staticVfxController
+        StaticVfxController staticVfxController,
+        IPluginLog log
     )
     {
         this.configuration = configuration;
@@ -81,12 +80,34 @@ internal sealed unsafe class ObjectCuller : IDisposable
         this.objectTable = objectTable;
         this.gameGui = gameGui;
         this.staticVfxController = staticVfxController;
+        playerVisibilityPipeline = new(exception => log.Error(exception, "Player visibility selection failed; using legacy fallback."));
         playerKeepRules = new(configuration, objectTable, targetManager);
         hiddenObjectTracker = new();
         fadeController = new(hiddenObjectTracker, InvisibleFlag);
     }
 
     #region Lifecycle
+
+    public CullingRuntimeSynchronization SynchronizeRuntimeMode(GameObjectManager* manager)
+    {
+        var nextMode = DetermineRuntimeMode(manager);
+        var transition = runtimeModeTransition.Synchronize(nextMode);
+        if (!transition.Changed)
+        {
+            return new(nextMode, RequiresRefresh: false);
+        }
+
+        if (transition.EnterInactive)
+        {
+            EnterInactiveMode(manager, transition.ClearLongTermRules);
+        }
+        else if (transition.RebuildActive)
+        {
+            ClearPublishedPlayerVisibilityState();
+        }
+
+        return new(nextMode, RequiresRefresh: transition.RebuildActive);
+    }
 
     public void Update(GameObjectManager* manager, bool refreshPlayerPreview)
     {
@@ -129,7 +150,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
         if (ShouldSuspendCullingInDuty())
         {
-            playerVisibilitySelectionController.Reset();
+            playerVisibilityPipeline.Reset();
             RestoreHiddenObjects(manager);
             ResetFades(manager);
             LastUpdateTrace = CreateTrace(
@@ -148,7 +169,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
         if (ShouldSuspendCulling(manager))
         {
-            playerVisibilitySelectionController.Reset();
+            playerVisibilityPipeline.Reset();
             RestoreHiddenObjects(manager);
             ResetFades(manager);
             LastUpdateTrace = CreateTrace(
@@ -168,7 +189,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         playerKeepRules.BeforeUpdate();
         if (!playerState.IsLoaded)
         {
-            playerVisibilitySelectionController.Reset();
+            playerVisibilityPipeline.Reset();
             RestoreHiddenObjects(manager);
             ResetFades(manager);
             LastUpdateTrace = CreateTrace(
@@ -195,60 +216,32 @@ internal sealed unsafe class ObjectCuller : IDisposable
         playerKeepPlan.Update(configuration, GetPlayerKeepCandidates(manager));
         var keepPlanTicks = Stopwatch.GetTimestamp() - phaseStart;
         phaseStart = Stopwatch.GetTimestamp();
-        var playerVisibilityPlan = PlayerVisibilityPlan.Build(
+        var playerVisibilityPlan = playerVisibilityPipeline.BuildPlan(
             ++nextPlayerVisibilityGeneration,
             manager,
             playerKeepPlan,
-            GetActivePreviewSelectedPlayerEntityId(),
-            playerVisibilityPlanEntries
+            GetActivePreviewSelectedPlayerEntityId()
         );
-        var legacyTargetSet = PlayerVisibilityLegacyTargetBuilder.Build(playerVisibilityPlan, playerVisibilityTargets);
+        var legacyTargetSet = playerVisibilityPipeline.BuildLegacyTarget(playerVisibilityPlan);
         var visibilityPlanTicks = Stopwatch.GetTimestamp() - phaseStart;
 
-        var selectionStart = Stopwatch.GetTimestamp();
-        PlayerVisibilitySelectionEvaluation selectionEvaluation;
-        try
-        {
-            var localPlayer = objectTable.LocalPlayer;
-            selectionEvaluation = playerVisibilitySelectionController.Evaluate(
-                playerVisibilityPlan,
-                legacyTargetSet,
-                configuration.LimitVisiblePlayerCount,
-                configuration.VisiblePlayerCountLimit,
-                localPlayer?.Position
-            );
-        }
-        catch (Exception exception)
-        {
-            selectionEvaluation = playerVisibilitySelectionController.CreateFailedEvaluation(
-                playerVisibilityPlan.Generation,
-                selectionStart,
-                exception
-            );
-        }
-
-        var activeResolution = PlayerVisibilityActiveTargetResolver.Resolve(
+        phaseStart = Stopwatch.GetTimestamp();
+        var frameState = playerVisibilityPipeline.BuildFrame(
             playerVisibilityPlan,
             legacyTargetSet,
-            selectionEvaluation,
-            stablePlayerVisibilityTargets
+            configuration.LimitVisiblePlayerCount,
+            configuration.VisiblePlayerCountLimit,
+            objectTable.LocalPlayer?.Position,
+            hiddenObjectTracker
         );
-        var activeTargetSet = activeResolution.ActiveTarget;
-        selectionEvaluation = activeResolution.Evaluation;
-
-        keepBudgetStats = PlayerVisibilityActiveBudgetStats.Calculate(activeTargetSet, configuration.VisiblePlayerCountLimit);
-        selectionEvaluation = selectionEvaluation with
-        {
-            Trace = selectionEvaluation.Trace with { AppliedSelectedCount = keepBudgetStats.VisibleBudgetedPlayerCount },
-        };
-        appliedVisibilityState.SetActiveTarget(activeTargetSet);
-        var appliedTarget = appliedVisibilityState.ActiveTarget!;
-        playerVisibilitySelectionController.CommitAppliedTarget(appliedTarget);
-
-        phaseStart = Stopwatch.GetTimestamp();
-        var playerVisibilityReconciliation = playerVisibilityReconciler.Reconcile(appliedTarget, hiddenObjectTracker);
-        latestPlayerVisibilityReconciliation = playerVisibilityReconciliation;
         var reconcileTicks = Stopwatch.GetTimestamp() - phaseStart;
+        keepBudgetStats = frameState.BudgetStats;
+        appliedVisibilityState.Publish(frameState);
+        latestPlayerVisibilityReconciliation = frameState.Reconciliation;
+        playerVisibilityPipeline.Commit(frameState);
+        var appliedTarget = frameState.ActiveTarget;
+        var activeTargetSet = frameState.ActiveTarget;
+        var playerVisibilityReconciliation = frameState.Reconciliation;
 
         long previewBeginTicks = 0;
         long previewAddTicks = 0;
@@ -269,8 +262,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         }
         var previewTicks = previewBeginTicks + previewAddTicks;
 
-        TickVisibility(manager);
-        var tickTrace = LastTickTrace.Tick;
+        var tickTrace = default(CullingTickPerformanceTrace);
         if (previewBuilder != null)
         {
             phaseStart = Stopwatch.GetTimestamp();
@@ -294,7 +286,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
             Tick: tickTrace,
             Preview: new CullingPreviewPerformanceTrace(previewBuilder?.Count ?? 0, previewBeginTicks, previewAddTicks, previewBuildTicks),
             PlayerVisibilityClasses: activeTargetSet.ClassificationCounts,
-            Selection: selectionEvaluation.Trace
+            Selection: frameState.SelectionTrace
         );
     }
 
@@ -320,7 +312,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
             return;
         }
 
-        if (!CanTickVisibility())
+        if (runtimeModeTransition.Current != CullingRuntimeMode.Active)
         {
             Reset(manager);
             LastTickTrace = CreateTrace(
@@ -443,7 +435,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
     public void ClearRuleState()
     {
         playerKeepRules.Clear();
-        playerVisibilitySelectionController.Reset();
+        playerVisibilityPipeline.Reset();
     }
 
     public void RecordChatMessage(IChatMessage message)
@@ -501,15 +493,11 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
     private void ApplyPlayerVisibilityReconciliation(GameObjectManager* manager, PlayerVisibilityReconciliation reconciliation)
     {
-        foreach (var action in reconciliation.Actions)
-        {
-            if (action.Reason != PlayerVisibilityActionReason.Maintain)
-            {
-                ApplyPlayerVisibilityAction(manager, action);
-            }
-        }
-
-        ApplyMaintainedPlayerVisibilityActions(manager, reconciliation.Actions);
+        playerVisibilityExecutor.Execute(
+            reconciliation,
+            action => ApplyPlayerVisibilityAction(manager, action),
+            actions => ApplyMaintainedPlayerVisibilityActions(manager, actions)
+        );
     }
 
     private void ApplyMaintainedPlayerVisibilityActions(GameObjectManager* manager, IReadOnlyList<PlayerVisibilityAction> actions)
@@ -906,10 +894,10 @@ internal sealed unsafe class ObjectCuller : IDisposable
         previewSelectedPlayerEntityId = null;
         previewSelectionExpiresAt = 0;
         nextMaintainedVisibilityActionIndex = 0;
-        playerAdmissionGate.ResetTracking();
+        playerAdmissionGate.RequestReset();
         playerTopologyDirtySignal.Clear();
         appliedVisibilityState.Clear();
-        playerVisibilitySelectionController.Reset();
+        playerVisibilityPipeline.Reset();
         latestPlayerVisibilityReconciliation = null;
     }
 
@@ -1261,14 +1249,58 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
     public PlayerAdmissionDiagnostics GetPlayerAdmissionDiagnostics() => playerAdmissionGate.GetDiagnostics();
 
-    public bool NeedsDynamicRefresh()
+    private CullingRuntimeMode DetermineRuntimeMode(GameObjectManager* manager)
     {
-        return IsCullingEnabled() && !ShouldSuspendCullingInDuty() && playerState.IsLoaded;
+        if (!IsCullingEnabled())
+        {
+            return CullingRuntimeMode.Disabled;
+        }
+
+        if (!playerState.IsLoaded || manager == null)
+        {
+            return CullingRuntimeMode.PlayerUnavailable;
+        }
+
+        if (ShouldSuspendCullingInDuty())
+        {
+            return CullingRuntimeMode.SuspendedDuty;
+        }
+
+        return ShouldSuspendCulling(manager) ? CullingRuntimeMode.SuspendedLowPlayerCount : CullingRuntimeMode.Active;
     }
 
-    private bool CanTickVisibility()
+    private void EnterInactiveMode(GameObjectManager* manager, bool clearLongTermRuleState)
     {
-        return IsCullingEnabled() && !ShouldSuspendCullingInDuty() && playerState.IsLoaded;
+        if (manager != null)
+        {
+            RestoreHiddenObjects(manager);
+            ResetFades(manager);
+        }
+        else
+        {
+            hiddenObjectTracker.Clear();
+            fadeController.Clear();
+        }
+
+        ClearPublishedPlayerVisibilityState();
+        if (clearLongTermRuleState)
+        {
+            playerKeepRules.Clear();
+        }
+    }
+
+    private void ClearPublishedPlayerVisibilityState()
+    {
+        latestPlayerVisibilityReconciliation = null;
+        appliedVisibilityState.Clear();
+        playerAdmissionGate.RequestReset();
+        playerTopologyDirtySignal.Clear();
+        playerVisibilityPipeline.Reset();
+        showTransitionBudget.Reset();
+        keepBudgetStats = default;
+        playerPreviewSnapshot = PlayerPreviewSnapshot.Empty;
+        nextMaintainedVisibilityActionIndex = 0;
+        ClearHiddenPlayerVfx();
     }
 
     public bool HasActiveFades => fadeController.HasActiveFades;

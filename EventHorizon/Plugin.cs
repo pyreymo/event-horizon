@@ -147,7 +147,8 @@ public sealed class Plugin : IDalamudPlugin
             ObjectTable,
             TargetManager,
             GameGui,
-            StaticVfxController
+            StaticVfxController,
+            Log
         );
         CharacterAlphaController = new CharacterAlphaController(ObjectTable);
         DtrBarIntegration = new DtrBarIntegration(DtrBar, Configuration, GetDtrBarState, SetPlayerHidingEnabled, ToggleConfigUi);
@@ -307,52 +308,45 @@ public sealed class Plugin : IDalamudPlugin
         var highlightTicks = Stopwatch.GetTimestamp() - phaseStart;
         LogStableTopBIfNeeded();
 
-        phaseStart = Stopwatch.GetTimestamp();
-        if (!NeedsDynamicCullingRefresh())
+        UpdateObjectArraysHook.BeginFrameworkFrame();
+        CullingFrameSchedule schedule;
+        long dynamicCheckTicks;
+        long refreshTicks = 0;
+        long tickTicks = 0;
+        CullingPerformanceTrace tickTrace;
+        try
         {
-            var needsDynamicTicks = Stopwatch.GetTimestamp() - phaseStart;
-            LogSlowFrameworkUpdate(
-                start,
-                dtrTicks,
-                layoutGraphicsTicks,
-                highlightTicks,
-                needsDynamicTicks,
-                0,
-                0,
-                didRefresh: false,
-                tickTrace: default
+            phaseStart = Stopwatch.GetTimestamp();
+            var runtime = UpdateObjectArraysHook.SynchronizeRuntimeMode();
+            var now = Environment.TickCount64;
+            var playerTopologyDirty = UpdateObjectArraysHook.ConsumePlayerTopologyDirty();
+            schedule = CullingFrameSchedule.Decide(
+                runtime.Mode,
+                runtime.RequiresRefresh || now >= nextDynamicCullingRefresh,
+                playerTopologyDirty
             );
-            return;
+            dynamicCheckTicks = Stopwatch.GetTimestamp() - phaseStart;
+
+            if (schedule.Refresh)
+            {
+                phaseStart = Stopwatch.GetTimestamp();
+                RefreshObjectCulling();
+                refreshTicks = Stopwatch.GetTimestamp() - phaseStart;
+                nextDynamicCullingRefresh = Environment.TickCount64 + DynamicCullingRefreshIntervalMs;
+            }
+
+            if (schedule.Tick)
+            {
+                phaseStart = Stopwatch.GetTimestamp();
+                UpdateObjectArraysHook.FrameworkTick();
+                tickTicks = Stopwatch.GetTimestamp() - phaseStart;
+            }
+            tickTrace = schedule.Tick ? UpdateObjectArraysHook.LastTickTrace : default;
         }
-        var dynamicCheckTicks = Stopwatch.GetTimestamp() - phaseStart;
-
-        phaseStart = Stopwatch.GetTimestamp();
-        UpdateObjectArraysHook.FrameworkTick();
-        var tickTicks = Stopwatch.GetTimestamp() - phaseStart;
-        var tickTrace = UpdateObjectArraysHook.LastTickTrace;
-
-        var now = Environment.TickCount64;
-        var playerTopologyDirty = UpdateObjectArraysHook.ConsumePlayerTopologyDirty();
-        if (now < nextDynamicCullingRefresh && !playerTopologyDirty)
+        finally
         {
-            LogSlowFrameworkUpdate(
-                start,
-                dtrTicks,
-                layoutGraphicsTicks,
-                highlightTicks,
-                dynamicCheckTicks,
-                tickTicks,
-                0,
-                didRefresh: false,
-                tickTrace
-            );
-            return;
+            UpdateObjectArraysHook.EndFrameworkFrame();
         }
-
-        phaseStart = Stopwatch.GetTimestamp();
-        RefreshObjectCulling();
-        var refreshTicks = Stopwatch.GetTimestamp() - phaseStart;
-        nextDynamicCullingRefresh = Environment.TickCount64 + DynamicCullingRefreshIntervalMs;
         LogSlowFrameworkUpdate(
             start,
             dtrTicks,
@@ -361,7 +355,7 @@ public sealed class Plugin : IDalamudPlugin
             dynamicCheckTicks,
             tickTicks,
             refreshTicks,
-            didRefresh: true,
+            didRefresh: schedule.Refresh,
             tickTrace
         );
     }
@@ -433,11 +427,6 @@ public sealed class Plugin : IDalamudPlugin
         {
             Log.Information(message);
         }
-    }
-
-    private bool NeedsDynamicCullingRefresh()
-    {
-        return UpdateObjectArraysHook.NeedsDynamicRefresh;
     }
 
     private void LogSlowFrameworkUpdate(

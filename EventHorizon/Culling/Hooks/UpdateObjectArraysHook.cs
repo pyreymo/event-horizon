@@ -20,10 +20,11 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
 
     private readonly ObjectCuller objectCuller;
     private readonly Hook<UpdateObjectArraysDelegate> hook;
+    private readonly CullingThreadModelProbe threadModelProbe;
+    private bool disposed;
 
     private delegate void* UpdateObjectArraysDelegate(GameObjectManager* objectManager);
 
-    public bool NeedsDynamicRefresh => objectCuller.NeedsDynamicRefresh();
     public int HiddenPlayerCount => objectCuller.GetHiddenPlayerCount();
     public PlayerKeepBudgetStats KeepBudgetStats => objectCuller.GetKeepBudgetStats();
     public PlayerPreviewSnapshot PlayerPreviewSnapshot => objectCuller.GetPlayerPreviewSnapshot();
@@ -39,11 +40,22 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         IObjectTable objectTable,
         ITargetManager targetManager,
         IGameGui gameGui,
-        StaticVfxController staticVfxController
+        StaticVfxController staticVfxController,
+        IPluginLog log
     )
     {
-        objectCuller = new ObjectCuller(configuration, playerState, condition, objectTable, targetManager, gameGui, staticVfxController);
+        objectCuller = new ObjectCuller(
+            configuration,
+            playerState,
+            condition,
+            objectTable,
+            targetManager,
+            gameGui,
+            staticVfxController,
+            log
+        );
         hook = gameInteropProvider.HookFromSignature<UpdateObjectArraysDelegate>(Signature, Detour);
+        threadModelProbe = new(log);
     }
 
     public void Enable()
@@ -58,13 +70,24 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
             objectCuller.ClearRuleState();
         }
 
-        OnObjectArraysUpdated(GameObjectManager.Instance(), refreshPlayerPreview);
+        var manager = GameObjectManager.Instance();
+        var runtime = objectCuller.SynchronizeRuntimeMode(manager);
+        if (runtime.Mode == CullingRuntimeMode.Active)
+        {
+            OnObjectArraysUpdated(manager, refreshPlayerPreview);
+        }
     }
 
     public void FrameworkTick()
     {
         objectCuller.Tick(GameObjectManager.Instance());
     }
+
+    public void BeginFrameworkFrame() => threadModelProbe.EnterFramework();
+
+    public void EndFrameworkFrame() => threadModelProbe.ExitFramework();
+
+    public CullingRuntimeSynchronization SynchronizeRuntimeMode() => objectCuller.SynchronizeRuntimeMode(GameObjectManager.Instance());
 
     public bool ConsumePlayerTopologyDirty() => objectCuller.ConsumePlayerTopologyDirty();
 
@@ -85,16 +108,34 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
 
     public void Dispose()
     {
-        objectCuller.Dispose();
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        if (hook.IsEnabled)
+        {
+            hook.Disable();
+        }
+
         hook.Dispose();
+        objectCuller.Dispose();
     }
 
     private void* Detour(GameObjectManager* objectManager)
     {
-        var result = hook.Original(objectManager);
-        objectCuller.ApplyPlayerAdmissionGate(objectManager);
-
-        return result;
+        threadModelProbe.EnterDetour();
+        try
+        {
+            var result = hook.Original(objectManager);
+            objectCuller.ApplyPlayerAdmissionGate(objectManager);
+            return result;
+        }
+        finally
+        {
+            threadModelProbe.ExitDetour();
+        }
     }
 
     private void OnObjectArraysUpdated(GameObjectManager* objectManager, bool refreshPlayerPreview)

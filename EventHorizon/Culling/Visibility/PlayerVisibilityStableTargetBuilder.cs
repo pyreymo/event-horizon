@@ -8,38 +8,45 @@ internal static class PlayerVisibilityStableTargetBuilder
 {
     public static PlayerVisibilityTargetSet Build(
         PlayerVisibilityPlan plan,
-        IReadOnlyCollection<PlayerObjectIdentity> selectedCompetitiveIdentities,
+        IReadOnlyCollection<PlayerVisibilitySelectionKey> selectedCompetitiveKeys,
         List<PlayerVisibilityTarget> targets
     )
     {
         ArgumentNullException.ThrowIfNull(plan);
-        ArgumentNullException.ThrowIfNull(selectedCompetitiveIdentities);
+        ArgumentNullException.ThrowIfNull(selectedCompetitiveKeys);
         ArgumentNullException.ThrowIfNull(targets);
 
-        var competitiveIdentities = new HashSet<PlayerObjectIdentity>();
-        foreach (var entry in plan.Entries)
+        var competitiveSourceIndices = new HashSet<int>();
+        for (var sourceIndex = 0; sourceIndex < plan.Entries.Count; sourceIndex++)
         {
+            var entry = plan.Entries[sourceIndex];
             if (entry.Classification == PlayerVisibilityClassification.Competitive)
             {
-                competitiveIdentities.Add(entry.Identity);
+                competitiveSourceIndices.Add(sourceIndex);
             }
         }
 
-        var selected = new HashSet<PlayerObjectIdentity>(selectedCompetitiveIdentities);
-        foreach (var identity in selected)
+        var selected = new HashSet<int>();
+        foreach (var key in selectedCompetitiveKeys)
         {
-            if (!competitiveIdentities.Contains(identity))
+            if (
+                !competitiveSourceIndices.Contains(key.SourceIndex)
+                || plan.Entries[key.SourceIndex].Identity != key.Identity
+                || plan.Entries[key.SourceIndex].ObjectIndex != key.ObjectIndex
+            )
             {
                 throw new ArgumentException(
-                    "Selected identity does not map to a Competitive entry in the current player visibility plan.",
-                    nameof(selectedCompetitiveIdentities)
+                    "Selected key does not map to the same Competitive entry in the current player visibility plan.",
+                    nameof(selectedCompetitiveKeys)
                 );
             }
+            selected.Add(key.SourceIndex);
         }
 
         targets.Clear();
-        foreach (var entry in plan.Entries)
+        for (var sourceIndex = 0; sourceIndex < plan.Entries.Count; sourceIndex++)
         {
+            var entry = plan.Entries[sourceIndex];
             if (!entry.IsManaged)
             {
                 continue;
@@ -48,7 +55,7 @@ internal static class PlayerVisibilityStableTargetBuilder
             var desiredVisible = entry.Classification switch
             {
                 PlayerVisibilityClassification.BypassVisible => true,
-                PlayerVisibilityClassification.Competitive => selected.Contains(entry.Identity),
+                PlayerVisibilityClassification.Competitive => selected.Contains(sourceIndex),
                 PlayerVisibilityClassification.ForceHidden => false,
                 _ => throw new ArgumentOutOfRangeException(nameof(entry.Classification), entry.Classification, null),
             };

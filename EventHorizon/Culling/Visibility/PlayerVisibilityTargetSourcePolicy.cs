@@ -53,7 +53,8 @@ internal static class PlayerVisibilityTargetSourcePolicy
 
 internal sealed record PlayerVisibilityActiveTargetResolution(
     PlayerVisibilityTargetSet ActiveTarget,
-    PlayerVisibilitySelectionEvaluation Evaluation
+    PlayerVisibilitySelectionEvaluation Evaluation,
+    Exception? FailureException = null
 );
 
 internal static class PlayerVisibilityActiveTargetResolver
@@ -70,26 +71,19 @@ internal static class PlayerVisibilityActiveTargetResolver
         ArgumentNullException.ThrowIfNull(evaluation);
         ArgumentNullException.ThrowIfNull(stableTargetBuffer);
 
-        PlayerVisibilityTargetSourceDecision decision;
-        try
-        {
-            decision = PlayerVisibilityTargetSourcePolicy.DecideTargetSource(evaluation.Trace.Status);
-        }
-        catch (Exception exception)
-        {
-            decision = new(PlayerVisibilityAppliedSource.LegacyFallback, PlayerVisibilityFallbackReason.SelectionFailed);
-            evaluation = MarkFailed(evaluation, exception);
-        }
+        var decision = PlayerVisibilityTargetSourcePolicy.DecideTargetSource(evaluation.Trace.Status);
 
         var activeTarget = legacyTarget;
+        Exception? failureException = null;
         if (decision.AppliedSource == PlayerVisibilityAppliedSource.StableTopB)
         {
             try
             {
-                activeTarget = PlayerVisibilityStableTargetBuilder.Build(plan, evaluation.SelectedIdentities, stableTargetBuffer);
+                activeTarget = PlayerVisibilityStableTargetBuilder.Build(plan, evaluation.SelectedKeys, stableTargetBuffer);
             }
             catch (Exception exception)
             {
+                failureException = exception;
                 decision = new(PlayerVisibilityAppliedSource.LegacyFallback, PlayerVisibilityFallbackReason.TargetBuildFailed);
                 evaluation = MarkFailed(evaluation, exception);
                 activeTarget = legacyTarget;
@@ -102,11 +96,10 @@ internal static class PlayerVisibilityActiveTargetResolver
             {
                 AppliedSource = decision.AppliedSource,
                 FallbackReason = decision.FallbackReason,
-                ProposalSelectedCount = evaluation.SelectedIdentities.Count,
-                AppliedSelectedCount = PlayerVisibilityActiveBudgetStats.Calculate(activeTarget, 1).VisibleBudgetedPlayerCount,
+                ProposalSelectedCount = evaluation.SelectedKeys.Count,
             },
         };
-        return new PlayerVisibilityActiveTargetResolution(activeTarget, evaluation);
+        return new PlayerVisibilityActiveTargetResolution(activeTarget, evaluation, failureException);
     }
 
     private static PlayerVisibilitySelectionEvaluation MarkFailed(PlayerVisibilitySelectionEvaluation evaluation, Exception exception) =>
