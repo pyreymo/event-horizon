@@ -189,8 +189,6 @@ internal sealed class PlayerTopologyDirtySignal
 {
     private int dirty;
 
-    public bool IsDirty => Volatile.Read(ref dirty) != 0;
-
     public void MarkFrom(PlayerAdmissionUpdateResult result)
     {
         if (result.AppearedCount != 0 || result.ReplacedCount != 0 || result.DisappearedCount != 0)

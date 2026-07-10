@@ -1,4 +1,3 @@
-using System;
 using System.Linq;
 using System.Threading;
 
@@ -10,14 +9,6 @@ internal sealed class PlayerVisibilityAppliedState
 
     public PlayerVisibilityFrameState? ActiveFrame => Volatile.Read(ref activeFrame);
     public PlayerVisibilityTargetSet? ActiveTarget => ActiveFrame?.ActiveTarget;
-
-    public void SetActiveTarget(PlayerVisibilityTargetSet activeTarget)
-    {
-        ArgumentNullException.ThrowIfNull(activeTarget);
-        Publish(
-            new PlayerVisibilityFrameState(activeTarget, new PlayerVisibilityReconciliation(activeTarget.Generation, [], 0, 0), default)
-        );
-    }
 
     public void Publish(PlayerVisibilityFrameState frame) => Volatile.Write(ref activeFrame, frame);
 

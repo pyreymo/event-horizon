@@ -26,11 +26,6 @@ internal sealed class PlayerVisibilitySelectionController
         this.reportFailure = reportFailure;
     }
 
-    internal bool IsSeeded => seeded;
-    internal int SelectedHistoryCount => selectedHistory.Count;
-
-    internal bool WasApplied(PlayerObjectIdentity identity) => selectedHistory.Contains(identity);
-
     public PlayerVisibilitySelectionEvaluation Evaluate(
         PlayerVisibilityPlan plan,
         PlayerVisibilityTargetSet legacyTargetSet,
