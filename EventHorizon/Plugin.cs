@@ -19,7 +19,6 @@ using EventHorizon.Integration.Vfx;
 using EventHorizon.Localization;
 using EventHorizon.Preview;
 using EventHorizon.Preview.UI;
-using EventHorizon.Rendering;
 using EventHorizon.Settings;
 using EventHorizon.UI.Config;
 
@@ -108,7 +107,6 @@ public sealed class Plugin : IDalamudPlugin
     private DtrBackgroundController DtrBackgroundController { get; init; }
     private LayoutGraphicsVisibilityController LayoutGraphicsVisibilityController { get; init; }
     private NamePlateTargetingMeMarkerController NamePlateTargetingMeMarkerController { get; init; }
-    private CharacterAlphaController CharacterAlphaController { get; init; }
 
     private long nextDynamicCullingRefresh;
     private long nextDtrBarRefresh;
@@ -148,7 +146,6 @@ public sealed class Plugin : IDalamudPlugin
             StaticVfxController,
             Log
         );
-        CharacterAlphaController = new CharacterAlphaController(ObjectTable);
         DtrBarIntegration = new DtrBarIntegration(DtrBar, Configuration, GetDtrBarState, SetPlayerHidingEnabled, ToggleConfigUi);
         DtrBackgroundController = new DtrBackgroundController(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
         LayoutGraphicsVisibilityController = new LayoutGraphicsVisibilityController(GameInteropProvider, ClientState, Log);
@@ -200,7 +197,6 @@ public sealed class Plugin : IDalamudPlugin
         DtrBackgroundController.Dispose();
         LayoutGraphicsVisibilityController.Dispose();
         NamePlateTargetingMeMarkerController.Dispose();
-        CharacterAlphaController.Dispose();
         UpdateObjectArraysHook.Dispose();
         StaticVfxController.Dispose();
         StaticVfxResourceRedirector.Dispose();
