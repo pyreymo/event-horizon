@@ -60,12 +60,22 @@ internal sealed class PlayerVisibilitySelectionParameters
             );
         }
 
-        if ((decimal)moveRetentionBonus <= (decimal)(rankCount - 1) * rankStep + softScoreScale)
+        var maxBaseScore = (decimal)(rankCount - 1) * rankStep + softScoreScale;
+        if ((decimal)moveRetentionBonus <= maxBaseScore)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(moveRetentionBonus),
                 moveRetentionBonus,
                 "MoveRetentionBonus must be greater than (RankCount - 1) * RankStep + SoftScoreScale."
+            );
+        }
+
+        if (maxBaseScore + moveRetentionBonus > long.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(moveRetentionBonus),
+                moveRetentionBonus,
+                "MaxBaseScore + MoveRetentionBonus must not exceed Int64.MaxValue."
             );
         }
 

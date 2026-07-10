@@ -121,3 +121,38 @@ Debug 和 Release 均实际发现并执行 23 个测试，范围包括：
 - Phase 2 代码没有接入 `ObjectCuller`、`Plugin`、`UpdateObjectArraysHook`、legacy builder、正式 target set、reconciler、RenderFlags、fade、VFX 或 preview。
 - 没有后台 worker、日志、Dalamud/FFCS 访问或全局配置读取。
 - Phase 3 的入口是由未来 Framework 适配层构造 selection snapshot，并仅做 legacy/Top-B 影子差异验证；本阶段未实现该调用、日志或正式接管。
+
+## 2026-07-10：Phase 2.1 完成
+
+### 修正内容
+
+- `PlayerVisibilitySelectionParameters` 使用 `decimal` 计算 `MaxBaseScore = (RankCount - 1) * RankStep + SoftScoreScale`，并在构造阶段验证 `MaxBaseScore + MoveRetentionBonus <= long.MaxValue`。违反约束时立即抛出说明最大调整分会超出 `Int64.MaxValue` 的 `ArgumentOutOfRangeException`，不再推迟到 selector 的 `checked` 运算。
+- `LocalSpeedSmoother` 增加只读状态 `HasVelocityEstimate`：首个有效样本仅建立基线；首个正时间间隔且速度可信的样本建立估计；非有限位置和非正时间间隔不改变状态；瞬移/超速重建基线并使估计失效；`Reset()` 清除速度、基线和有效状态。
+- 没有改变 selector snapshot、默认参数、数学模型、分数量化或排序顺序。
+
+### 新增性质测试
+
+- 最大调整分溢出在参数构造阶段失败。
+- 零距离零速度软分精确为 1。
+- `DistanceSigma` 距离、静止时软分约为 0.5。
+- 近距离软分严格高于远距离。
+- 相同初始距离下，靠近严格高于静止，静止严格高于远离。
+- 候选人数严格小于预算时全部选中。
+- 重复 `SourceIndex` 抛出带参数名和重复值的明确异常。
+- motion start、区间中点和 full speed 分别得到 0、`(0,1)` 和 1 的运动因子。
+- `LocalSpeedSmoother.Reset()` 清除速度、基线和有效状态。
+- 瞬移后从新基线用下一份正常样本重新建立有效速度估计。
+- 既有首样本、非有限位置和非正时间间隔测试同时增加有效状态断言。
+
+### 验证结果
+
+- `dotnet csharpier format .`：通过，58 个文件检查/格式化。
+- `dotnet build EventHorizon.sln -c Debug`：通过，0 warning、0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning、0 error。
+- `dotnet test EventHorizon.sln -c Debug`：实际发现并通过 33/33。
+- `dotnet test EventHorizon.sln -c Release`：实际发现并通过 33/33。
+
+### 边界确认
+
+- 本轮只修改 selection 参数、速度平滑器、单元测试和本进展文件。
+- 未接入 Phase 3；未修改 `ObjectCuller`、legacy target、reconciler、hook、RenderFlags、fade、VFX 或 preview，正式玩家可见性行为不变。

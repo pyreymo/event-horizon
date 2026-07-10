@@ -248,6 +248,7 @@ public sealed class PlayerVisibilitySelectorTests
         var speed = smoother.AddSample(TimeSpan.FromSeconds(10), new Vector3(10, 0, 0));
 
         Assert.AreEqual(0.0, speed);
+        Assert.IsFalse(smoother.HasVelocityEstimate);
     }
 
     [TestMethod]
@@ -280,9 +281,12 @@ public sealed class PlayerVisibilitySelectorTests
         smoother.AddSample(TimeSpan.Zero, Vector3.Zero);
 
         var invalidResult = smoother.AddSample(TimeSpan.FromSeconds(1), new Vector3(float.NaN, 0, 0));
+        var hasEstimateAfterInvalidSample = smoother.HasVelocityEstimate;
         var validResult = smoother.AddSample(TimeSpan.FromSeconds(1), new Vector3(5, 0, 0));
 
         Assert.AreEqual(0.0, invalidResult);
+        Assert.IsFalse(hasEstimateAfterInvalidSample);
+        Assert.IsTrue(smoother.HasVelocityEstimate);
         Assert.IsTrue(validResult > 0);
     }
 
@@ -294,10 +298,13 @@ public sealed class PlayerVisibilitySelectorTests
 
         var sameTimestamp = smoother.AddSample(TimeSpan.FromSeconds(1), new Vector3(100, 0, 0));
         var earlierTimestamp = smoother.AddSample(TimeSpan.Zero, new Vector3(100, 0, 0));
+        var hasEstimateBeforeValidSample = smoother.HasVelocityEstimate;
         var laterValidSample = smoother.AddSample(TimeSpan.FromSeconds(2), new Vector3(5, 0, 0));
 
         Assert.AreEqual(0.0, sameTimestamp);
         Assert.AreEqual(0.0, earlierTimestamp);
+        Assert.IsFalse(hasEstimateBeforeValidSample);
+        Assert.IsTrue(smoother.HasVelocityEstimate);
         Assert.IsTrue(laterValidSample > 0);
     }
 
@@ -321,6 +328,136 @@ public sealed class PlayerVisibilitySelectorTests
         Assert.AreEqual(0.0, negative.MotionFactor);
         Assert.AreEqual(1.0, positiveInfinity.MotionFactor);
         Assert.AreEqual(DefaultParameters.MoveRetentionBonus, positiveInfinity.RetentionBonus);
+    }
+
+    [TestMethod]
+    public void Parameters_WhenMaximumAdjustedScoreWouldOverflowLong_ThrowsImmediately()
+    {
+        var rankStep = long.MaxValue / 2;
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new PlayerVisibilitySelectionParameters(
+                rankCount: 2,
+                rankStep: rankStep,
+                softScoreScale: 0,
+                restRetentionBonus: 0,
+                moveRetentionBonus: rankStep + 2
+            )
+        );
+
+        Assert.AreEqual("moveRetentionBonus", exception.ParamName);
+        StringAssert.Contains(exception.Message, "MaxBaseScore + MoveRetentionBonus must not exceed Int64.MaxValue");
+    }
+
+    [TestMethod]
+    public void CalculateSoftScore_AtZeroDistanceAndVelocity_IsExactlyOne()
+    {
+        var score = PlayerVisibilitySelector.CalculateSoftScore(Vector3.Zero, Vector3.Zero, DefaultParameters);
+
+        Assert.AreEqual(1.0, score);
+    }
+
+    [TestMethod]
+    public void CalculateSoftScore_AtDistanceSigmaAndZeroVelocity_IsOneHalf()
+    {
+        var position = new Vector3((float)DefaultParameters.DistanceSigma, 0, 0);
+
+        var score = PlayerVisibilitySelector.CalculateSoftScore(position, Vector3.Zero, DefaultParameters);
+
+        Assert.AreEqual(0.5, score, 1e-12);
+    }
+
+    [TestMethod]
+    public void CalculateSoftScore_NearCandidateStrictlyOutscoresFarCandidate()
+    {
+        var nearScore = PlayerVisibilitySelector.CalculateSoftScore(new Vector3(10, 0, 0), Vector3.Zero, DefaultParameters);
+        var farScore = PlayerVisibilitySelector.CalculateSoftScore(new Vector3(100, 0, 0), Vector3.Zero, DefaultParameters);
+
+        Assert.IsTrue(nearScore > farScore);
+    }
+
+    [TestMethod]
+    public void CalculateSoftScore_ApproachingOutscoresStationaryWhichOutscoresReceding()
+    {
+        var position = new Vector3(30, 0, 0);
+        var approaching = PlayerVisibilitySelector.CalculateSoftScore(position, new Vector3(-10, 0, 0), DefaultParameters);
+        var stationary = PlayerVisibilitySelector.CalculateSoftScore(position, Vector3.Zero, DefaultParameters);
+        var receding = PlayerVisibilitySelector.CalculateSoftScore(position, new Vector3(10, 0, 0), DefaultParameters);
+
+        Assert.IsTrue(approaching > stationary);
+        Assert.IsTrue(stationary > receding);
+    }
+
+    [TestMethod]
+    public void Select_WhenCandidateCountIsStrictlyBelowBudget_SelectsAll()
+    {
+        var candidates = new[] { Candidate(0, rank: 7), Candidate(1, rank: 0) };
+
+        var result = Select(candidates, budget: candidates.Length + 3);
+
+        Assert.AreEqual(candidates.Length, result.Budget);
+        Assert.AreEqual(candidates.Length, result.SelectedCount);
+        CollectionAssert.AreEquivalent(
+            candidates.Select(candidate => candidate.SourceIndex).ToArray(),
+            result.SelectedSourceIndices.ToArray()
+        );
+    }
+
+    [TestMethod]
+    public void Select_WithDuplicateSourceIndex_ThrowsClearException()
+    {
+        var exception = Assert.Throws<ArgumentException>(() => Select([Candidate(4), Candidate(4, gameObjectId: 99)], budget: 1));
+
+        Assert.AreEqual("source", exception.ParamName);
+        StringAssert.Contains(exception.Message, "SourceIndex 4 is not unique");
+    }
+
+    [TestMethod]
+    public void Select_AtMotionThresholdsAndMidpoint_UsesExpectedMotionFactors()
+    {
+        var candidate = Candidate(0, previouslySelected: true);
+        var atStart = Select([candidate], budget: 1, speed: DefaultParameters.MotionStartSpeed);
+        var midpointSpeed = (DefaultParameters.MotionStartSpeed + DefaultParameters.MotionFullSpeed) / 2;
+        var atMidpoint = Select([candidate], budget: 1, speed: midpointSpeed);
+        var atFull = Select([candidate], budget: 1, speed: DefaultParameters.MotionFullSpeed);
+
+        Assert.AreEqual(0.0, atStart.MotionFactor);
+        Assert.IsTrue(atMidpoint.MotionFactor is > 0 and < 1);
+        Assert.AreEqual(1.0, atFull.MotionFactor);
+    }
+
+    [TestMethod]
+    public void LocalSpeedSmoother_ResetClearsSpeedBaselineAndVelocityEstimate()
+    {
+        var smoother = new LocalSpeedSmoother(DefaultParameters);
+        smoother.AddSample(TimeSpan.Zero, Vector3.Zero);
+        smoother.AddSample(TimeSpan.FromSeconds(1), new Vector3(5, 0, 0));
+        Assert.IsTrue(smoother.HasVelocityEstimate);
+        Assert.IsTrue(smoother.SmoothedSpeed > 0);
+
+        smoother.Reset();
+        var firstAfterReset = smoother.AddSample(TimeSpan.FromSeconds(10), new Vector3(1_000, 0, 0));
+
+        Assert.AreEqual(0.0, firstAfterReset);
+        Assert.AreEqual(0.0, smoother.SmoothedSpeed);
+        Assert.IsFalse(smoother.HasVelocityEstimate);
+    }
+
+    [TestMethod]
+    public void LocalSpeedSmoother_AfterTeleport_ReestablishesEstimateFromNewBaseline()
+    {
+        var smoother = new LocalSpeedSmoother(DefaultParameters);
+        smoother.AddSample(TimeSpan.Zero, Vector3.Zero);
+        smoother.AddSample(TimeSpan.FromSeconds(1), new Vector3(5, 0, 0));
+        Assert.IsTrue(smoother.HasVelocityEstimate);
+
+        smoother.AddSample(TimeSpan.FromSeconds(2), new Vector3(10_000, 0, 0));
+        Assert.IsFalse(smoother.HasVelocityEstimate);
+
+        var speed = smoother.AddSample(TimeSpan.FromSeconds(3), new Vector3(10_005, 0, 0));
+
+        Assert.IsTrue(smoother.HasVelocityEstimate);
+        Assert.IsTrue(speed > 0);
+        Assert.IsTrue(speed <= DefaultParameters.MaxTrustedLocalSpeed);
     }
 
     [TestMethod]
