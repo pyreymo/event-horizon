@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace EventHorizon.Culling.Visibility;
 
@@ -14,11 +15,12 @@ internal sealed class PlayerAdmissionGate
 
     public PlayerAdmissionUpdateResult Apply(
         IReadOnlyList<PlayerObjectIdentity?> currentSlots,
-        PlayerVisibilityTargetSet? activeTarget,
+        PlayerVisibilityAppliedState appliedState,
         Action<PlayerAdmissionChange> hardHide
     )
     {
         ArgumentNullException.ThrowIfNull(currentSlots);
+        ArgumentNullException.ThrowIfNull(appliedState);
         ArgumentNullException.ThrowIfNull(hardHide);
         var changeCounts = slotTracker.Evaluate(currentSlots, changes);
         var approvedCount = 0;
@@ -31,7 +33,7 @@ internal sealed class PlayerAdmissionGate
                 continue;
             }
 
-            if (IsExplicitlyVisible(activeTarget, change.CurrentIdentity!.Value))
+            if (appliedState.IsExplicitlyVisible(change.CurrentIdentity!.Value))
             {
                 approvedCount++;
                 continue;
@@ -60,24 +62,23 @@ internal sealed class PlayerAdmissionGate
     }
 
     public void ResetTracking() => slotTracker.Reset();
+}
 
-    private static bool IsExplicitlyVisible(PlayerVisibilityTargetSet? activeTarget, PlayerObjectIdentity identity)
+internal sealed class PlayerTopologyDirtySignal
+{
+    private int dirty;
+
+    public bool IsDirty => Volatile.Read(ref dirty) != 0;
+
+    public void MarkFrom(PlayerAdmissionUpdateResult result)
     {
-        if (activeTarget == null)
+        if (result.AppearedCount != 0 || result.ReplacedCount != 0 || result.DisappearedCount != 0)
         {
-            return false;
+            Interlocked.Exchange(ref dirty, 1);
         }
-
-        foreach (var target in activeTarget.Targets)
-        {
-            if (target.Identity == identity && target.DesiredVisible)
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
+
+    public void Clear() => Interlocked.Exchange(ref dirty, 0);
 }
 
 internal sealed class PlayerSlotIdentityTracker

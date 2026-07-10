@@ -44,6 +44,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly List<PlayerVisibilityTarget> stablePlayerVisibilityTargets = [];
     private readonly PlayerVisibilitySelectionController playerVisibilitySelectionController = new();
     private readonly PlayerAdmissionGate playerAdmissionGate = new();
+    private readonly PlayerTopologyDirtySignal playerTopologyDirtySignal = new();
+    private readonly PlayerVisibilityAppliedState appliedVisibilityState = new();
     private readonly PlayerObjectIdentity?[] playerAdmissionSlotIdentities = new PlayerObjectIdentity?[
         PlayerAdmissionGate.LastPlayerSlot + 1
     ];
@@ -59,7 +61,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private long previewSelectionExpiresAt;
     private int nextPlayerVisibilityGeneration;
     private int nextMaintainedVisibilityActionIndex;
-    private PlayerVisibilityTargetSet? latestPlayerVisibilityTargetSet;
     private PlayerVisibilityReconciliation? latestPlayerVisibilityReconciliation;
 
     public CullingPerformanceTrace LastUpdateTrace { get; private set; }
@@ -243,11 +244,12 @@ internal sealed unsafe class ObjectCuller : IDisposable
         {
             Trace = selectionEvaluation.Trace with { AppliedSelectedCount = keepBudgetStats.VisibleBudgetedPlayerCount },
         };
-        playerVisibilitySelectionController.CommitAppliedTarget(activeTargetSet);
-        latestPlayerVisibilityTargetSet = activeTargetSet;
+        appliedVisibilityState.SetActiveTarget(activeTargetSet);
+        var appliedTarget = appliedVisibilityState.ActiveTarget!;
+        playerVisibilitySelectionController.CommitAppliedTarget(appliedTarget);
 
         phaseStart = Stopwatch.GetTimestamp();
-        var playerVisibilityReconciliation = playerVisibilityReconciler.Reconcile(activeTargetSet, hiddenObjectTracker);
+        var playerVisibilityReconciliation = playerVisibilityReconciler.Reconcile(appliedTarget, hiddenObjectTracker);
         latestPlayerVisibilityReconciliation = playerVisibilityReconciliation;
         var reconcileTicks = Stopwatch.GetTimestamp() - phaseStart;
 
@@ -265,7 +267,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         if (previewBuilder != null)
         {
             phaseStart = Stopwatch.GetTimestamp();
-            AddPlayerPreviewEntries(manager, activeTargetSet, previewBuilder);
+            AddPlayerPreviewEntries(manager, appliedTarget, previewBuilder);
             previewAddTicks = Stopwatch.GetTimestamp() - phaseStart;
         }
         var previewTicks = previewBeginTicks + previewAddTicks;
@@ -375,7 +377,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
             ReconcileTicks: 0,
             PreviewTicks: 0,
             Tick: tickTrace,
-            PlayerVisibilityClasses: latestPlayerVisibilityTargetSet?.ClassificationCounts ?? default
+            PlayerVisibilityClasses: appliedVisibilityState.ActiveTarget?.ClassificationCounts ?? default
         );
     }
 
@@ -390,6 +392,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         )
         {
             playerAdmissionGate.ResetTracking();
+            playerTopologyDirtySignal.Clear();
             return;
         }
 
@@ -404,9 +407,9 @@ internal sealed unsafe class ObjectCuller : IDisposable
                 gameObject != null && gameObject->ObjectKind == ObjectKind.Pc ? PlayerObjectIdentity.From(gameObject) : null;
         }
 
-        playerAdmissionGate.Apply(
+        var result = playerAdmissionGate.Apply(
             playerAdmissionSlotIdentities,
-            latestPlayerVisibilityTargetSet,
+            appliedVisibilityState,
             change =>
             {
                 var gameObject = manager->Objects.IndexSorted[change.Slot].Value;
@@ -418,6 +421,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
                 Hide(gameObject, change.Slot);
             }
         );
+        playerTopologyDirtySignal.MarkFrom(result);
     }
 
     public void Reset(GameObjectManager* manager)
@@ -452,13 +456,13 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
     public void RefreshPlayerPreview(GameObjectManager* manager)
     {
-        if (manager == null || !IsCullingEnabled() || !playerState.IsLoaded || latestPlayerVisibilityTargetSet == null)
+        if (manager == null || !IsCullingEnabled() || !playerState.IsLoaded || appliedVisibilityState.ActiveTarget == null)
         {
             return;
         }
 
         var previewBuilder = PlayerPreviewBuilder.Begin(manager, configuration);
-        AddPlayerPreviewEntries(manager, latestPlayerVisibilityTargetSet, previewBuilder);
+        AddPlayerPreviewEntries(manager, appliedVisibilityState.ActiveTarget, previewBuilder);
         playerPreviewSnapshot = previewBuilder.Build();
     }
 
@@ -653,7 +657,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
                 hiddenVfxTicks,
                 hiddenVfxTrace
             ),
-            PlayerVisibilityClasses: latestPlayerVisibilityTargetSet?.ClassificationCounts ?? default
+            PlayerVisibilityClasses: appliedVisibilityState.ActiveTarget?.ClassificationCounts ?? default
         );
     }
 
@@ -906,8 +910,9 @@ internal sealed unsafe class ObjectCuller : IDisposable
         previewSelectionExpiresAt = 0;
         nextMaintainedVisibilityActionIndex = 0;
         playerAdmissionGate.ResetTracking();
+        playerTopologyDirtySignal.Clear();
+        appliedVisibilityState.Clear();
         playerVisibilitySelectionController.Reset();
-        latestPlayerVisibilityTargetSet = null;
         latestPlayerVisibilityReconciliation = null;
     }
 
@@ -1254,6 +1259,10 @@ internal sealed unsafe class ObjectCuller : IDisposable
     public PlayerKeepBudgetStats GetKeepBudgetStats() => keepBudgetStats;
 
     public PlayerPreviewSnapshot GetPlayerPreviewSnapshot() => playerPreviewSnapshot;
+
+    public bool IsPlayerTopologyDirty() => playerTopologyDirtySignal.IsDirty;
+
+    public void ClearPlayerTopologyDirty() => playerTopologyDirtySignal.Clear();
 
     public bool NeedsDynamicRefresh()
     {

@@ -28,6 +28,7 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
     public PlayerPreviewSnapshot PlayerPreviewSnapshot => objectCuller.GetPlayerPreviewSnapshot();
     public CullingPerformanceTrace LastRefreshTrace => objectCuller.LastUpdateTrace;
     public CullingPerformanceTrace LastTickTrace => objectCuller.LastTickTrace;
+    public bool PlayerTopologyDirty => objectCuller.IsPlayerTopologyDirty();
 
     public UpdateObjectArraysHook(
         IGameInteropProvider gameInteropProvider,
@@ -57,6 +58,7 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         }
 
         OnObjectArraysUpdated(GameObjectManager.Instance(), refreshPlayerPreview);
+        objectCuller.ClearPlayerTopologyDirty();
     }
 
     public void Tick()

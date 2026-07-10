@@ -404,3 +404,33 @@ hook.Original(objectManager)
 - 保留每次 scan 的纯结果类型和 hard-hide failure 隔离，供单元测试验证，不产生运行时日志。
 - admission 仍只负责槽位身份变化和立即硬隐藏，不进入 fade、ShowTransitionBudget、selection history 或其他正式选择逻辑。
 - 删除仅服务于临时开关的 2 个测试，保留 11 个 admission 行为测试；全套测试总数为 82。
+
+## 2026-07-10：admission topology dirty 与 applied state 接线
+
+### topology dirty 提前刷新
+
+- `PlayerAdmissionGate.Apply(...)` 的 Appeared/Replaced/Disappeared 结果现在交给独立 `PlayerTopologyDirtySignal`；任一计数非零即原子标记 dirty，Unchanged 不标记。
+- detour 仍只执行 admission gate 和既有 `Tick()`，不运行规则、plan、selector 或 reconciler。
+- Framework update 在正常 per-frame tick 后检查 `PlayerTopologyDirty`：dirty 时绕过尚未到期的 200ms refresh deadline，在下一帧提前执行一次完整 refresh。
+- `UpdateObjectArraysHook.Refresh(...)` 完成 refresh 后清除 dirty；Clear/Reset/suspend/关闭 culling 等 admission reset 路径也清除 dirty，避免恢复后消费过期信号。
+- dirty 是单向调度信号，不携带 identity，也不改变 admission gate、selection controller 或 reconciler 的职责。
+
+### AppliedVisibilityState
+
+- 新增 `PlayerVisibilityAppliedState`，集中持有当前 active target。
+- active source policy 确定 target 后先写入 applied state；同一 active target 随后供：
+
+```text
+PlayerVisibilityReconciler / Preview
+PlayerVisibilitySelectionController.CommitAppliedTarget
+PlayerAdmissionGate explicit-visible identity lookup
+```
+
+- 清理路径统一清空 applied state；admission 在尚无 active target 时继续 fail-closed。
+- 原 `latestPlayerVisibilityTargetSet` 独立字段已移除，避免 active target 与 admission/preview 查询状态分叉。
+
+### 测试
+
+- 新增 topology dirty 的 Appeared/Replaced/Disappeared/Unchanged/clear 测试。
+- 新增 applied state 的 active target、visible lookup 和 clear 测试。
+- 全套测试总数恢复为 84 个。

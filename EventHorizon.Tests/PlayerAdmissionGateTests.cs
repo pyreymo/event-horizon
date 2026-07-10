@@ -19,7 +19,7 @@ public sealed class PlayerAdmissionGateTests
         var slots = Slots((2, IdentityA));
         var hidden = new List<PlayerAdmissionChange>();
 
-        var result = gate.Apply(slots, null, hidden.Add);
+        var result = gate.Apply(slots, State(), hidden.Add);
 
         Assert.IsTrue(result.BaselineEstablished);
         Assert.AreEqual(0, result.AppearedCount);
@@ -105,7 +105,7 @@ public sealed class PlayerAdmissionGateTests
         var hidden = new List<PlayerAdmissionChange>();
         var active = TargetSet((IdentityA, true));
 
-        var result = gate.Apply(Slots((2, IdentityA)), active, hidden.Add);
+        var result = gate.Apply(Slots((2, IdentityA)), State(active), hidden.Add);
 
         Assert.AreEqual(1, result.ApprovedCount);
         Assert.AreEqual(0, result.HiddenCount);
@@ -120,7 +120,7 @@ public sealed class PlayerAdmissionGateTests
             var gate = BaselineGate();
             var hardHideCount = 0;
 
-            var result = gate.Apply(Slots((2, IdentityA)), active, _ => hardHideCount++);
+            var result = gate.Apply(Slots((2, IdentityA)), State(active), _ => hardHideCount++);
 
             Assert.AreEqual(1, result.HiddenCount);
             Assert.AreEqual(1, hardHideCount);
@@ -131,10 +131,10 @@ public sealed class PlayerAdmissionGateTests
     public void Replacement_DoesNotInheritPreviousSlotIdentityApproval()
     {
         var gate = new PlayerAdmissionGate();
-        gate.Apply(Slots((2, IdentityA)), TargetSet((IdentityA, true)), _ => Assert.Fail());
+        gate.Apply(Slots((2, IdentityA)), State(TargetSet((IdentityA, true))), _ => Assert.Fail());
         var hidden = new List<PlayerAdmissionChange>();
 
-        var result = gate.Apply(Slots((2, IdentityB)), TargetSet((IdentityA, true)), hidden.Add);
+        var result = gate.Apply(Slots((2, IdentityB)), State(TargetSet((IdentityA, true))), hidden.Add);
 
         Assert.AreEqual(1, result.ReplacedCount);
         Assert.AreEqual(1, result.HiddenCount);
@@ -149,7 +149,7 @@ public sealed class PlayerAdmissionGateTests
         var fadeCount = 0;
         var showBudgetCount = 0;
 
-        var result = gate.Apply(Slots((2, IdentityA)), null, _ => hardHideCount++);
+        var result = gate.Apply(Slots((2, IdentityA)), State(), _ => hardHideCount++);
 
         Assert.AreEqual(1, hardHideCount);
         Assert.AreEqual(0, fadeCount);
@@ -162,9 +162,9 @@ public sealed class PlayerAdmissionGateTests
     {
         var gate = BaselineGate();
         var hiddenCount = 0;
-        gate.Apply(Slots((2, IdentityA)), null, _ => hiddenCount++);
+        gate.Apply(Slots((2, IdentityA)), State(), _ => hiddenCount++);
 
-        var unchanged = gate.Apply(Slots((2, IdentityA)), null, _ => hiddenCount++);
+        var unchanged = gate.Apply(Slots((2, IdentityA)), State(), _ => hiddenCount++);
 
         Assert.AreEqual(1, hiddenCount);
         Assert.AreEqual(0, unchanged.HiddenCount);
@@ -175,11 +175,11 @@ public sealed class PlayerAdmissionGateTests
     public void ResetTracking_MakesNextScanBaselineOnly()
     {
         var gate = BaselineGate();
-        gate.Apply(Slots((2, IdentityA)), null, _ => { });
+        gate.Apply(Slots((2, IdentityA)), State(), _ => { });
         gate.ResetTracking();
         var hiddenCount = 0;
 
-        var result = gate.Apply(Slots((2, IdentityB)), null, _ => hiddenCount++);
+        var result = gate.Apply(Slots((2, IdentityB)), State(), _ => hiddenCount++);
 
         Assert.IsTrue(result.BaselineEstablished);
         Assert.AreEqual(0, result.HiddenCount);
@@ -191,16 +191,55 @@ public sealed class PlayerAdmissionGateTests
     {
         var gate = BaselineGate();
 
-        var result = gate.Apply(Slots((2, IdentityA)), null, _ => throw new InvalidOperationException("test"));
+        var result = gate.Apply(Slots((2, IdentityA)), State(), _ => throw new InvalidOperationException("test"));
 
         Assert.AreEqual(1, result.FailedCount);
         Assert.AreEqual(0, result.HiddenCount);
     }
 
+    [TestMethod]
+    public void TopologyDirtySignal_MarksAnySlotTopologyChangeAndClearsAfterRefresh()
+    {
+        var changeResults = new[]
+        {
+            new PlayerAdmissionUpdateResult(false, 1, 0, 0, 0, 0, 0),
+            new PlayerAdmissionUpdateResult(false, 0, 1, 0, 0, 0, 0),
+            new PlayerAdmissionUpdateResult(false, 0, 0, 1, 0, 0, 0),
+        };
+
+        foreach (var result in changeResults)
+        {
+            var signal = new PlayerTopologyDirtySignal();
+            signal.MarkFrom(result);
+            Assert.IsTrue(signal.IsDirty);
+            signal.Clear();
+            Assert.IsFalse(signal.IsDirty);
+        }
+
+        var unchangedSignal = new PlayerTopologyDirtySignal();
+        unchangedSignal.MarkFrom(default);
+        Assert.IsFalse(unchangedSignal.IsDirty);
+    }
+
+    [TestMethod]
+    public void AppliedVisibilityState_CentralizesActiveTargetAdmissionLookupAndClear()
+    {
+        var state = State(TargetSet((IdentityA, true), (IdentityB, false)));
+
+        Assert.IsTrue(state.IsExplicitlyVisible(IdentityA));
+        Assert.IsFalse(state.IsExplicitlyVisible(IdentityB));
+        Assert.IsNotNull(state.ActiveTarget);
+
+        state.Clear();
+
+        Assert.IsNull(state.ActiveTarget);
+        Assert.IsFalse(state.IsExplicitlyVisible(IdentityA));
+    }
+
     private static PlayerAdmissionGate BaselineGate()
     {
         var gate = new PlayerAdmissionGate();
-        gate.Apply(Slots(), null, _ => Assert.Fail("Baseline must not hide."));
+        gate.Apply(Slots(), State(), _ => Assert.Fail("Baseline must not hide."));
         return gate;
     }
 
@@ -228,6 +267,17 @@ public sealed class PlayerAdmissionGateTests
             ))
             .ToArray();
         return new PlayerVisibilityTargetSet(1, 0, targets, default);
+    }
+
+    private static PlayerVisibilityAppliedState State(PlayerVisibilityTargetSet? target = null)
+    {
+        var state = new PlayerVisibilityAppliedState();
+        if (target != null)
+        {
+            state.SetActiveTarget(target);
+        }
+
+        return state;
     }
 
     private static PlayerObjectIdentity Identity(uint value) => new((nint)value, value, value);

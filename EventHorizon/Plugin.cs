@@ -332,7 +332,8 @@ public sealed class Plugin : IDalamudPlugin
         var tickTrace = UpdateObjectArraysHook.LastTickTrace;
 
         var now = Environment.TickCount64;
-        if (now < nextDynamicCullingRefresh)
+        var playerTopologyDirty = UpdateObjectArraysHook.PlayerTopologyDirty;
+        if (now < nextDynamicCullingRefresh && !playerTopologyDirty)
         {
             LogSlowFrameworkUpdate(
                 start,
