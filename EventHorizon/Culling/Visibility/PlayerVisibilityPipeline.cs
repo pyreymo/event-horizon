@@ -31,9 +31,8 @@ internal sealed class PlayerVisibilityPipeline(Action<Exception> reportSelection
             reportFailure(resolution.FailureException);
         }
         var budgetStats = PlayerVisibilityActiveBudgetStats.Calculate(resolution.ActiveTarget, visiblePlayerCountLimit);
-        var trace = resolution.Evaluation.Trace with { AppliedSelectedCount = budgetStats.VisibleBudgetedPlayerCount };
         var reconciliation = reconciler.Reconcile(resolution.ActiveTarget, hiddenObjectTracker);
-        return new PlayerVisibilityFrameState(resolution.ActiveTarget, reconciliation, budgetStats, trace);
+        return new PlayerVisibilityFrameState(resolution.ActiveTarget, reconciliation, budgetStats);
     }
 
     public void Commit(PlayerVisibilityFrameState frame) => selectionController.CommitAppliedTarget(frame.ActiveTarget);

@@ -13,7 +13,16 @@ using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.Culling;
 
-internal sealed unsafe class ObjectCuller : IDisposable
+internal sealed unsafe class ObjectCuller(
+    Configuration configuration,
+    IPlayerState playerState,
+    ICondition condition,
+    IObjectTable objectTable,
+    ITargetManager targetManager,
+    IGameGui gameGui,
+    StaticVfxController staticVfxController,
+    IPluginLog log
+) : IDisposable
 {
     private const int MaxHiddenPlayerVfxCreatesPerFrame = 8;
     private const int MaxPlayerRelatedObjectIndex = 199;
@@ -21,18 +30,20 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private const VisibilityFlags InvisibleFlag = PluginCustomProbe | VisibilityFlags.Nameplate | VisibilityFlags.Model;
     private const string HiddenPlayerVfxPath = StaticVfxResourceRedirector.HiddenPlayerGroundMarkerPath;
 
-    private readonly Configuration configuration;
-    private readonly IPlayerState playerState;
-    private readonly ICondition condition;
-    private readonly IObjectTable objectTable;
-    private readonly IGameGui gameGui;
-    private readonly StaticVfxController staticVfxController;
-    private readonly PlayerKeepRules playerKeepRules;
+    private readonly Configuration configuration = configuration;
+    private readonly IPlayerState playerState = playerState;
+    private readonly ICondition condition = condition;
+    private readonly IObjectTable objectTable = objectTable;
+    private readonly IGameGui gameGui = gameGui;
+    private readonly StaticVfxController staticVfxController = staticVfxController;
+    private readonly PlayerKeepRules playerKeepRules = new(configuration, objectTable, targetManager);
     private readonly EventNpcVisibilityRule eventNpcVisibilityRule = new();
     private readonly PlayerKeepPlan playerKeepPlan = new();
     private readonly List<PlayerKeepCandidate> playerKeepCandidates = [];
-    private readonly HiddenObjectTracker hiddenObjectTracker;
-    private readonly PlayerVisibilityPipeline playerVisibilityPipeline;
+    private readonly HiddenObjectTracker hiddenObjectTracker = new();
+    private readonly PlayerVisibilityPipeline playerVisibilityPipeline = new(exception =>
+        log.Error(exception, "Player visibility selection failed; using legacy fallback.")
+    );
     private readonly ShowTransitionBudget showTransitionBudget = new();
     private readonly PlayerAdmissionGate playerAdmissionGate = new();
     private readonly PlayerTopologyDirtySignal playerTopologyDirtySignal = new();
@@ -53,28 +64,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private int nextPlayerVisibilityGeneration;
     private PlayerVisibilityReconciliation? latestPlayerVisibilityReconciliation;
     private readonly CullingRuntimeModeTransition runtimeModeTransition = new();
-
-    public ObjectCuller(
-        Configuration configuration,
-        IPlayerState playerState,
-        ICondition condition,
-        IObjectTable objectTable,
-        ITargetManager targetManager,
-        IGameGui gameGui,
-        StaticVfxController staticVfxController,
-        IPluginLog log
-    )
-    {
-        this.configuration = configuration;
-        this.playerState = playerState;
-        this.condition = condition;
-        this.objectTable = objectTable;
-        this.gameGui = gameGui;
-        this.staticVfxController = staticVfxController;
-        playerVisibilityPipeline = new(exception => log.Error(exception, "Player visibility selection failed; using legacy fallback."));
-        playerKeepRules = new(configuration, objectTable, targetManager);
-        hiddenObjectTracker = new();
-    }
 
     #region Lifecycle
 

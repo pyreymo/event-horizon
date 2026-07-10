@@ -18,8 +18,7 @@ internal static class PlayerVisibilitySelector
         var effectiveBudget = Math.Clamp(snapshot.Budget, 0, candidates.Length);
         var motionFactor = CalculateMotionFactor(snapshot.SmoothedLocalSpeed, parameters);
         var retentionBonus = CalculateRetentionBonus(motionFactor, parameters);
-        var rankedCandidates = new PlayerVisibilityScoredCandidate[candidates.Length];
-        var previouslySelectedCount = 0;
+        var rankedCandidates = new ScoredCandidate[candidates.Length];
 
         for (var i = 0; i < candidates.Length; i++)
         {
@@ -29,19 +28,11 @@ internal static class PlayerVisibilitySelector
             var priorityLevel = parameters.RankCount - 1 - candidate.Rank;
             var baseScore = checked((parameters.RankStep * priorityLevel) + softPoints);
             var adjustedScore = checked(baseScore + (candidate.WasPreviouslySelected ? retentionBonus : 0));
-            if (candidate.WasPreviouslySelected)
-            {
-                previouslySelectedCount++;
-            }
-
-            rankedCandidates[i] = new PlayerVisibilityScoredCandidate(
+            rankedCandidates[i] = new ScoredCandidate(
                 candidate.SourceIndex,
                 candidate.GameObjectId,
                 candidate.EntityId,
                 candidate.ObjectIndex,
-                candidate.Rank,
-                softScore,
-                softPoints,
                 baseScore,
                 adjustedScore,
                 candidate.WasPreviouslySelected
@@ -51,29 +42,13 @@ internal static class PlayerVisibilitySelector
         Array.Sort(rankedCandidates, CompareScoredCandidates);
 
         var selectedSourceIndices = new int[effectiveBudget];
-        var retainedCount = 0;
         for (var i = 0; i < effectiveBudget; i++)
         {
             var selected = rankedCandidates[i];
             selectedSourceIndices[i] = selected.SourceIndex;
-            if (selected.WasPreviouslySelected)
-            {
-                retainedCount++;
-            }
         }
 
-        return new PlayerVisibilitySelectionResult(
-            Array.AsReadOnly(selectedSourceIndices),
-            Array.AsReadOnly(rankedCandidates),
-            effectiveBudget,
-            candidates.Length,
-            effectiveBudget,
-            previouslySelectedCount,
-            retainedCount,
-            effectiveBudget - retainedCount,
-            motionFactor,
-            retentionBonus
-        );
+        return new PlayerVisibilitySelectionResult(Array.AsReadOnly(selectedSourceIndices));
     }
 
     internal static double CalculateSoftScore(
@@ -182,7 +157,7 @@ internal static class PlayerVisibilitySelector
         return checked((long)Math.Round(bonus, MidpointRounding.AwayFromZero));
     }
 
-    private static int CompareScoredCandidates(PlayerVisibilityScoredCandidate left, PlayerVisibilityScoredCandidate right)
+    private static int CompareScoredCandidates(ScoredCandidate left, ScoredCandidate right)
     {
         var comparison = right.AdjustedScore.CompareTo(left.AdjustedScore);
         if (comparison != 0)
@@ -219,4 +194,14 @@ internal static class PlayerVisibilitySelector
     }
 
     private static bool IsFinite(Vector3 value) => float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
+
+    private readonly record struct ScoredCandidate(
+        int SourceIndex,
+        ulong GameObjectId,
+        uint EntityId,
+        int ObjectIndex,
+        long BaseScore,
+        long AdjustedScore,
+        bool WasPreviouslySelected
+    );
 }

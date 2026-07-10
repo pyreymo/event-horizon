@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.Linq;
 using System.Numerics;
 using EventHorizon.Culling.Selection;
 
@@ -30,7 +28,6 @@ internal sealed class PlayerVisibilitySelectionController
 
     internal bool IsSeeded => seeded;
     internal int SelectedHistoryCount => selectedHistory.Count;
-    internal int TrackedPlayerVelocityCount => playerVelocityTracker.Count;
 
     internal bool WasApplied(PlayerObjectIdentity identity) => selectedHistory.Contains(identity);
 
@@ -47,10 +44,7 @@ internal sealed class PlayerVisibilitySelectionController
 
         if (!localPosition.HasValue || !IsFinite(localPosition.Value))
         {
-            return new PlayerVisibilitySelectionEvaluation(
-                CreateUnavailableTrace(plan.Generation, "Local player position is unavailable."),
-                []
-            );
+            return new PlayerVisibilitySelectionEvaluation(PlayerVisibilitySelectionStatus.Unavailable, []);
         }
 
         try
@@ -60,17 +54,8 @@ internal sealed class PlayerVisibilitySelectionController
         catch (Exception exception)
         {
             reportFailure?.Invoke(exception);
-            return CreateFailedEvaluation(plan.Generation, exception);
+            return new PlayerVisibilitySelectionEvaluation(PlayerVisibilitySelectionStatus.Failed, []);
         }
-    }
-
-    internal static PlayerVisibilitySelectionEvaluation CreateFailedEvaluation(int generation, Exception exception)
-    {
-        ArgumentNullException.ThrowIfNull(exception);
-        return new PlayerVisibilitySelectionEvaluation(
-            CreateFailedTrace(generation, $"{exception.GetType().Name}: {exception.Message}"),
-            []
-        );
     }
 
     public void Reset()
@@ -110,7 +95,6 @@ internal sealed class PlayerVisibilitySelectionController
 
         var competitiveIdentities = new HashSet<PlayerObjectIdentity>();
         var velocityEstimates = new Dictionary<PlayerObjectIdentity, PlayerVelocityEstimate>();
-        var candidateRankHistogram = new int[parameters.RankCount];
         var competitiveCount = 0;
         for (var sourceIndex = 0; sourceIndex < plan.Entries.Count; sourceIndex++)
         {
@@ -122,7 +106,6 @@ internal sealed class PlayerVisibilitySelectionController
 
             competitiveCount++;
             competitiveIdentities.Add(entry.Identity);
-            candidateRankHistogram[entry.Decision.Rank]++;
             velocityEstimates[entry.Identity] = entry.HasPosition
                 ? playerVelocityTracker.AddSample(timestamp, entry.Identity, entry.Position)
                 : playerVelocityTracker.GetEstimate(entry.Identity);
@@ -165,46 +148,18 @@ internal sealed class PlayerVisibilitySelectionController
         var snapshot = new PlayerVisibilitySelectionSnapshot(budget, localSpeedSmoother.SmoothedSpeed, candidates);
         var selection = PlayerVisibilitySelector.Select(snapshot, parameters);
 
-        var currentSelected = new HashSet<PlayerObjectIdentity>();
         var selectedKeys = new PlayerVisibilitySelectionKey[selection.SelectedSourceIndices.Count];
         for (var selectedIndex = 0; selectedIndex < selection.SelectedSourceIndices.Count; selectedIndex++)
         {
             var sourceIndex = selection.SelectedSourceIndices[selectedIndex];
             var entry = plan.Entries[sourceIndex];
             selectedKeys[selectedIndex] = new(sourceIndex, entry.Identity, entry.ObjectIndex);
-            currentSelected.Add(entry.Identity);
         }
-
-        var retainedCount = CountIntersection(currentSelected, previousSelected);
-        var enteredCount = CountExcept(currentSelected, previousSelected);
-        var leftCount = CountExcept(previousSelected, currentSelected);
-        var missingPreviousCount = CountExcept(previousSelected, competitiveIdentities);
-        var activeReplacedCount = CountActiveReplaced(previousSelected, competitiveIdentities, currentSelected);
 
         var status = localSpeedSmoother.HasVelocityEstimate
             ? PlayerVisibilitySelectionStatus.Ready
             : PlayerVisibilitySelectionStatus.Warmup;
-        var trace = new PlayerVisibilitySelectionTrace(
-            status,
-            plan.Generation,
-            candidates.Count,
-            selection.Budget,
-            selection.SelectedCount,
-            previousSelected.Count,
-            retainedCount,
-            enteredCount,
-            leftCount,
-            missingPreviousCount,
-            activeReplacedCount,
-            localSpeedSmoother.HasVelocityEstimate,
-            playerVelocityTracker.Count,
-            localSpeedSmoother.SmoothedSpeed,
-            selection.MotionFactor,
-            selection.RetentionBonus,
-            ReadOnly(candidateRankHistogram)
-        );
-
-        return new PlayerVisibilitySelectionEvaluation(trace, Array.AsReadOnly(selectedKeys));
+        return new PlayerVisibilitySelectionEvaluation(status, Array.AsReadOnly(selectedKeys));
     }
 
     private static HashSet<PlayerObjectIdentity> GetLegacySelectedIdentities(PlayerVisibilityTargetSet targetSet)
@@ -221,49 +176,6 @@ internal sealed class PlayerVisibilitySelectionController
         return identities;
     }
 
-    private static int CountIntersection(IReadOnlySet<PlayerObjectIdentity> left, IReadOnlySet<PlayerObjectIdentity> right)
-    {
-        var count = 0;
-        foreach (var identity in left)
-        {
-            if (right.Contains(identity))
-            {
-                count++;
-            }
-        }
-
-        return count;
-    }
-
-    private static int CountExcept(HashSet<PlayerObjectIdentity> left, IReadOnlySet<PlayerObjectIdentity> right) =>
-        left.Count - CountIntersection(left, right);
-
-    private static int CountActiveReplaced(
-        IReadOnlySet<PlayerObjectIdentity> previous,
-        HashSet<PlayerObjectIdentity> competitive,
-        HashSet<PlayerObjectIdentity> current
-    )
-    {
-        var count = 0;
-        foreach (var identity in previous)
-        {
-            if (competitive.Contains(identity) && !current.Contains(identity))
-            {
-                count++;
-            }
-        }
-
-        return count;
-    }
-
-    private static ReadOnlyCollection<int> ReadOnly(int[] values) => Array.AsReadOnly(values);
-
-    private static PlayerVisibilitySelectionTrace CreateUnavailableTrace(int generation, string reason) =>
-        new(Status: PlayerVisibilitySelectionStatus.Unavailable, Generation: generation, FailureReason: reason);
-
-    private static PlayerVisibilitySelectionTrace CreateFailedTrace(int generation, string reason) =>
-        new(Status: PlayerVisibilitySelectionStatus.Failed, Generation: generation, FailureReason: reason);
-
     private static bool IsFinite(Vector3 value) => float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
 
     internal static Vector3 CalculateRelativeVelocity(
@@ -275,46 +187,14 @@ internal sealed class PlayerVisibilitySelectionController
 }
 
 internal sealed record PlayerVisibilitySelectionEvaluation(
-    PlayerVisibilitySelectionTrace Trace,
+    PlayerVisibilitySelectionStatus Status,
     IReadOnlyList<PlayerVisibilitySelectionKey> SelectedKeys
-)
-{
-    public IReadOnlyList<PlayerObjectIdentity> SelectedIdentities => [.. SelectedKeys.Select(static key => key.Identity)];
-}
+);
 
 internal readonly record struct PlayerVisibilitySelectionKey(int SourceIndex, PlayerObjectIdentity Identity, int ObjectIndex);
 
-internal readonly record struct PlayerVisibilitySelectionTrace(
-    PlayerVisibilitySelectionStatus Status,
-    int Generation,
-    int CandidateCount = 0,
-    int Budget = 0,
-    int SelectedCount = 0,
-    int PreviousSelectedCount = 0,
-    int RetainedCount = 0,
-    int EnteredCount = 0,
-    int LeftCount = 0,
-    int MissingPreviousCount = 0,
-    int ActiveReplacedCount = 0,
-    bool HasLocalVelocityEstimate = false,
-    int TrackedPlayerVelocityCount = 0,
-    double SmoothedLocalSpeed = 0,
-    double MotionFactor = 0,
-    long RetentionBonus = 0,
-    IReadOnlyList<int>? CandidateRankHistogram = null,
-    PlayerVisibilityAppliedSource AppliedSource = PlayerVisibilityAppliedSource.LegacyFallback,
-    PlayerVisibilityFallbackReason FallbackReason = PlayerVisibilityFallbackReason.None,
-    int ProposalSelectedCount = 0,
-    int AppliedSelectedCount = 0,
-    string? FailureReason = null
-)
-{
-    public bool HasValue => Status != PlayerVisibilitySelectionStatus.None;
-}
-
 internal enum PlayerVisibilitySelectionStatus
 {
-    None,
     Ready,
     Warmup,
     Unavailable,

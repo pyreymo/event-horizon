@@ -25,28 +25,4 @@ internal sealed record PlayerVisibilitySelectionSnapshot(
         Candidates ?? throw new ArgumentNullException(nameof(Candidates));
 }
 
-internal readonly record struct PlayerVisibilityScoredCandidate(
-    int SourceIndex,
-    ulong GameObjectId,
-    uint EntityId,
-    int ObjectIndex,
-    int Rank,
-    double SoftScore,
-    long SoftPoints,
-    long BaseScore,
-    long AdjustedScore,
-    bool WasPreviouslySelected
-);
-
-internal sealed record PlayerVisibilitySelectionResult(
-    IReadOnlyList<int> SelectedSourceIndices,
-    IReadOnlyList<PlayerVisibilityScoredCandidate> RankedCandidates,
-    int Budget,
-    int CandidateCount,
-    int SelectedCount,
-    int PreviouslySelectedCount,
-    int RetainedCount,
-    int EnteredCount,
-    double MotionFactor,
-    long RetentionBonus
-);
+internal sealed record PlayerVisibilitySelectionResult(IReadOnlyList<int> SelectedSourceIndices);

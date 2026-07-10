@@ -15,12 +15,7 @@ internal sealed class PlayerVisibilityAppliedState
     {
         ArgumentNullException.ThrowIfNull(activeTarget);
         Publish(
-            new PlayerVisibilityFrameState(
-                activeTarget,
-                new PlayerVisibilityReconciliation(activeTarget.Generation, [], 0, 0),
-                default,
-                default
-            )
+            new PlayerVisibilityFrameState(activeTarget, new PlayerVisibilityReconciliation(activeTarget.Generation, [], 0, 0), default)
         );
     }
 

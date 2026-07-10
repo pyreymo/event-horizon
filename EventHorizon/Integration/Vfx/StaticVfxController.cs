@@ -68,29 +68,27 @@ internal sealed unsafe class StaticVfxController : IDisposable
         return activeVfx.TryGetValue(gameObjectId, out var active) && active.Path == path && active.VfxAddress != nint.Zero;
     }
 
-    public StaticVfxShowResult ShowOrUpdate(ulong gameObjectId, string path, SystemVector3 position, float rotation = 0f)
+    public void ShowOrUpdate(ulong gameObjectId, string path, SystemVector3 position, float rotation = 0f)
     {
         if (disposed || gameObjectId == 0 || string.IsNullOrEmpty(path))
         {
-            return StaticVfxShowResult.Ignored;
+            return;
         }
 
         if (activeVfx.TryGetValue(gameObjectId, out var active) && active.Path == path && active.VfxAddress != nint.Zero)
         {
             if (active.IsSameTransform(position, rotation))
             {
-                return StaticVfxShowResult.SkippedResult;
+                return;
             }
 
             UpdateTransform((VfxObject*)active.VfxAddress, position, rotation);
             activeVfx[gameObjectId] = active with { Position = position, Rotation = rotation };
-            return StaticVfxShowResult.UpdatedResult;
+            return;
         }
 
-        var removed = Remove(gameObjectId);
-        return Create(gameObjectId, path, position, rotation)
-            ? new StaticVfxShowResult(Created: true, Updated: false, Skipped: false, Removed: removed)
-            : new StaticVfxShowResult(Created: false, Updated: false, Skipped: false, Removed: removed);
+        Remove(gameObjectId);
+        Create(gameObjectId, path, position, rotation);
     }
 
     public void PruneExcept(HashSet<ulong> gameObjectIds)
@@ -136,7 +134,7 @@ internal sealed unsafe class StaticVfxController : IDisposable
         disposed = true;
     }
 
-    private bool Create(ulong gameObjectId, string path, SystemVector3 position, float rotation)
+    private void Create(ulong gameObjectId, string path, SystemVector3 position, float rotation)
     {
         var create = staticVfxCreate;
         var run = staticVfxRun;
@@ -153,7 +151,7 @@ internal sealed unsafe class StaticVfxController : IDisposable
                 loggedInteropUnavailable = true;
             }
 
-            return false;
+            return;
         }
 
         try
@@ -169,19 +167,19 @@ internal sealed unsafe class StaticVfxController : IDisposable
             if (vfx == null)
             {
                 log.Warning("[HiddenVfx] VfxObject.Create returned null. gameObjectId={GameObjectId} path={Path}", gameObjectId, path);
-                return false;
+                return;
             }
 
             activeVfx[gameObjectId] = new ActiveStaticVfx((nint)vfx, path, position, rotation);
             run(vfx, 0f, 0xFFFFFFFF);
             UpdateTransform(vfx, position, rotation);
-            return true;
+            return;
         }
         catch (Exception ex)
         {
             log.Warning(ex, "[HiddenVfx] Failed to create static VFX. gameObjectId={GameObjectId} path={Path}", gameObjectId, path);
             activeVfx.Remove(gameObjectId);
-            return false;
+            return;
         }
     }
 
@@ -278,11 +276,4 @@ internal sealed unsafe class StaticVfxController : IDisposable
                 && Math.Abs(Rotation - rotation) <= RotationEpsilon;
         }
     }
-}
-
-internal readonly record struct StaticVfxShowResult(bool Created, bool Updated, bool Skipped, bool Removed)
-{
-    public static readonly StaticVfxShowResult Ignored = default;
-    public static readonly StaticVfxShowResult SkippedResult = new(Created: false, Updated: false, Skipped: true, Removed: false);
-    public static readonly StaticVfxShowResult UpdatedResult = new(Created: false, Updated: true, Skipped: false, Removed: false);
 }
