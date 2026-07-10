@@ -397,3 +397,136 @@
 
 - `budget == input` 场景应出现 `status=OptimalByInspection`、`solve=0`，累计 optimal 增长。
 - `input > budget` 场景观察完整 Top-B hint 是否使 Feasible/Optimal 开始增长；若仍全部 Unknown，下一步缩减或重写 CP-SAT 模型结构。
+
+## 2026-07-10 10:59 +08:00
+
+实机反馈：
+
+- 无竞争快速路径累计完成 641 次，`exceptions=0`、`replaced=0`、结果年龄 0 ms。
+- `input=20-23` 且 `budget=input`，状态均为 `OptimalByInspection`，`finalJ=JStar`，`solve=0`。
+- worker 总耗时约 0.023-0.026 ms，说明无竞争场景已不再承担 CP-SAT 初始化成本。
+- 本批数据没有出现 `input > budget`，因此尚未实际运行带 Top-B hint 的 CP-SAT，不能据此判断求解成功率。
+
+统计语义调整：
+
+- `OptimalByInspection` 不再计入 solver 的 `optimal`。
+- 累计状态增加独立 `inspected`，日志格式变为 `statuses[optimal=... feasible=... unknown=... inspected=...]`。
+- 这样 `optimal/feasible/unknown` 只反映真正进入 CP-SAT 的样本，避免快速路径掩盖求解器表现。
+
+验证结果：
+
+- `dotnet csharpier format .`：已运行。
+- `dotnet build EventHorizon.sln`：通过，0 warning，0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning，0 error。
+- `git diff --check`：通过；仅有仓库现有换行符提示。
+
+下一步观察：
+
+- 需要在 `input > budget` 的拥挤场景收集定期日志；届时 `inspected` 与真正 solver 状态会分别累计。
+
+## 2026-07-10 11:02 +08:00
+
+实机反馈：
+
+- 已获得真正超预算样本：累计 `unknown=131`，`optimal=0`、`feasible=0`；完整 Top-B hint 没有使 4 ms 内产生可用 incumbent。
+- 超预算样本约 `input=27-31`、`budget=25`，8 步模型约 432-496 个变量、225-257 个约束。
+- 模型构建约 0.143-0.161 ms，求解调用约 4.611-5.081 ms，状态仍全部 `Unknown`。
+- 无竞争快速路径继续正常累计，`inspected=427`；`exceptions=0`、`replaced=0`，worker 调度不是瓶颈。
+
+针对实机反馈处理：
+
+- 不继续提高 4 ms 时限。
+- 将预测步数从 8 缩减为 4，预测步长仍为 200 ms，形成 800 ms 预测窗口。
+- 完整 Top-B hint、`JThreshold`、切换目标、单线程和其他参数保持不变，用于隔离模型规模的影响。
+- 预计超预算模型变量和逐玩家切换约束约减半；仍只做影子求解，不采纳结果。
+
+验证结果：
+
+- `dotnet csharpier format .`：已运行。
+- `dotnet build EventHorizon.sln`：通过，0 warning，0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning，0 error。
+- `git diff --check`：通过；仅有仓库现有换行符提示。
+
+下一步观察：
+
+- 在同类 `input > 25` 场景比较 4 步模型的变量/约束数和 `statuses`。
+- 若 4 步模型仍全部 Unknown，则不再继续压缩预测窗口，转而重写模型/求解策略。
+
+## 2026-07-10 11:06 +08:00
+
+实机反馈：
+
+- 4 步模型累计真正求解 222 次，仍为 `optimal=0 feasible=0 unknown=222`；缩减预测窗口没有解决短时限内无 incumbent 的问题。
+- 超预算模型约 208-280 个变量、109-145 个约束，模型构建约 0.077-0.113 ms，求解调用约 3.727-4.797 ms。
+- `exceptions=0`、`replaced=0`，无竞争快速路径继续正常；停止继续压缩预测窗口。
+- 多个不同输入规模的 `JStar` 固定为 `796650`，说明当前量化效用存在大量相同系数，模型具有较强对称性。
+
+针对实机反馈处理：
+
+- 保持 4 步、4 ms、单线程、完整 Top-B hint 和目标函数不变。
+- solver 参数增加 `symmetry_level:0`，关闭当前高度对称模型的对称性检测。
+- solver 参数增加 `cp_model_probing_level:0`，关闭短时限下可能占据主要启动时间的 probing。
+- 该轮用于隔离 CP-SAT 预处理启动成本；仍不采纳结果。
+
+验证结果：
+
+- `dotnet csharpier format .`：已运行。
+- `dotnet build EventHorizon.sln`：通过，0 warning，0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning，0 error。
+- `git diff --check`：通过；仅有仓库现有换行符提示。
+
+下一步观察：
+
+- 比较关闭 symmetry/probing 后的 `optimal/feasible/unknown` 和 `solve`。
+- 若仍为 100% Unknown，不再继续微调 solver 参数，改写切换变量和目标表达。
+
+## 2026-07-10 11:10 +08:00
+
+实机反馈：
+
+- 关闭 symmetry/probing 后，真正求解累计达到 `optimal=10 feasible=190 unknown=0`；短时限内无 incumbent 的问题已解决。
+- 常态超预算求解约 4.25-4.49 ms，worker 约 4.35-4.58 ms，结果年龄通常 0-15 ms，`replaced=0`、`exceptions=0`。
+- 可行解满足阈值；示例 `JStar=795777`、`threshold=771904`、`finalJ=773267`，并输出 `finalD=6 stepSwitch=5`，表明求解器确实会用允许的效用余量减少切换，而非只返回 Top-B hint。
+- 首个真正求解出现一次性冷启动尖峰：`model=18.336 ms`、`solve=110.837 ms`、worker 130.963 ms、结果年龄 125 ms。后续恢复正常，属于 OR-Tools 首次模型/求解初始化成本。
+
+针对实机反馈处理：
+
+- `PlayerVisibilityCpSatOptimizer` 增加最小模型 `WarmUp()`。
+- worker 启动后、接收真实快照前，在后台完成 native 依赖加载和一次最小求解预热；不阻塞插件构造或 Framework 线程。
+- 预热期间仍保持 latest-wins：游戏线程可以继续提交，worker 预热完成后只处理最新待处理快照。
+- worker 统计增加 `init=...ms`，单独记录后台初始化/预热耗时，避免与真实快照的 `model/solve/lastWorker` 混在一起。
+- 若预热失败，真实快照处理会重试初始化，并通过现有 `lastError` 暴露错误。
+- 求解结果仍不采纳，不改变玩家显示行为。
+
+验证结果：
+
+- `dotnet csharpier format .`：已运行。
+- `dotnet build EventHorizon.sln`：通过，0 warning，0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning，0 error。
+- `git diff --check`：通过；仅有仓库现有换行符提示。
+
+下一步观察：
+
+- 重新加载后观察 `init`、首个真正 CP-SAT 样本的 `model/solve/lastWorker`，确认约 100 ms 的冷启动成本已迁移到后台预热。
+- 同时确认预热期间即使出现 `replaced`，随后结果年龄仍快速恢复到目标范围；在验证前继续不采纳结果。
+
+## 2026-07-10 11:13 +08:00
+
+实机反馈：
+
+- 后台预热耗时 `init=63.398 ms`，已从真实快照的 model/solve 统计中分离。
+- 预热后的真实求解累计 `optimal=27 feasible=260 unknown=0`，继续保持 100% 可用状态。
+- 常态模型构建约 0.073-0.141 ms，求解约 3.344-4.394 ms，worker 总耗时约 3.429-4.559 ms。
+- 结果年龄通常 0-16 ms，`replaced=0`、`exceptions=0`；预热没有造成可见积压。
+- 未再出现此前首个真实模型 `model=18 ms / solve=111 ms` 的冷启动尖峰，说明预热迁移有效。
+- 可行解继续满足 `FinalJ >= JThreshold`；例如 `JStar=796650`、`threshold=772751`、`finalJ=774784`、`finalD=5`、`stepSwitch=4`。
+
+阶段结论：
+
+- 4 步、200 ms 步长、4 ms 上限、单线程、关闭 symmetry/probing 的影子求解在当前约 26-37 人输入规模下已达到稳定可用状态。
+- Framework 线程不等待 solver，worker 无异常、无任务积压，结果年龄显著低于 300 ms 目标。
+- 影子求解性能验证通过；仍未发布或采纳 solver 目标集合，因此玩家显示行为未改变。
+
+下一步建议：
+
+- 进入 Phase 3 的结果通道：worker 发布 immutable current-step result，游戏线程只读取并验证 generation、年龄和对象 identity，先统计 accepted/stale/invalid，仍不替换 legacy target set。

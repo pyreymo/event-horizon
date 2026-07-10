@@ -487,7 +487,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         return string.Format(
-            "submitted={0} completed={1} replaced={2} exceptions={3} statuses[optimal={23} feasible={24} unknown={25}] lastGen={4} lastInput={5} lastBudget={6} lastPos={7} lastVel={8} lastAge={9}ms lastWorker={10:F3}ms ok={11} cpSat[status={12} vars={13} constraints={14} jStar={15} threshold={16} finalJ={17} finalD={18} stepSwitch={19} model={20:F3}ms solve={21:F3}ms] lastError={22}",
+            "submitted={0} completed={1} replaced={2} exceptions={3} statuses[optimal={23} feasible={24} unknown={25} inspected={26}] init={27:F3}ms lastGen={4} lastInput={5} lastBudget={6} lastPos={7} lastVel={8} lastAge={9}ms lastWorker={10:F3}ms ok={11} cpSat[status={12} vars={13} constraints={14} jStar={15} threshold={16} finalJ={17} finalD={18} stepSwitch={19} model={20:F3}ms solve={21:F3}ms] lastError={22}",
             stats.SubmittedCount,
             stats.CompletedCount,
             stats.PendingSnapshotReplacedCount,
@@ -513,7 +513,9 @@ public sealed class Plugin : IDalamudPlugin
             stats.LastError ?? "n/a",
             stats.OptimalCount,
             stats.FeasibleCount,
-            stats.UnknownCount
+            stats.UnknownCount,
+            stats.InspectedCount,
+            ToMilliseconds(stats.InitializationTicks)
         );
     }
 

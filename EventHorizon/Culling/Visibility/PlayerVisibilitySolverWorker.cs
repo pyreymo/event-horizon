@@ -26,6 +26,8 @@ internal sealed class PlayerVisibilitySolverWorker : IDisposable
     private int optimalCount;
     private int feasibleCount;
     private int unknownCount;
+    private int inspectedCount;
+    private long initializationTicks;
 
     public PlayerVisibilitySolverWorker(string pluginDirectory)
     {
@@ -83,6 +85,7 @@ internal sealed class PlayerVisibilitySolverWorker : IDisposable
             optimalCount = 0;
             feasibleCount = 0;
             unknownCount = 0;
+            inspectedCount = 0;
             latestStats = default;
         }
     }
@@ -116,6 +119,7 @@ internal sealed class PlayerVisibilitySolverWorker : IDisposable
 
     private void WorkerLoop()
     {
+        InitializeSolver();
         while (!cancellationTokenSource.IsCancellationRequested)
         {
             snapshotAvailable.WaitOne();
@@ -123,6 +127,25 @@ internal sealed class PlayerVisibilitySolverWorker : IDisposable
             {
                 ProcessSnapshot(snapshot, snapshotEpoch);
             }
+        }
+    }
+
+    private void InitializeSolver()
+    {
+        var start = Stopwatch.GetTimestamp();
+        try
+        {
+            OrToolsNativeDependencyLoader.EnsureLoaded(pluginDirectory, cancellationTokenSource.Token);
+            PlayerVisibilityCpSatOptimizer.WarmUp();
+        }
+        catch (OperationCanceledException) when (cancellationTokenSource.IsCancellationRequested) { }
+        catch
+        {
+            // ProcessSnapshot retries initialization and exposes any failure through LastError.
+        }
+        finally
+        {
+            initializationTicks = Stopwatch.GetTimestamp() - start;
         }
     }
 
@@ -208,8 +231,10 @@ internal sealed class PlayerVisibilitySolverWorker : IDisposable
                 switch (cpSatStats.Status)
                 {
                     case "Optimal":
-                    case "OptimalByInspection":
                         optimalCount++;
+                        break;
+                    case "OptimalByInspection":
+                        inspectedCount++;
                         break;
                     case "Feasible":
                         feasibleCount++;
@@ -241,7 +266,9 @@ internal sealed class PlayerVisibilitySolverWorker : IDisposable
                 lastError,
                 optimalCount,
                 feasibleCount,
-                unknownCount
+                unknownCount,
+                inspectedCount,
+                initializationTicks
             );
         }
     }
@@ -264,7 +291,9 @@ internal readonly record struct PlayerVisibilitySolverWorkerStats(
     string? LastError = null,
     int OptimalCount = 0,
     int FeasibleCount = 0,
-    int UnknownCount = 0
+    int UnknownCount = 0,
+    int InspectedCount = 0,
+    long InitializationTicks = 0
 )
 {
     public bool HasValue => SubmittedCount > 0 || CompletedCount > 0 || PendingSnapshotReplacedCount > 0 || ExceptionCount > 0;

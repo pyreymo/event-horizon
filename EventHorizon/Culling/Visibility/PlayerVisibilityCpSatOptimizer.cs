@@ -8,12 +8,21 @@ namespace EventHorizon.Culling.Visibility;
 
 internal static class PlayerVisibilityCpSatOptimizer
 {
-    private const int HorizonSteps = 8;
+    private const int HorizonSteps = 4;
     private const float PredictionStepSeconds = 0.2f;
     private const double Gamma = 0.85;
     private const double Epsilon = 0.03;
     private const int UtilityScale = 10_000;
-    private const string SolverParameters = "num_search_workers:1 max_time_in_seconds:0.004";
+    private const string SolverParameters = "num_search_workers:1 max_time_in_seconds:0.004 symmetry_level:0 cp_model_probing_level:0";
+
+    public static void WarmUp()
+    {
+        var model = new CpModel();
+        var variable = model.NewBoolVar("warmup");
+        model.Maximize(variable);
+        var solver = new CpSolver { StringParameters = SolverParameters };
+        solver.Solve(model, null);
+    }
 
     public static PlayerVisibilityCpSatStats Solve(PlayerVisibilitySolverSnapshot snapshot)
     {
