@@ -156,3 +156,85 @@ Debug 和 Release 均实际发现并执行 23 个测试，范围包括：
 
 - 本轮只修改 selection 参数、速度平滑器、单元测试和本进展文件。
 - 未接入 Phase 3；未修改 `ObjectCuller`、legacy target、reconciler、hook、RenderFlags、fade、VFX 或 preview，正式玩家可见性行为不变。
+
+## 2026-07-10：Phase 3 完成（代码与自动化验证）
+
+### 新增与修改文件
+
+- 新增 `EventHorizon/Culling/Visibility/PlayerVisibilityShadowController.cs`：shadow snapshot 适配、独立历史、churn、legacy 差异、rank histogram、状态和 trace。
+- 新增 `EventHorizon/Culling/Selection/PlayerVelocityTracker.cs`：与游戏对象无关、按完整 identity 分桶的玩家向量速度 EMA。
+- 新增 `EventHorizon.Tests/PlayerVisibilityShadowControllerTests.cs`：21 个 shadow/history/motion 测试。
+- 修改 `LocalSpeedSmoother.cs`：增加独立的 `SmoothedVelocity` 向量 EMA，不改变 `SmoothedSpeed` 的瞬时速度大小 EMA 语义。
+- 修改 `PlayerVisibilityPlan.cs`：将构造函数调整为 internal，供同程序集适配层和真实测试构造纯 plan 数据。
+- 修改 `ObjectCuller.cs`：在 legacy target 构造后、legacy reconcile 前执行隔离的 shadow evaluation，并补齐 reset 入口。
+- 修改 `CullingPerformanceTrace.cs`：refresh trace 增加可选 `PlayerVisibilityShadowTrace`；普通 tick 保持默认值。
+- 修改 `Plugin.cs`：增加 2 秒冷却的 `[StableTopB Shadow]` 结构化摘要日志和 slow trace 中的独立 shadow 计时。
+
+### 数据流与正式边界
+
+```text
+PlayerKeepPlan
+→ PlayerVisibilityPlan
+→ PlayerVisibilityLegacyTargetBuilder
+→ PlayerVisibilityShadowController.Evaluate（只读 shadow）
+→ PlayerVisibilityReconciler（输入仍是同一个 legacy target）
+→ preview / TickVisibility（仍读取 legacy target）
+```
+
+- shadow 只接收 `Competitive` 条目；`SourceIndex` 是 plan entry 索引，选择后映射回完整 `PlayerObjectIdentity`。
+- 限制人数时预算为配置限制的 `[1,100]` Clamp；不限制时预算等于 Competitive candidate 数量。
+- 缺失位置的 Competitive 条目仍进入 selector，并使用非有限相对位置使软分确定为 0。
+- shadow result 从未传给 reconciler、preview、fade、VFX、ShowTransitionBudget、swap 或 RenderFlags。
+
+### identity、history 与 reset
+
+- history 使用包含地址、GameObjectId、EntityId 的完整 `PlayerObjectIdentity`，地址不参与 selector 排序，只用于运动与历史连续性。
+- reset 后未播种；第一次可执行 evaluation 仅从 legacy 中 `Competitive && DesiredVisible` 的完整身份播种一次。
+- 首次 selector 成功后，后续 `WasPreviouslySelected` 只来自上一轮 shadow selected set，不再由 legacy 覆盖。
+- 成功完成 selection、映射和统计后才原子替换 history；Unavailable/Failed 不提交新 history。
+- manager 不可用、culling 关闭、duty/低人数 suspend、玩家未加载、Reset/Clear、dispose 和显式 resetRuleState 均清除 shadow history 与全部运动状态。
+
+### 运动向量
+
+- 本地标量速度继续对瞬时速度大小做 EMA；本地向量速度独立对瞬时速度向量做同 alpha 的 EMA，转向时不以向量长度替代标量值。
+- 其他玩家 tracker 以完整 identity 为 key，首样本只建基线；可信连续样本更新向量 EMA；非有限/非正 dt 不污染；瞬移重建基线并使估计失效；每轮清理已离开 Competitive 集合的身份。
+- 相对位置为 `OtherPosition - LocalPosition`；相对速度严格为有效的 other velocity（否则零）减有效的 local velocity（否则零）。
+- 本地或其他玩家 tracker 暂时复用 `0.35s` half-life 与 `50.0` 最大可信速度，作为 Phase 3 内部初值，不增加配置 UI。
+
+### trace 与 churn
+
+- 状态明确区分 `Ready`、`Warmup`、`Unavailable`、`Failed`；本地速度未形成有效估计时仍执行 selector，但标记 Warmup。
+- trace 包含 generation、candidate/budget/selected/previous、Retained/Entered/Left/MissingPrevious/ActiveReplaced、legacy only/shadow only/symmetric difference、本地速度状态、tracked count、motion/bonus、三份 8 档 histogram，以及 snapshot/selector/total ticks。
+- churn 使用上一轮完整 shadow set、本轮完整 shadow set和当前完整 Competitive set计算，不依赖 selector 的当前候选 retained 数。
+- histogram 每轮复制为独立只读数组，不引用复用工作区。
+
+### 日志
+
+- 每 2000ms 最多输出一条 `[StableTopB Shadow]`；Warmup、Unavailable、Failed 均在 `status` 中明确显示，Failed 使用 error 级别并受相同冷却限制。
+- 日志不包含姓名、地址或对象 ID。格式示例（字段结构来自实际 formatter，数值为说明性示例，不是实机采样）：
+
+```text
+[StableTopB Shadow] status=Warmup generation=42 candidates=18 budget=10 selected=10 previous=10 retained=9 entered=1 left=1 missing=0 replaced=1 legacySelected=10 legacyOnly=2 shadowOnly=2 diff=4 localVelocity=False tracked=18 speed=0.000 motion=0.000 bonus=500 snapshotMs=0.080 selectorMs=0.030 totalMs=0.140 candidateRanks=[1,2,3,4,3,2,2,1] shadowRanks=[1,2,3,3,1,0,0,0] legacyRanks=[1,2,3,2,2,0,0,0] reason=n/a
+```
+
+### 异常隔离
+
+- controller 内部捕获 snapshot/selector/mapping/statistics 异常并返回 Failed trace；`ObjectCuller` 另以仅包围本地位置读取和 shadow 调用的窄 catch 作为最后隔离层。
+- Failed trace 保留异常类型与消息，不提交 history；下一步仍使用原 legacy target 调用 reconciler，并继续 preview、fade、VFX 和 visibility tick。
+
+### 测试与验证
+
+- 保留原 33 个测试，新增 21 个测试，总计 54 个。
+- 新增覆盖：一次性 legacy seed、独立 shadow history、reset 后重播种、完整 identity 隔离、Left/Missing/ActiveReplaced、legacy symmetric difference、不可变 histogram、SourceIndex 映射、无限制预算、Warmup、Unavailable/Failed 不提交、完整 reset、输入只读、本地标量/向量 EMA、其他玩家速度方向/瞬移/identity 隔离、严格相对速度。
+- `dotnet csharpier format .`：通过，61 个文件检查/格式化。
+- `dotnet build EventHorizon.sln -c Debug`：通过，0 warning、0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning、0 error。
+- `dotnet test EventHorizon.sln -c Debug`：实际发现并通过 54/54。
+- `dotnet test EventHorizon.sln -c Release`：实际发现并通过 54/54。
+- 源码与产物扫描未发现 OR-Tools；未增加 worker、异步任务、命令、配置 UI 或正式切换开关；native detour 未修改。
+
+### 尚待实机验证
+
+- 尚未在本轮自动化环境中启动游戏确认约 2 秒日志节奏及真实 candidate/churn/耗时分布。
+- 尚未基于实机 shadow 数据调整 motion threshold、EMA half-life、最大可信速度或 retention 参数；当前不得声称改善实际帧率或可见性稳定性。
+- 本轮停在 Phase 3，不进入 Phase 4，不增加正式接管开关。

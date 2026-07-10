@@ -9,7 +9,7 @@ namespace EventHorizon.Culling.Visibility;
 
 internal sealed unsafe class PlayerVisibilityPlan
 {
-    private PlayerVisibilityPlan(
+    internal PlayerVisibilityPlan(
         int generation,
         long createdAtTickCount64,
         IReadOnlyList<PlayerVisibilityPlanEntry> entries,

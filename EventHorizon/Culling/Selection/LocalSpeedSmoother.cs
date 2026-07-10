@@ -12,6 +12,7 @@ internal sealed class LocalSpeedSmoother(PlayerVisibilitySelectionParameters par
     private bool hasBaseline;
 
     public double SmoothedSpeed { get; private set; }
+    public Vector3 SmoothedVelocity { get; private set; }
     public bool HasVelocityEstimate { get; private set; }
 
     public double AddSample(TimeSpan timestamp, Vector3 position)
@@ -27,6 +28,7 @@ internal sealed class LocalSpeedSmoother(PlayerVisibilitySelectionParameters par
             previousPosition = position;
             hasBaseline = true;
             SmoothedSpeed = 0;
+            SmoothedVelocity = Vector3.Zero;
             HasVelocityEstimate = false;
             return SmoothedSpeed;
         }
@@ -37,8 +39,10 @@ internal sealed class LocalSpeedSmoother(PlayerVisibilitySelectionParameters par
             return SmoothedSpeed;
         }
 
-        var distance = Vector3.Distance(previousPosition, position);
+        var displacement = position - previousPosition;
+        var distance = displacement.Length();
         var instantaneousSpeed = distance / elapsedSeconds;
+        var instantaneousVelocity = displacement / (float)elapsedSeconds;
         var alpha = 1 - Math.Exp(-Ln2 * elapsedSeconds / parameters.LocalSpeedHalfLifeSeconds);
 
         previousTimestamp = timestamp;
@@ -47,6 +51,7 @@ internal sealed class LocalSpeedSmoother(PlayerVisibilitySelectionParameters par
         if (!float.IsFinite(distance) || !double.IsFinite(instantaneousSpeed) || instantaneousSpeed > parameters.MaxTrustedLocalSpeed)
         {
             instantaneousSpeed = 0;
+            instantaneousVelocity = Vector3.Zero;
             HasVelocityEstimate = false;
         }
         else
@@ -55,9 +60,16 @@ internal sealed class LocalSpeedSmoother(PlayerVisibilitySelectionParameters par
         }
 
         SmoothedSpeed += alpha * (instantaneousSpeed - SmoothedSpeed);
+        SmoothedVelocity += (float)alpha * (instantaneousVelocity - SmoothedVelocity);
         if (!double.IsFinite(SmoothedSpeed) || SmoothedSpeed < 0)
         {
             SmoothedSpeed = 0;
+        }
+
+        if (!IsFinite(SmoothedVelocity))
+        {
+            SmoothedVelocity = Vector3.Zero;
+            HasVelocityEstimate = false;
         }
 
         return SmoothedSpeed;
@@ -69,6 +81,7 @@ internal sealed class LocalSpeedSmoother(PlayerVisibilitySelectionParameters par
         previousPosition = default;
         hasBaseline = false;
         SmoothedSpeed = 0;
+        SmoothedVelocity = Vector3.Zero;
         HasVelocityEstimate = false;
     }
 

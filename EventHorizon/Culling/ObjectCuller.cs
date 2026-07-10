@@ -28,6 +28,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly Configuration configuration;
     private readonly IPlayerState playerState;
     private readonly ICondition condition;
+    private readonly IObjectTable objectTable;
     private readonly IGameGui gameGui;
     private readonly StaticVfxController staticVfxController;
     private readonly PlayerKeepRules playerKeepRules;
@@ -39,6 +40,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly ShowTransitionBudget showTransitionBudget = new();
     private readonly List<PlayerVisibilityPlanEntry> playerVisibilityPlanEntries = [];
     private readonly List<PlayerVisibilityTarget> playerVisibilityTargets = [];
+    private readonly PlayerVisibilityShadowController playerVisibilityShadowController = new();
     private readonly Dictionary<ulong, string> playerPreviewNames = [];
     private readonly List<nint> hiddenPlayerVfxAddresses = [];
     private readonly List<HiddenPlayerVfxCandidate> hiddenPlayerVfxCandidates = [];
@@ -70,6 +72,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         this.configuration = configuration;
         this.playerState = playerState;
         this.condition = condition;
+        this.objectTable = objectTable;
         this.gameGui = gameGui;
         this.staticVfxController = staticVfxController;
         playerKeepRules = new(configuration, objectTable, targetManager);
@@ -120,6 +123,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
         if (ShouldSuspendCullingInDuty())
         {
+            playerVisibilityShadowController.Reset();
             RestoreHiddenObjects(manager);
             ResetFades(manager);
             LastUpdateTrace = CreateTrace(
@@ -138,6 +142,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
         if (ShouldSuspendCulling(manager))
         {
+            playerVisibilityShadowController.Reset();
             RestoreHiddenObjects(manager);
             ResetFades(manager);
             LastUpdateTrace = CreateTrace(
@@ -157,6 +162,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         playerKeepRules.BeforeUpdate();
         if (!playerState.IsLoaded)
         {
+            playerVisibilityShadowController.Reset();
             RestoreHiddenObjects(manager);
             ResetFades(manager);
             LastUpdateTrace = CreateTrace(
@@ -195,6 +201,24 @@ internal sealed unsafe class ObjectCuller : IDisposable
         var playerVisibilityTargetSet = PlayerVisibilityLegacyTargetBuilder.Build(playerVisibilityPlan, playerVisibilityTargets);
         latestPlayerVisibilityTargetSet = playerVisibilityTargetSet;
         var visibilityPlanTicks = Stopwatch.GetTimestamp() - phaseStart;
+
+        var shadowStart = Stopwatch.GetTimestamp();
+        PlayerVisibilityShadowResult shadowResult;
+        try
+        {
+            var localPlayer = objectTable.LocalPlayer;
+            shadowResult = playerVisibilityShadowController.Evaluate(
+                playerVisibilityPlan,
+                playerVisibilityTargetSet,
+                configuration.LimitVisiblePlayerCount,
+                configuration.VisiblePlayerCountLimit,
+                localPlayer?.Position
+            );
+        }
+        catch (Exception exception)
+        {
+            shadowResult = playerVisibilityShadowController.CreateFailedResult(playerVisibilityPlan.Generation, shadowStart, exception);
+        }
 
         phaseStart = Stopwatch.GetTimestamp();
         var playerVisibilityReconciliation = playerVisibilityReconciler.Reconcile(playerVisibilityTargetSet, hiddenObjectTracker);
@@ -244,7 +268,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
             PreviewTicks: previewTicks,
             Tick: tickTrace,
             Preview: new CullingPreviewPerformanceTrace(previewBuilder?.Count ?? 0, previewBeginTicks, previewAddTicks, previewBuildTicks),
-            PlayerVisibilityClasses: playerVisibilityTargetSet.ClassificationCounts
+            PlayerVisibilityClasses: playerVisibilityTargetSet.ClassificationCounts,
+            Shadow: shadowResult.Trace
         );
     }
 
@@ -350,6 +375,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
     public void ClearRuleState()
     {
         playerKeepRules.Clear();
+        playerVisibilityShadowController.Reset();
     }
 
     public void RecordChatMessage(IChatMessage message)
@@ -812,6 +838,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         previewSelectedPlayerEntityId = null;
         previewSelectionExpiresAt = 0;
         nextMaintainedVisibilityActionIndex = 0;
+        playerVisibilityShadowController.Reset();
         latestPlayerVisibilityTargetSet = null;
         latestPlayerVisibilityReconciliation = null;
     }
