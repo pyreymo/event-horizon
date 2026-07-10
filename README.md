@@ -132,7 +132,7 @@ Experimental visual aids can show hidden-player ground markers, but these are op
 The plugin code is grouped by responsibility:
 
 - `EventHorizon/Culling` contains player selection, admission gating, visibility reconciliation, and keep-rule decisions.
-- `EventHorizon/Integration` contains native UI, nameplate marker, DTR, and VFX integrations.
+- `EventHorizon/Dtr`, `TargetingMarker`, and `WorldGraphics` contain user-facing features; shared native Atk and VFX code lives under `EventHorizon/Interop`.
 - `EventHorizon/Preview` contains preview snapshots, preview rendering, the floating preview window, world arrows, and selected-player highlights.
 - `EventHorizon/UI/Config` contains settings tabs and shared config-window layout helpers.
 - `EventHorizon/Settings` contains persisted plugin configuration.

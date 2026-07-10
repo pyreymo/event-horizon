@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Dalamud.Configuration;
-using EventHorizon.Culling.Rules;
+using EventHorizon.Culling;
 using Newtonsoft.Json;
 
 namespace EventHorizon.Settings;

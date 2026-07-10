@@ -8,17 +8,14 @@ using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using EventHorizon.Culling;
-using EventHorizon.Culling.Hooks;
-using EventHorizon.Culling.Rules;
-using EventHorizon.Integration.Dtr;
-using EventHorizon.Integration.Layout;
-using EventHorizon.Integration.NamePlate;
-using EventHorizon.Integration.Vfx;
+using EventHorizon.Dtr;
+using EventHorizon.Interop.Vfx;
 using EventHorizon.Localization;
 using EventHorizon.Preview;
-using EventHorizon.Preview.UI;
 using EventHorizon.Settings;
+using EventHorizon.TargetingMarker;
 using EventHorizon.UI.Config;
+using EventHorizon.WorldGraphics;
 
 namespace EventHorizon;
 
@@ -26,8 +23,6 @@ public sealed class Plugin : IDalamudPlugin
 {
     private const string PrimaryCommandName = "/eventhorizon";
     private const string ShortCommandName = "/eh";
-    private const int DynamicCullingRefreshIntervalMs = 200;
-    private const int DtrBarRefreshIntervalMs = 1_000;
 
     #region Services
 
@@ -94,21 +89,19 @@ public sealed class Plugin : IDalamudPlugin
     public readonly WindowSystem WindowSystem = new("EventHorizon");
     private ConfigWindow ConfigWindow { get; init; }
     private PlayerPreviewWindow PlayerPreviewWindow { get; init; }
-    private UpdateObjectArraysHook UpdateObjectArraysHook { get; init; }
+    private CullingController Culling { get; init; }
     private PlayerPreviewHighlighter PlayerPreviewHighlighter { get; init; }
     private ActorVfxController ActorVfxController { get; init; }
     private StaticVfxResourceRedirector StaticVfxResourceRedirector { get; init; }
     private StaticVfxController StaticVfxController { get; init; }
-    private DtrBarIntegration DtrBarIntegration { get; init; }
-    private DtrBackgroundController DtrBackgroundController { get; init; }
-    private LayoutGraphicsVisibilityController LayoutGraphicsVisibilityController { get; init; }
-    private NamePlateTargetingMeMarkerController NamePlateTargetingMeMarkerController { get; init; }
+    private DtrBar DtrStatusBar { get; init; }
+    private DtrBackground DtrBackground { get; init; }
+    private LayoutGraphics LayoutGraphics { get; init; }
+    private TargetingMarkerController TargetingMarkerController { get; init; }
 
-    private long nextDynamicCullingRefresh;
-    private long nextDtrBarRefresh;
-    public int HiddenPlayerCount => UpdateObjectArraysHook.HiddenPlayerCount;
-    internal PlayerKeepBudgetStats KeepBudgetStats => UpdateObjectArraysHook.KeepBudgetStats;
-    internal PlayerPreviewSnapshot PlayerPreviewSnapshot => UpdateObjectArraysHook.PlayerPreviewSnapshot;
+    public int HiddenPlayerCount => Culling.HiddenPlayerCount;
+    internal PlayerKeepBudgetStats KeepBudgetStats => Culling.KeepBudgetStats;
+    internal PlayerPreviewSnapshot PlayerPreviewSnapshot => Culling.PlayerPreviewSnapshot;
     public bool IsDutyCullingSuspended =>
         Configuration.HideAllOtherPlayers
         && Configuration.DisableInDuty
@@ -130,7 +123,7 @@ public sealed class Plugin : IDalamudPlugin
         ActorVfxController = new ActorVfxController(GameInteropProvider, SigScanner, Log);
         StaticVfxResourceRedirector = new StaticVfxResourceRedirector(PluginInterface, GameInteropProvider, Log);
         StaticVfxController = new StaticVfxController(GameInteropProvider, SigScanner, Log);
-        UpdateObjectArraysHook = new UpdateObjectArraysHook(
+        Culling = new CullingController(
             GameInteropProvider,
             Configuration,
             PlayerState,
@@ -141,10 +134,10 @@ public sealed class Plugin : IDalamudPlugin
             StaticVfxController,
             Log
         );
-        DtrBarIntegration = new DtrBarIntegration(DtrBar, Configuration, GetDtrBarState, SetPlayerHidingEnabled, ToggleConfigUi);
-        DtrBackgroundController = new DtrBackgroundController(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
-        LayoutGraphicsVisibilityController = new LayoutGraphicsVisibilityController(GameInteropProvider, ClientState, Log);
-        NamePlateTargetingMeMarkerController = new NamePlateTargetingMeMarkerController(
+        DtrStatusBar = new DtrBar(DtrBar, Configuration, GetDtrBarState, SetPlayerHidingEnabled, ToggleConfigUi);
+        DtrBackground = new DtrBackground(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
+        LayoutGraphics = new LayoutGraphics(GameInteropProvider, ClientState, Log);
+        TargetingMarkerController = new TargetingMarkerController(
             AddonLifecycle,
             GameGui,
             NamePlateGui,
@@ -170,7 +163,7 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.LanguageChanged += OnLanguageChanged;
         ChatGui.ChatMessage += OnChatMessage;
         Framework.Update += OnFrameworkUpdate;
-        UpdateObjectArraysHook.Enable();
+        Culling.Enable();
     }
 
     public void Dispose()
@@ -186,11 +179,11 @@ public sealed class Plugin : IDalamudPlugin
         ConfigWindow.Dispose();
         PlayerPreviewWindow.Dispose();
         PlayerPreviewHighlighter.Dispose();
-        DtrBarIntegration.Dispose();
-        DtrBackgroundController.Dispose();
-        LayoutGraphicsVisibilityController.Dispose();
-        NamePlateTargetingMeMarkerController.Dispose();
-        UpdateObjectArraysHook.Dispose();
+        DtrStatusBar.Dispose();
+        DtrBackground.Dispose();
+        LayoutGraphics.Dispose();
+        TargetingMarkerController.Dispose();
+        Culling.Dispose();
         StaticVfxController.Dispose();
         StaticVfxResourceRedirector.Dispose();
         ActorVfxController.Dispose();
@@ -257,11 +250,11 @@ public sealed class Plugin : IDalamudPlugin
         ConfigWindow.Open(ConfigWindow.Tab.Behavior);
     }
 
-    public void RefreshDtrBar() => DtrBarIntegration.Refresh();
+    public void RefreshDtrBar() => DtrStatusBar.RefreshNow();
 
-    public void RefreshDtrBackground() => DtrBackgroundController.Refresh();
+    public void RefreshDtrBackground() => DtrBackground.Refresh();
 
-    public void RequestTargetingMeMarkerRefresh() => NamePlateTargetingMeMarkerController.RequestRefresh();
+    public void RequestTargetingMeMarkerRefresh() => TargetingMarkerController.RequestRefresh();
 
     private void OnDraw()
     {
@@ -281,57 +274,27 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnFrameworkUpdate(IFramework framework)
     {
-        RefreshDtrBarIfNeeded();
-        LayoutGraphicsVisibilityController.Update(Configuration.HideBgPartGraphicsObjects, Configuration.HideTerrainGraphicsObjects);
+        DtrStatusBar.Update();
+        LayoutGraphics.Update(Configuration.HideBgPartGraphicsObjects, Configuration.HideTerrainGraphicsObjects);
         PlayerPreviewHighlighter.Update();
 
-        var runtime = UpdateObjectArraysHook.SynchronizeRuntimeMode();
-        var now = Environment.TickCount64;
-        var playerTopologyDirty = UpdateObjectArraysHook.ConsumePlayerTopologyDirty();
-        var schedule = CullingFrameSchedule.Decide(
-            runtime.Mode,
-            runtime.RequiresRefresh || now >= nextDynamicCullingRefresh,
-            playerTopologyDirty
-        );
-
-        if (schedule.Refresh)
-        {
-            RefreshObjectCulling();
-            nextDynamicCullingRefresh = Environment.TickCount64 + DynamicCullingRefreshIntervalMs;
-        }
-
-        if (schedule.Tick)
-        {
-            UpdateObjectArraysHook.FrameworkTick();
-        }
-    }
-
-    private void RefreshDtrBarIfNeeded()
-    {
-        var now = Environment.TickCount64;
-        if (now < nextDtrBarRefresh)
-        {
-            return;
-        }
-
-        RefreshDtrBar();
-        nextDtrBarRefresh = Environment.TickCount64 + DtrBarRefreshIntervalMs;
+        Culling.Update();
     }
 
     public void RefreshObjectCulling(bool resetRuleState = false)
     {
-        UpdateObjectArraysHook.Refresh(resetRuleState);
+        Culling.Refresh(resetRuleState);
     }
 
     internal void RefreshPlayerPreview()
     {
-        UpdateObjectArraysHook.RefreshPlayerPreview();
+        Culling.RefreshPlayerPreview();
     }
 
     internal void SetPreviewSelectedPlayer(uint? entityId)
     {
         PlayerPreviewHighlighter.SetSelectedPlayer(entityId);
-        if (UpdateObjectArraysHook.SetPreviewSelectedPlayer(entityId))
+        if (Culling.SetPreviewSelectedPlayer(entityId))
         {
             RefreshObjectCulling();
         }
@@ -353,7 +316,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnChatMessage(IChatMessage message)
     {
-        UpdateObjectArraysHook.RecordChatMessage(message);
+        Culling.RecordChatMessage(message);
     }
 
     private DtrBarState GetDtrBarState()

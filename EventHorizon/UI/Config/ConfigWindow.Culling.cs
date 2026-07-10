@@ -112,7 +112,7 @@ public partial class ConfigWindow
 
         DrawCard(
             title,
-            () => playerPreviewPanel.DrawInlineContent(PlayerKeepRuleText.GetLabel),
+            () => playerPreviewPanel.DrawInlineContent(PlayerKeepRuleLabels.GetLabel),
             DrawPlayerPreviewActions,
             ImGui.GetFrameHeight()
         );
