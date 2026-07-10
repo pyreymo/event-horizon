@@ -12,6 +12,11 @@ internal sealed class PlayerAdmissionGate
 
     private readonly PlayerSlotIdentityTracker slotTracker = new();
     private readonly List<PlayerAdmissionChange> changes = [];
+    private readonly HashSet<PlayerObjectIdentity> admissionHolds = [];
+    private readonly HashSet<PlayerObjectIdentity> newHolds = [];
+    private readonly Dictionary<PlayerObjectIdentity, int> currentSlotsByIdentity = [];
+    private long admissionHideFailed;
+    private long admissionReasserted;
 
     public PlayerAdmissionUpdateResult Apply(
         IReadOnlyList<PlayerObjectIdentity?> currentSlots,
@@ -26,27 +31,84 @@ internal sealed class PlayerAdmissionGate
         var approvedCount = 0;
         var hiddenCount = 0;
         var failedCount = 0;
+        var reassertedCount = 0;
+        newHolds.Clear();
+        BuildCurrentSlotMap(currentSlots);
+
         foreach (var change in changes)
         {
+            if (change.Kind is PlayerAdmissionChangeKind.Disappeared or PlayerAdmissionChangeKind.Replaced)
+            {
+                if (change.PreviousIdentity.HasValue)
+                {
+                    admissionHolds.Remove(change.PreviousIdentity.Value);
+                }
+            }
+
             if (change.Kind is not (PlayerAdmissionChangeKind.Appeared or PlayerAdmissionChangeKind.Replaced))
             {
                 continue;
             }
 
-            if (appliedState.IsExplicitlyVisible(change.CurrentIdentity!.Value))
+            var currentIdentity = change.CurrentIdentity!.Value;
+            if (appliedState.IsExplicitlyVisible(currentIdentity))
             {
+                admissionHolds.Remove(currentIdentity);
                 approvedCount++;
                 continue;
             }
 
+            if (admissionHolds.Add(currentIdentity))
+            {
+                newHolds.Add(currentIdentity);
+            }
+        }
+
+        if (changeCounts.BaselineEstablished && appliedState.ActiveTarget != null)
+        {
+            foreach (var identity in currentSlotsByIdentity.Keys)
+            {
+                if (!appliedState.IsExplicitlyVisible(identity) && admissionHolds.Add(identity))
+                {
+                    newHolds.Add(identity);
+                }
+            }
+        }
+
+        admissionHolds.RemoveWhere(identity => !currentSlotsByIdentity.ContainsKey(identity));
+        foreach (var identity in currentSlotsByIdentity.Keys)
+        {
+            if (appliedState.IsExplicitlyVisible(identity))
+            {
+                admissionHolds.Remove(identity);
+            }
+        }
+
+        foreach (var identity in admissionHolds)
+        {
+            var change = new PlayerAdmissionChange(
+                currentSlotsByIdentity[identity],
+                newHolds.Contains(identity) ? PlayerAdmissionChangeKind.Appeared : PlayerAdmissionChangeKind.Unchanged,
+                identity,
+                identity
+            );
             try
             {
                 hardHide(change);
-                hiddenCount++;
+                if (newHolds.Contains(identity))
+                {
+                    hiddenCount++;
+                }
+                else
+                {
+                    reassertedCount++;
+                    admissionReasserted++;
+                }
             }
             catch
             {
                 failedCount++;
+                admissionHideFailed++;
             }
         }
 
@@ -57,11 +119,33 @@ internal sealed class PlayerAdmissionGate
             changeCounts.DisappearedCount,
             approvedCount,
             hiddenCount,
-            failedCount
+            failedCount,
+            reassertedCount,
+            admissionHolds.Count
         );
     }
 
-    public void ResetTracking() => slotTracker.Reset();
+    public PlayerAdmissionDiagnostics GetDiagnostics() => new(admissionHideFailed, admissionReasserted, admissionHolds.Count);
+
+    public void ResetTracking()
+    {
+        slotTracker.Reset();
+        admissionHolds.Clear();
+        newHolds.Clear();
+        currentSlotsByIdentity.Clear();
+    }
+
+    private void BuildCurrentSlotMap(IReadOnlyList<PlayerObjectIdentity?> currentSlots)
+    {
+        currentSlotsByIdentity.Clear();
+        for (var slot = FirstPlayerSlot; slot <= LastPlayerSlot; slot += PlayerSlotStep)
+        {
+            if (currentSlots[slot].HasValue)
+            {
+                currentSlotsByIdentity[currentSlots[slot]!.Value] = slot;
+            }
+        }
+    }
 }
 
 internal sealed class PlayerTopologyDirtySignal
@@ -77,6 +161,8 @@ internal sealed class PlayerTopologyDirtySignal
             Interlocked.Exchange(ref dirty, 1);
         }
     }
+
+    public bool Consume() => Interlocked.Exchange(ref dirty, 0) != 0;
 
     public void Clear() => Interlocked.Exchange(ref dirty, 0);
 }
@@ -202,5 +288,9 @@ internal readonly record struct PlayerAdmissionUpdateResult(
     int DisappearedCount,
     int ApprovedCount,
     int HiddenCount,
-    int FailedCount
+    int FailedCount,
+    int ReassertedCount,
+    int HoldCount
 );
+
+internal readonly record struct PlayerAdmissionDiagnostics(long AdmissionHideFailed, long AdmissionReasserted, int AdmissionHoldCount);

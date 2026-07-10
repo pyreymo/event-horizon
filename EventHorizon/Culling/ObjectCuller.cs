@@ -1260,9 +1260,9 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
     public PlayerPreviewSnapshot GetPlayerPreviewSnapshot() => playerPreviewSnapshot;
 
-    public bool IsPlayerTopologyDirty() => playerTopologyDirtySignal.IsDirty;
+    public bool ConsumePlayerTopologyDirty() => playerTopologyDirtySignal.Consume();
 
-    public void ClearPlayerTopologyDirty() => playerTopologyDirtySignal.Clear();
+    public PlayerAdmissionDiagnostics GetPlayerAdmissionDiagnostics() => playerAdmissionGate.GetDiagnostics();
 
     public bool NeedsDynamicRefresh()
     {

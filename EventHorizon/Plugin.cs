@@ -332,7 +332,7 @@ public sealed class Plugin : IDalamudPlugin
         var tickTrace = UpdateObjectArraysHook.LastTickTrace;
 
         var now = Environment.TickCount64;
-        var playerTopologyDirty = UpdateObjectArraysHook.PlayerTopologyDirty;
+        var playerTopologyDirty = UpdateObjectArraysHook.ConsumePlayerTopologyDirty();
         if (now < nextDynamicCullingRefresh && !playerTopologyDirty)
         {
             LogSlowFrameworkUpdate(
@@ -393,8 +393,9 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         nextStableTopBLog = now + StableTopBLogIntervalMs;
+        var admission = UpdateObjectArraysHook.PlayerAdmissionDiagnostics;
         var message = string.Format(
-            "[StableTopB] configured={0} applied={1} status={2} fallback={3} generation={4} candidates={5} budget={6} proposalSelected={7} appliedSelected={8} previous={9} proposalRetained={10} proposalEntered={11} proposalLeft={12} proposalMissing={13} proposalReplaced={14} legacySelected={15} legacyOnly={16} proposalOnly={17} proposalLegacyDiff={18} localVelocity={19} tracked={20} speed={21:F3} motion={22:F3} bonus={23} snapshotMs={24:F3} selectorMs={25:F3} totalMs={26:F3} candidateRanks={27} proposalRanks={28} legacyRanks={29} reason={30}",
+            "[StableTopB] configured={0} applied={1} status={2} fallback={3} generation={4} candidates={5} budget={6} proposalSelected={7} appliedSelected={8} previous={9} proposalRetained={10} proposalEntered={11} proposalLeft={12} proposalMissing={13} proposalReplaced={14} legacySelected={15} legacyOnly={16} proposalOnly={17} proposalLegacyDiff={18} localVelocity={19} tracked={20} speed={21:F3} motion={22:F3} bonus={23} snapshotMs={24:F3} selectorMs={25:F3} totalMs={26:F3} candidateRanks={27} proposalRanks={28} legacyRanks={29} reason={30} admissionHideFailed={31} admissionReasserted={32} admissionHoldCount={33}",
             trace.ConfiguredSource,
             trace.AppliedSource,
             trace.Status,
@@ -425,7 +426,10 @@ public sealed class Plugin : IDalamudPlugin
             FormatRankHistogram(trace.CandidateRankHistogram),
             FormatRankHistogram(trace.ProposalRankHistogram),
             FormatRankHistogram(trace.LegacyRankHistogram),
-            trace.FailureReason ?? "n/a"
+            trace.FailureReason ?? "n/a",
+            admission.AdmissionHideFailed,
+            admission.AdmissionReasserted,
+            admission.AdmissionHoldCount
         );
 
         if (trace.Status == PlayerVisibilitySelectionStatus.Failed)

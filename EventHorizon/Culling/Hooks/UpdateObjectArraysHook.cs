@@ -3,6 +3,7 @@ using Dalamud.Game.Chat;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using EventHorizon.Culling.Rules;
+using EventHorizon.Culling.Visibility;
 using EventHorizon.Integration.Vfx;
 using EventHorizon.Preview;
 using EventHorizon.Settings;
@@ -28,7 +29,7 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
     public PlayerPreviewSnapshot PlayerPreviewSnapshot => objectCuller.GetPlayerPreviewSnapshot();
     public CullingPerformanceTrace LastRefreshTrace => objectCuller.LastUpdateTrace;
     public CullingPerformanceTrace LastTickTrace => objectCuller.LastTickTrace;
-    public bool PlayerTopologyDirty => objectCuller.IsPlayerTopologyDirty();
+    public PlayerAdmissionDiagnostics PlayerAdmissionDiagnostics => objectCuller.GetPlayerAdmissionDiagnostics();
 
     public UpdateObjectArraysHook(
         IGameInteropProvider gameInteropProvider,
@@ -58,13 +59,14 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         }
 
         OnObjectArraysUpdated(GameObjectManager.Instance(), refreshPlayerPreview);
-        objectCuller.ClearPlayerTopologyDirty();
     }
 
     public void Tick()
     {
         objectCuller.Tick(GameObjectManager.Instance());
     }
+
+    public bool ConsumePlayerTopologyDirty() => objectCuller.ConsumePlayerTopologyDirty();
 
     public void RefreshPlayerPreview()
     {

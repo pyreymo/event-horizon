@@ -434,3 +434,31 @@ PlayerAdmissionGate explicit-visible identity lookup
 - 新增 topology dirty 的 Appeared/Replaced/Disappeared/Unchanged/clear 测试。
 - 新增 applied state 的 active target、visible lookup 和 clear 测试。
 - 全套测试总数恢复为 84 个。
+
+## 2026-07-10：admission 持续 hold 与 dirty consume
+
+### 持续准入保持
+
+- `PlayerAdmissionGate` 新增完整 identity 的 `admissionHolds`。Appeared/Replaced 且未被 applied state 明确允许显示时加入 hold，并立即硬隐藏。
+- 每次 post-original scan 都会对仍存在且未获许可的 hold 再次调用 hard hide，持续重新 OR RenderFlags；不再依赖 identity 再次变化。
+- applied state 明确 `DesiredVisible=true` 时释放 hold；身份 Disappeared 或 Replaced 时移除旧 identity hold。
+- hard-hide callback 失败时 hold 保留，下一次 detour 继续重试，不再只依赖下一次 topology change。
+- tracker baseline 时：尚无 active target 仍只建立基线；已有 active target 时，所有当前未 explicit-visible 的玩家直接进入 hold 并硬隐藏，关闭恢复后的 fail-open 窗口。
+- `ResetTracking()` 同时清除 slot baseline、holds 和复用工作集合。
+
+### admission 诊断
+
+- 增加累计 `admissionHideFailed`、`admissionReasserted` 和当前 `admissionHoldCount`。
+- 三项作为正常 `[StableTopB]` 低频日志的附加字段，不恢复已删除的独立 admission 临时日志。
+- per-update result 增加 reasserted/hold count，便于纯单元测试验证；topology dirty 仍只由 Appeared/Replaced/Disappeared 驱动。
+
+### dirty 无丢信号消费
+
+- `PlayerTopologyDirtySignal.Consume()` 使用 `Interlocked.Exchange(ref dirty, 0)`。
+- Framework 在决定提前 refresh 时先原子消费 dirty；consume 之后、refresh 期间发生的新 admission 变化会重新置位并保留到下一帧，不再由 refresh 末尾无条件 clear 覆盖。
+- Hook refresh 不再在末尾清 dirty；Clear/Reset/suspend 等状态重置仍显式清除过期信号。
+
+### 测试
+
+- 新增/调整测试覆盖：Unchanged hold 每轮 reassert、explicit-visible 释放、Disappeared 释放、baseline 有 active target 时 fail-closed、hide failure 保留并重试、reassert/failure 诊断，以及 dirty consume 后的新 wakeup 保留。
+- 全套测试增加到 87 个。

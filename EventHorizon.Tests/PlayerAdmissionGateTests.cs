@@ -158,7 +158,7 @@ public sealed class PlayerAdmissionGateTests
     }
 
     [TestMethod]
-    public void UnchangedIdentity_DoesNotHideRepeatedly()
+    public void HeldUnchangedIdentity_ReassertsHardHideEveryScan()
     {
         var gate = BaselineGate();
         var hiddenCount = 0;
@@ -166,9 +166,11 @@ public sealed class PlayerAdmissionGateTests
 
         var unchanged = gate.Apply(Slots((2, IdentityA)), State(), _ => hiddenCount++);
 
-        Assert.AreEqual(1, hiddenCount);
+        Assert.AreEqual(2, hiddenCount);
         Assert.AreEqual(0, unchanged.HiddenCount);
         Assert.AreEqual(0, unchanged.ReplacedCount);
+        Assert.AreEqual(1, unchanged.ReassertedCount);
+        Assert.AreEqual(1, unchanged.HoldCount);
     }
 
     [TestMethod]
@@ -195,16 +197,22 @@ public sealed class PlayerAdmissionGateTests
 
         Assert.AreEqual(1, result.FailedCount);
         Assert.AreEqual(0, result.HiddenCount);
+        Assert.AreEqual(1, result.HoldCount);
+
+        var retry = gate.Apply(Slots((2, IdentityA)), State(), _ => { });
+        Assert.AreEqual(1, retry.ReassertedCount);
+        Assert.AreEqual(1L, gate.GetDiagnostics().AdmissionHideFailed);
+        Assert.AreEqual(1L, gate.GetDiagnostics().AdmissionReasserted);
     }
 
     [TestMethod]
-    public void TopologyDirtySignal_MarksAnySlotTopologyChangeAndClearsAfterRefresh()
+    public void TopologyDirtySignal_ConsumesBeforeRefreshAndPreservesLaterWakeup()
     {
         var changeResults = new[]
         {
-            new PlayerAdmissionUpdateResult(false, 1, 0, 0, 0, 0, 0),
-            new PlayerAdmissionUpdateResult(false, 0, 1, 0, 0, 0, 0),
-            new PlayerAdmissionUpdateResult(false, 0, 0, 1, 0, 0, 0),
+            new PlayerAdmissionUpdateResult(false, 1, 0, 0, 0, 0, 0, 0, 0),
+            new PlayerAdmissionUpdateResult(false, 0, 1, 0, 0, 0, 0, 0, 0),
+            new PlayerAdmissionUpdateResult(false, 0, 0, 1, 0, 0, 0, 0, 0),
         };
 
         foreach (var result in changeResults)
@@ -212,13 +220,58 @@ public sealed class PlayerAdmissionGateTests
             var signal = new PlayerTopologyDirtySignal();
             signal.MarkFrom(result);
             Assert.IsTrue(signal.IsDirty);
-            signal.Clear();
+            Assert.IsTrue(signal.Consume());
             Assert.IsFalse(signal.IsDirty);
+
+            signal.MarkFrom(result);
+            Assert.IsTrue(signal.Consume());
         }
 
         var unchangedSignal = new PlayerTopologyDirtySignal();
         unchangedSignal.MarkFrom(default);
+        Assert.IsFalse(unchangedSignal.Consume());
         Assert.IsFalse(unchangedSignal.IsDirty);
+    }
+
+    [TestMethod]
+    public void ExplicitVisibility_ReleasesExistingAdmissionHold()
+    {
+        var gate = BaselineGate();
+        gate.Apply(Slots((2, IdentityA)), State(), _ => { });
+        var hardHideCount = 0;
+
+        var released = gate.Apply(Slots((2, IdentityA)), State(TargetSet((IdentityA, true))), _ => hardHideCount++);
+
+        Assert.AreEqual(0, released.HoldCount);
+        Assert.AreEqual(0, released.ReassertedCount);
+        Assert.AreEqual(0, hardHideCount);
+    }
+
+    [TestMethod]
+    public void DisappearedIdentity_IsRemovedFromAdmissionHolds()
+    {
+        var gate = BaselineGate();
+        gate.Apply(Slots((2, IdentityA)), State(), _ => { });
+
+        var disappeared = gate.Apply(Slots(), State(), _ => Assert.Fail("Disappeared identity must not be hidden."));
+
+        Assert.AreEqual(1, disappeared.DisappearedCount);
+        Assert.AreEqual(0, disappeared.HoldCount);
+    }
+
+    [TestMethod]
+    public void BaselineWithActiveTarget_HoldsEveryCurrentIdentityNotExplicitlyVisible()
+    {
+        var gate = new PlayerAdmissionGate();
+        var hardHidden = new List<PlayerObjectIdentity>();
+        var state = State(TargetSet((IdentityA, true), (IdentityB, false)));
+
+        var baseline = gate.Apply(Slots((2, IdentityA), (4, IdentityB)), state, change => hardHidden.Add(change.CurrentIdentity!.Value));
+
+        Assert.IsTrue(baseline.BaselineEstablished);
+        Assert.AreEqual(1, baseline.HiddenCount);
+        Assert.AreEqual(1, baseline.HoldCount);
+        CollectionAssert.AreEqual(new[] { IdentityB }, hardHidden);
     }
 
     [TestMethod]
