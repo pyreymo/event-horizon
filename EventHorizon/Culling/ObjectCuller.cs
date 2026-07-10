@@ -16,6 +16,7 @@ namespace EventHorizon.Culling;
 
 internal sealed unsafe class ObjectCuller : IDisposable
 {
+    private const PlayerVisibilityTargetSource DefaultPlayerVisibilityTargetSource = PlayerVisibilityTargetSource.StableTopB;
     private const int MaxMaintainedPlayerActionsPerFrame = 24;
     private const int MaxHiddenPlayerVfxCreatesPerFrame = 8;
     private const int MaxPlayerRelatedObjectIndex = 199;
@@ -40,7 +41,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly ShowTransitionBudget showTransitionBudget = new();
     private readonly List<PlayerVisibilityPlanEntry> playerVisibilityPlanEntries = [];
     private readonly List<PlayerVisibilityTarget> playerVisibilityTargets = [];
-    private readonly PlayerVisibilityShadowController playerVisibilityShadowController = new();
+    private readonly List<PlayerVisibilityTarget> stablePlayerVisibilityTargets = [];
+    private readonly PlayerVisibilitySelectionController playerVisibilitySelectionController = new();
     private readonly Dictionary<ulong, string> playerPreviewNames = [];
     private readonly List<nint> hiddenPlayerVfxAddresses = [];
     private readonly List<HiddenPlayerVfxCandidate> hiddenPlayerVfxCandidates = [];
@@ -123,7 +125,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
         if (ShouldSuspendCullingInDuty())
         {
-            playerVisibilityShadowController.Reset();
+            playerVisibilitySelectionController.Reset();
             RestoreHiddenObjects(manager);
             ResetFades(manager);
             LastUpdateTrace = CreateTrace(
@@ -142,7 +144,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
 
         if (ShouldSuspendCulling(manager))
         {
-            playerVisibilityShadowController.Reset();
+            playerVisibilitySelectionController.Reset();
             RestoreHiddenObjects(manager);
             ResetFades(manager);
             LastUpdateTrace = CreateTrace(
@@ -162,7 +164,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         playerKeepRules.BeforeUpdate();
         if (!playerState.IsLoaded)
         {
-            playerVisibilityShadowController.Reset();
+            playerVisibilitySelectionController.Reset();
             RestoreHiddenObjects(manager);
             ResetFades(manager);
             LastUpdateTrace = CreateTrace(
@@ -197,19 +199,17 @@ internal sealed unsafe class ObjectCuller : IDisposable
             GetActivePreviewSelectedPlayerEntityId(),
             playerVisibilityPlanEntries
         );
-        keepBudgetStats = playerVisibilityPlan.BudgetStats;
-        var playerVisibilityTargetSet = PlayerVisibilityLegacyTargetBuilder.Build(playerVisibilityPlan, playerVisibilityTargets);
-        latestPlayerVisibilityTargetSet = playerVisibilityTargetSet;
+        var legacyTargetSet = PlayerVisibilityLegacyTargetBuilder.Build(playerVisibilityPlan, playerVisibilityTargets);
         var visibilityPlanTicks = Stopwatch.GetTimestamp() - phaseStart;
 
-        var shadowStart = Stopwatch.GetTimestamp();
-        PlayerVisibilityShadowResult shadowResult;
+        var selectionStart = Stopwatch.GetTimestamp();
+        PlayerVisibilitySelectionEvaluation selectionEvaluation;
         try
         {
             var localPlayer = objectTable.LocalPlayer;
-            shadowResult = playerVisibilityShadowController.Evaluate(
+            selectionEvaluation = playerVisibilitySelectionController.Evaluate(
                 playerVisibilityPlan,
-                playerVisibilityTargetSet,
+                legacyTargetSet,
                 configuration.LimitVisiblePlayerCount,
                 configuration.VisiblePlayerCountLimit,
                 localPlayer?.Position
@@ -217,11 +217,33 @@ internal sealed unsafe class ObjectCuller : IDisposable
         }
         catch (Exception exception)
         {
-            shadowResult = playerVisibilityShadowController.CreateFailedResult(playerVisibilityPlan.Generation, shadowStart, exception);
+            selectionEvaluation = playerVisibilitySelectionController.CreateFailedEvaluation(
+                playerVisibilityPlan.Generation,
+                selectionStart,
+                exception
+            );
         }
 
+        var activeResolution = PlayerVisibilityActiveTargetResolver.Resolve(
+            playerVisibilityPlan,
+            legacyTargetSet,
+            selectionEvaluation,
+            DefaultPlayerVisibilityTargetSource,
+            stablePlayerVisibilityTargets
+        );
+        var activeTargetSet = activeResolution.ActiveTarget;
+        selectionEvaluation = activeResolution.Evaluation;
+
+        keepBudgetStats = PlayerVisibilityActiveBudgetStats.Calculate(activeTargetSet, configuration.VisiblePlayerCountLimit);
+        selectionEvaluation = selectionEvaluation with
+        {
+            Trace = selectionEvaluation.Trace with { AppliedSelectedCount = keepBudgetStats.VisibleBudgetedPlayerCount },
+        };
+        playerVisibilitySelectionController.CommitAppliedTarget(activeTargetSet);
+        latestPlayerVisibilityTargetSet = activeTargetSet;
+
         phaseStart = Stopwatch.GetTimestamp();
-        var playerVisibilityReconciliation = playerVisibilityReconciler.Reconcile(playerVisibilityTargetSet, hiddenObjectTracker);
+        var playerVisibilityReconciliation = playerVisibilityReconciler.Reconcile(activeTargetSet, hiddenObjectTracker);
         latestPlayerVisibilityReconciliation = playerVisibilityReconciliation;
         var reconcileTicks = Stopwatch.GetTimestamp() - phaseStart;
 
@@ -239,7 +261,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         if (previewBuilder != null)
         {
             phaseStart = Stopwatch.GetTimestamp();
-            AddPlayerPreviewEntries(manager, playerVisibilityTargetSet, previewBuilder);
+            AddPlayerPreviewEntries(manager, activeTargetSet, previewBuilder);
             previewAddTicks = Stopwatch.GetTimestamp() - phaseStart;
         }
         var previewTicks = previewBeginTicks + previewAddTicks;
@@ -268,8 +290,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
             PreviewTicks: previewTicks,
             Tick: tickTrace,
             Preview: new CullingPreviewPerformanceTrace(previewBuilder?.Count ?? 0, previewBeginTicks, previewAddTicks, previewBuildTicks),
-            PlayerVisibilityClasses: playerVisibilityTargetSet.ClassificationCounts,
-            Shadow: shadowResult.Trace
+            PlayerVisibilityClasses: activeTargetSet.ClassificationCounts,
+            Selection: selectionEvaluation.Trace
         );
     }
 
@@ -375,7 +397,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
     public void ClearRuleState()
     {
         playerKeepRules.Clear();
-        playerVisibilityShadowController.Reset();
+        playerVisibilitySelectionController.Reset();
     }
 
     public void RecordChatMessage(IChatMessage message)
@@ -838,7 +860,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         previewSelectedPlayerEntityId = null;
         previewSelectionExpiresAt = 0;
         nextMaintainedVisibilityActionIndex = 0;
-        playerVisibilityShadowController.Reset();
+        playerVisibilitySelectionController.Reset();
         latestPlayerVisibilityTargetSet = null;
         latestPlayerVisibilityReconciliation = null;
     }

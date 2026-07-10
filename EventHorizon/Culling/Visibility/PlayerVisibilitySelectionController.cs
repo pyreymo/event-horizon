@@ -7,7 +7,7 @@ using EventHorizon.Culling.Selection;
 
 namespace EventHorizon.Culling.Visibility;
 
-internal sealed class PlayerVisibilityShadowController
+internal sealed class PlayerVisibilitySelectionController
 {
     private static readonly Vector3 InvalidPosition = new(float.NaN, float.NaN, float.NaN);
     private readonly PlayerVisibilitySelectionParameters parameters;
@@ -16,7 +16,7 @@ internal sealed class PlayerVisibilityShadowController
     private HashSet<PlayerObjectIdentity> selectedHistory = [];
     private bool seeded;
 
-    public PlayerVisibilityShadowController(PlayerVisibilitySelectionParameters? parameters = null)
+    public PlayerVisibilitySelectionController(PlayerVisibilitySelectionParameters? parameters = null)
     {
         this.parameters = parameters ?? PlayerVisibilitySelectionParameters.Default;
         localSpeedSmoother = new LocalSpeedSmoother(this.parameters);
@@ -27,7 +27,9 @@ internal sealed class PlayerVisibilityShadowController
     internal int SelectedHistoryCount => selectedHistory.Count;
     internal int TrackedPlayerVelocityCount => playerVelocityTracker.Count;
 
-    public PlayerVisibilityShadowResult Evaluate(
+    internal bool WasApplied(PlayerObjectIdentity identity) => selectedHistory.Contains(identity);
+
+    public PlayerVisibilitySelectionEvaluation Evaluate(
         PlayerVisibilityPlan plan,
         PlayerVisibilityTargetSet legacyTargetSet,
         bool limitVisiblePlayerCount,
@@ -41,7 +43,7 @@ internal sealed class PlayerVisibilityShadowController
         var totalStart = Stopwatch.GetTimestamp();
         if (!localPosition.HasValue || !IsFinite(localPosition.Value))
         {
-            return new PlayerVisibilityShadowResult(
+            return new PlayerVisibilitySelectionEvaluation(
                 CreateUnavailableTrace(plan.Generation, totalStart, "Local player position is unavailable."),
                 Array.Empty<PlayerObjectIdentity>()
             );
@@ -53,14 +55,14 @@ internal sealed class PlayerVisibilityShadowController
         }
         catch (Exception exception)
         {
-            return CreateFailedResult(plan.Generation, totalStart, exception);
+            return CreateFailedEvaluation(plan.Generation, totalStart, exception);
         }
     }
 
-    internal PlayerVisibilityShadowResult CreateFailedResult(int generation, long totalStart, Exception exception)
+    internal PlayerVisibilitySelectionEvaluation CreateFailedEvaluation(int generation, long totalStart, Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
-        return new PlayerVisibilityShadowResult(
+        return new PlayerVisibilitySelectionEvaluation(
             CreateFailedTrace(generation, totalStart, $"{exception.GetType().Name}: {exception.Message}"),
             Array.Empty<PlayerObjectIdentity>()
         );
@@ -74,7 +76,23 @@ internal sealed class PlayerVisibilityShadowController
         playerVelocityTracker.Clear();
     }
 
-    private PlayerVisibilityShadowResult EvaluateCore(
+    public void CommitAppliedTarget(PlayerVisibilityTargetSet appliedTarget)
+    {
+        ArgumentNullException.ThrowIfNull(appliedTarget);
+        var appliedSelection = new HashSet<PlayerObjectIdentity>();
+        foreach (var target in appliedTarget.Targets)
+        {
+            if (target.Classification == PlayerVisibilityClassification.Competitive && target.DesiredVisible)
+            {
+                appliedSelection.Add(target.Identity);
+            }
+        }
+
+        selectedHistory = appliedSelection;
+        seeded = true;
+    }
+
+    private PlayerVisibilitySelectionEvaluation EvaluateCore(
         PlayerVisibilityPlan plan,
         PlayerVisibilityTargetSet legacyTargetSet,
         bool limitVisiblePlayerCount,
@@ -150,14 +168,14 @@ internal sealed class PlayerVisibilityShadowController
 
         var currentSelected = new HashSet<PlayerObjectIdentity>();
         var selectedIdentities = new PlayerObjectIdentity[selection.SelectedSourceIndices.Count];
-        var shadowRankHistogram = new int[parameters.RankCount];
+        var proposalRankHistogram = new int[parameters.RankCount];
         for (var selectedIndex = 0; selectedIndex < selection.SelectedSourceIndices.Count; selectedIndex++)
         {
             var sourceIndex = selection.SelectedSourceIndices[selectedIndex];
             var entry = plan.Entries[sourceIndex];
             selectedIdentities[selectedIndex] = entry.Identity;
             currentSelected.Add(entry.Identity);
-            shadowRankHistogram[entry.Decision.Rank]++;
+            proposalRankHistogram[entry.Decision.Rank]++;
         }
 
         var legacySelected = GetLegacySelectedIdentities(legacyTargetSet);
@@ -168,13 +186,12 @@ internal sealed class PlayerVisibilityShadowController
         var missingPreviousCount = CountExcept(previousSelected, competitiveIdentities);
         var activeReplacedCount = CountActiveReplaced(previousSelected, competitiveIdentities, currentSelected);
         var legacyOnlyCount = CountExcept(legacySelected, currentSelected);
-        var shadowOnlyCount = CountExcept(currentSelected, legacySelected);
+        var proposalOnlyCount = CountExcept(currentSelected, legacySelected);
 
-        selectedHistory = currentSelected;
-        seeded = true;
-
-        var status = localSpeedSmoother.HasVelocityEstimate ? PlayerVisibilityShadowStatus.Ready : PlayerVisibilityShadowStatus.Warmup;
-        var trace = new PlayerVisibilityShadowTrace(
+        var status = localSpeedSmoother.HasVelocityEstimate
+            ? PlayerVisibilitySelectionStatus.Ready
+            : PlayerVisibilitySelectionStatus.Warmup;
+        var trace = new PlayerVisibilitySelectionTrace(
             status,
             plan.Generation,
             candidates.Count,
@@ -188,22 +205,22 @@ internal sealed class PlayerVisibilityShadowController
             activeReplacedCount,
             legacySelected.Count,
             legacyOnlyCount,
-            shadowOnlyCount,
-            legacyOnlyCount + shadowOnlyCount,
+            proposalOnlyCount,
+            legacyOnlyCount + proposalOnlyCount,
             localSpeedSmoother.HasVelocityEstimate,
             playerVelocityTracker.Count,
             localSpeedSmoother.SmoothedSpeed,
             selection.MotionFactor,
             selection.RetentionBonus,
             ReadOnly(candidateRankHistogram),
-            ReadOnly(shadowRankHistogram),
+            ReadOnly(proposalRankHistogram),
             ReadOnly(legacyRankHistogram),
             snapshotTicks,
             selectorTicks,
             Stopwatch.GetTimestamp() - totalStart
         );
 
-        return new PlayerVisibilityShadowResult(trace, Array.AsReadOnly(selectedIdentities));
+        return new PlayerVisibilitySelectionEvaluation(trace, Array.AsReadOnly(selectedIdentities));
     }
 
     private static HashSet<PlayerObjectIdentity> GetLegacySelectedIdentities(PlayerVisibilityTargetSet targetSet)
@@ -271,17 +288,17 @@ internal sealed class PlayerVisibilityShadowController
 
     private static ReadOnlyCollection<int> ReadOnly(int[] values) => Array.AsReadOnly(values);
 
-    private static PlayerVisibilityShadowTrace CreateUnavailableTrace(int generation, long totalStart, string reason) =>
+    private static PlayerVisibilitySelectionTrace CreateUnavailableTrace(int generation, long totalStart, string reason) =>
         new(
-            Status: PlayerVisibilityShadowStatus.Unavailable,
+            Status: PlayerVisibilitySelectionStatus.Unavailable,
             Generation: generation,
             FailureReason: reason,
             TotalTicks: Stopwatch.GetTimestamp() - totalStart
         );
 
-    private static PlayerVisibilityShadowTrace CreateFailedTrace(int generation, long totalStart, string reason) =>
+    private static PlayerVisibilitySelectionTrace CreateFailedTrace(int generation, long totalStart, string reason) =>
         new(
-            Status: PlayerVisibilityShadowStatus.Failed,
+            Status: PlayerVisibilitySelectionStatus.Failed,
             Generation: generation,
             FailureReason: reason,
             TotalTicks: Stopwatch.GetTimestamp() - totalStart
@@ -297,13 +314,13 @@ internal sealed class PlayerVisibilityShadowController
     ) => (hasOtherVelocity ? otherVelocity : Vector3.Zero) - (hasLocalVelocity ? localVelocity : Vector3.Zero);
 }
 
-internal sealed record PlayerVisibilityShadowResult(
-    PlayerVisibilityShadowTrace Trace,
+internal sealed record PlayerVisibilitySelectionEvaluation(
+    PlayerVisibilitySelectionTrace Trace,
     IReadOnlyList<PlayerObjectIdentity> SelectedIdentities
 );
 
-internal readonly record struct PlayerVisibilityShadowTrace(
-    PlayerVisibilityShadowStatus Status,
+internal readonly record struct PlayerVisibilitySelectionTrace(
+    PlayerVisibilitySelectionStatus Status,
     int Generation,
     int CandidateCount = 0,
     int Budget = 0,
@@ -316,7 +333,7 @@ internal readonly record struct PlayerVisibilityShadowTrace(
     int ActiveReplacedCount = 0,
     int LegacySelectedCount = 0,
     int LegacyOnlyCount = 0,
-    int ShadowOnlyCount = 0,
+    int ProposalOnlyCount = 0,
     int SymmetricDifference = 0,
     bool HasLocalVelocityEstimate = false,
     int TrackedPlayerVelocityCount = 0,
@@ -324,18 +341,23 @@ internal readonly record struct PlayerVisibilityShadowTrace(
     double MotionFactor = 0,
     long RetentionBonus = 0,
     IReadOnlyList<int>? CandidateRankHistogram = null,
-    IReadOnlyList<int>? ShadowRankHistogram = null,
+    IReadOnlyList<int>? ProposalRankHistogram = null,
     IReadOnlyList<int>? LegacyRankHistogram = null,
     long SnapshotTicks = 0,
     long SelectorTicks = 0,
     long TotalTicks = 0,
+    PlayerVisibilityTargetSource ConfiguredSource = PlayerVisibilityTargetSource.Legacy,
+    PlayerVisibilityTargetSource AppliedSource = PlayerVisibilityTargetSource.Legacy,
+    PlayerVisibilityFallbackReason FallbackReason = PlayerVisibilityFallbackReason.None,
+    int ProposalSelectedCount = 0,
+    int AppliedSelectedCount = 0,
     string? FailureReason = null
 )
 {
-    public bool HasValue => Status != PlayerVisibilityShadowStatus.None;
+    public bool HasValue => Status != PlayerVisibilitySelectionStatus.None;
 }
 
-internal enum PlayerVisibilityShadowStatus
+internal enum PlayerVisibilitySelectionStatus
 {
     None,
     Ready,

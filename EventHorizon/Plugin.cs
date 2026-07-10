@@ -33,7 +33,7 @@ public sealed class Plugin : IDalamudPlugin
     private const int DtrBarRefreshIntervalMs = 1_000;
     private const double SlowFrameworkUpdateLogThresholdMs = 2.0;
     private const int SlowFrameworkUpdateLogCooldownMs = 1_000;
-    private const int StableTopBShadowLogIntervalMs = 2_000;
+    private const int StableTopBLogIntervalMs = 2_000;
 
     #region Services
 
@@ -114,7 +114,7 @@ public sealed class Plugin : IDalamudPlugin
     private long nextDynamicCullingRefresh;
     private long nextDtrBarRefresh;
     private long nextSlowFrameworkUpdateLog;
-    private long nextStableTopBShadowLog;
+    private long nextStableTopBLog;
     public int HiddenPlayerCount => UpdateObjectArraysHook.HiddenPlayerCount;
     internal PlayerKeepBudgetStats KeepBudgetStats => UpdateObjectArraysHook.KeepBudgetStats;
     internal PlayerPreviewSnapshot PlayerPreviewSnapshot => UpdateObjectArraysHook.PlayerPreviewSnapshot;
@@ -305,7 +305,7 @@ public sealed class Plugin : IDalamudPlugin
         phaseStart = Stopwatch.GetTimestamp();
         PlayerPreviewHighlighter.Update();
         var highlightTicks = Stopwatch.GetTimestamp() - phaseStart;
-        LogStableTopBShadowIfNeeded();
+        LogStableTopBIfNeeded();
 
         phaseStart = Stopwatch.GetTimestamp();
         if (!NeedsDynamicCullingRefresh())
@@ -377,28 +377,32 @@ public sealed class Plugin : IDalamudPlugin
         nextDtrBarRefresh = Environment.TickCount64 + DtrBarRefreshIntervalMs;
     }
 
-    private void LogStableTopBShadowIfNeeded()
+    private void LogStableTopBIfNeeded()
     {
         var now = Environment.TickCount64;
-        if (now < nextStableTopBShadowLog)
+        if (now < nextStableTopBLog)
         {
             return;
         }
 
-        var trace = UpdateObjectArraysHook.LastRefreshTrace.Shadow;
+        var trace = UpdateObjectArraysHook.LastRefreshTrace.Selection;
         if (!trace.HasValue)
         {
             return;
         }
 
-        nextStableTopBShadowLog = now + StableTopBShadowLogIntervalMs;
+        nextStableTopBLog = now + StableTopBLogIntervalMs;
         var message = string.Format(
-            "[StableTopB Shadow] status={0} generation={1} candidates={2} budget={3} selected={4} previous={5} retained={6} entered={7} left={8} missing={9} replaced={10} legacySelected={11} legacyOnly={12} shadowOnly={13} diff={14} localVelocity={15} tracked={16} speed={17:F3} motion={18:F3} bonus={19} snapshotMs={20:F3} selectorMs={21:F3} totalMs={22:F3} candidateRanks={23} shadowRanks={24} legacyRanks={25} reason={26}",
+            "[StableTopB] configured={0} applied={1} status={2} fallback={3} generation={4} candidates={5} budget={6} proposalSelected={7} appliedSelected={8} previous={9} proposalRetained={10} proposalEntered={11} proposalLeft={12} proposalMissing={13} proposalReplaced={14} legacySelected={15} legacyOnly={16} proposalOnly={17} proposalLegacyDiff={18} localVelocity={19} tracked={20} speed={21:F3} motion={22:F3} bonus={23} snapshotMs={24:F3} selectorMs={25:F3} totalMs={26:F3} candidateRanks={27} proposalRanks={28} legacyRanks={29} reason={30}",
+            trace.ConfiguredSource,
+            trace.AppliedSource,
             trace.Status,
+            trace.FallbackReason,
             trace.Generation,
             trace.CandidateCount,
             trace.Budget,
-            trace.SelectedCount,
+            trace.ProposalSelectedCount,
+            trace.AppliedSelectedCount,
             trace.PreviousSelectedCount,
             trace.RetainedCount,
             trace.EnteredCount,
@@ -407,7 +411,7 @@ public sealed class Plugin : IDalamudPlugin
             trace.ActiveReplacedCount,
             trace.LegacySelectedCount,
             trace.LegacyOnlyCount,
-            trace.ShadowOnlyCount,
+            trace.ProposalOnlyCount,
             trace.SymmetricDifference,
             trace.HasLocalVelocityEstimate,
             trace.TrackedPlayerVelocityCount,
@@ -418,12 +422,12 @@ public sealed class Plugin : IDalamudPlugin
             ToMilliseconds(trace.SelectorTicks),
             ToMilliseconds(trace.TotalTicks),
             FormatRankHistogram(trace.CandidateRankHistogram),
-            FormatRankHistogram(trace.ShadowRankHistogram),
+            FormatRankHistogram(trace.ProposalRankHistogram),
             FormatRankHistogram(trace.LegacyRankHistogram),
             trace.FailureReason ?? "n/a"
         );
 
-        if (trace.Status == PlayerVisibilityShadowStatus.Failed)
+        if (trace.Status == PlayerVisibilitySelectionStatus.Failed)
         {
             Log.Error(message);
         }
@@ -486,7 +490,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         return string.Format(
-            "total={0:F3} guard={1:F3} keep={2:F3} plan={3:F3} reconcile={4:F3} preview={5:F3} previewTrace[{6}] classes[{7}] actions={8} pendingShow={9} pendingHide={10} previewActive={11} tick[{12}] shadow[{13}]",
+            "total={0:F3} guard={1:F3} keep={2:F3} plan={3:F3} reconcile={4:F3} preview={5:F3} previewTrace[{6}] classes[{7}] actions={8} pendingShow={9} pendingHide={10} previewActive={11} tick[{12}] selection[{13}]",
             ToMilliseconds(trace.TotalTicks),
             ToMilliseconds(trace.GuardTicks),
             ToMilliseconds(trace.KeepPlanTicks),
@@ -500,11 +504,11 @@ public sealed class Plugin : IDalamudPlugin
             trace.PendingHideCount,
             trace.RefreshPlayerPreview,
             FormatTickTrace(trace.Tick),
-            FormatShadowTrace(trace.Shadow)
+            FormatSelectionTrace(trace.Selection)
         );
     }
 
-    private static string FormatShadowTrace(PlayerVisibilityShadowTrace trace) =>
+    private static string FormatSelectionTrace(PlayerVisibilitySelectionTrace trace) =>
         trace.HasValue
             ? string.Format(
                 "status={0} total={1:F3} snapshot={2:F3} selector={3:F3}",

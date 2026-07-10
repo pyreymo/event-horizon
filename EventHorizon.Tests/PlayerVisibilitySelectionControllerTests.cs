@@ -10,7 +10,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace EventHorizon.Tests;
 
 [TestClass]
-public sealed class PlayerVisibilityShadowControllerTests
+public sealed class PlayerVisibilitySelectionControllerTests
 {
     private static readonly PlayerObjectIdentity IdentityA = Identity(1);
     private static readonly PlayerObjectIdentity IdentityB = Identity(2);
@@ -19,28 +19,28 @@ public sealed class PlayerVisibilityShadowControllerTests
     [TestMethod]
     public void FirstEvaluation_SeedsPreviousSelectionFromLegacyOnce()
     {
-        var controller = new PlayerVisibilityShadowController();
+        var controller = new PlayerVisibilitySelectionController();
         var entries = new[] { Entry(IdentityA, rank: 7), Entry(IdentityB, rank: 0) };
 
         var result = Evaluate(controller, Plan(1, 0, entries), Legacy(entries, IdentityA), budget: 1, Vector3.Zero);
 
-        Assert.AreEqual(PlayerVisibilityShadowStatus.Warmup, result.Trace.Status);
+        Assert.AreEqual(PlayerVisibilitySelectionStatus.Warmup, result.Trace.Status);
         Assert.AreEqual(1, result.Trace.PreviousSelectedCount);
         Assert.AreEqual(IdentityB, result.SelectedIdentities.Single());
         Assert.IsTrue(controller.IsSeeded);
     }
 
     [TestMethod]
-    public void LaterEvaluation_UsesPreviousShadowInsteadOfChangedLegacy()
+    public void LaterEvaluation_UsesPreviousAppliedSelectionInsteadOfChangedLegacy()
     {
-        var controller = new PlayerVisibilityShadowController();
+        var controller = new PlayerVisibilitySelectionController();
         var firstEntries = new[] { Entry(IdentityA, rank: 7), Entry(IdentityB, rank: 0) };
         Evaluate(controller, Plan(1, 0, firstEntries), Legacy(firstEntries, IdentityA), 1, Vector3.Zero);
         var secondEntries = new[] { Entry(IdentityA, rank: 0), Entry(IdentityB, rank: 7) };
 
         var second = Evaluate(controller, Plan(2, 1_000, secondEntries), Legacy(secondEntries, IdentityA), 1, new Vector3(5, 0, 0));
 
-        Assert.AreEqual(PlayerVisibilityShadowStatus.Ready, second.Trace.Status);
+        Assert.AreEqual(PlayerVisibilitySelectionStatus.Ready, second.Trace.Status);
         Assert.AreEqual(IdentityB, second.SelectedIdentities.Single());
         Assert.AreEqual(1, second.Trace.RetainedCount);
         Assert.AreEqual(2, second.Trace.SymmetricDifference);
@@ -49,7 +49,7 @@ public sealed class PlayerVisibilityShadowControllerTests
     [TestMethod]
     public void Reset_CausesNextEvaluationToSeedFromLegacyAgain()
     {
-        var controller = new PlayerVisibilityShadowController();
+        var controller = new PlayerVisibilitySelectionController();
         var entries = new[] { Entry(IdentityA, rank: 0), Entry(IdentityB, rank: 0) };
         Evaluate(controller, Plan(1, 0, entries), Legacy(entries, IdentityA), 1, Vector3.Zero);
         controller.Reset();
@@ -63,7 +63,7 @@ public sealed class PlayerVisibilityShadowControllerTests
     [TestMethod]
     public void ChangedFullIdentity_DoesNotInheritRetention()
     {
-        var controller = new PlayerVisibilityShadowController();
+        var controller = new PlayerVisibilitySelectionController();
         var firstEntries = new[] { Entry(IdentityA, rank: 0) };
         Evaluate(controller, Plan(1, 0, firstEntries), Legacy(firstEntries, IdentityA), 1, Vector3.Zero);
         var replacementIdentity = IdentityA with { Address = (nint)999 };
@@ -85,7 +85,7 @@ public sealed class PlayerVisibilityShadowControllerTests
     [TestMethod]
     public void MissingPreviousPlayer_CountsAsLeftAndMissing()
     {
-        var controller = new PlayerVisibilityShadowController();
+        var controller = new PlayerVisibilitySelectionController();
         var firstEntries = new[] { Entry(IdentityA, 0), Entry(IdentityB, 0) };
         Evaluate(controller, Plan(1, 0, firstEntries), Legacy(firstEntries, IdentityA, IdentityB), 2, Vector3.Zero);
         var secondEntries = new[] { Entry(IdentityB, 0), Entry(IdentityC, 7) };
@@ -101,7 +101,7 @@ public sealed class PlayerVisibilityShadowControllerTests
     [TestMethod]
     public void StillActivePreviousPlayerThatLosesBudget_CountsAsActiveReplaced()
     {
-        var controller = new PlayerVisibilityShadowController();
+        var controller = new PlayerVisibilitySelectionController();
         var entries = new[] { Entry(IdentityA, 0), Entry(IdentityB, 1) };
         Evaluate(controller, Plan(1, 0, entries), Legacy(entries, IdentityA, IdentityB), 2, Vector3.Zero);
 
@@ -113,22 +113,22 @@ public sealed class PlayerVisibilityShadowControllerTests
     }
 
     [TestMethod]
-    public void LegacyShadowDifference_IsCalculatedFromCompleteIdentitySets()
+    public void LegacyProposalDifference_IsCalculatedFromCompleteIdentitySets()
     {
-        var controller = new PlayerVisibilityShadowController();
+        var controller = new PlayerVisibilitySelectionController();
         var entries = new[] { Entry(IdentityA, 7), Entry(IdentityB, 0) };
 
         var result = Evaluate(controller, Plan(1, 0, entries), Legacy(entries, IdentityA), 1, Vector3.Zero);
 
         Assert.AreEqual(1, result.Trace.LegacyOnlyCount);
-        Assert.AreEqual(1, result.Trace.ShadowOnlyCount);
+        Assert.AreEqual(1, result.Trace.ProposalOnlyCount);
         Assert.AreEqual(2, result.Trace.SymmetricDifference);
     }
 
     [TestMethod]
     public void RankHistograms_AreCorrectAndIndependentAcrossEvaluations()
     {
-        var controller = new PlayerVisibilityShadowController();
+        var controller = new PlayerVisibilitySelectionController();
         var firstEntries = new[] { Entry(IdentityA, 0), Entry(IdentityB, 7), Entry(IdentityC, 7) };
         var first = Evaluate(controller, Plan(1, 0, firstEntries), Legacy(firstEntries, IdentityA), 2, Vector3.Zero);
         var firstCandidateHistogram = first.Trace.CandidateRankHistogram!.ToArray();
@@ -138,14 +138,14 @@ public sealed class PlayerVisibilityShadowControllerTests
 
         CollectionAssert.AreEqual(new[] { 1, 0, 0, 0, 0, 0, 0, 2 }, firstCandidateHistogram);
         CollectionAssert.AreEqual(firstCandidateHistogram, first.Trace.CandidateRankHistogram!.ToArray());
-        Assert.AreEqual(2, first.Trace.ShadowRankHistogram!.Sum());
+        Assert.AreEqual(2, first.Trace.ProposalRankHistogram!.Sum());
         Assert.AreEqual(1, first.Trace.LegacyRankHistogram!.Sum());
     }
 
     [TestMethod]
     public void SelectedSourceIndex_MapsBackToPlanEntryIdentity()
     {
-        var controller = new PlayerVisibilityShadowController();
+        var controller = new PlayerVisibilitySelectionController();
         var entries = new[] { Entry(IdentityA, 0, PlayerVisibilityClassification.ForceHidden), Entry(IdentityB, 7), Entry(IdentityC, 0) };
 
         var result = Evaluate(controller, Plan(1, 0, entries), Legacy(entries, IdentityC), 1, Vector3.Zero);
@@ -156,7 +156,7 @@ public sealed class PlayerVisibilityShadowControllerTests
     [TestMethod]
     public void UnlimitedVisibility_UsesCompetitiveCandidateCountAsBudget()
     {
-        var controller = new PlayerVisibilityShadowController();
+        var controller = new PlayerVisibilitySelectionController();
         var entries = new[] { Entry(IdentityA, 0), Entry(IdentityB, 1), Entry(IdentityC, 2) };
 
         var result = controller.Evaluate(Plan(1, 0, entries), Legacy(entries), false, 1, Vector3.Zero);
@@ -168,12 +168,12 @@ public sealed class PlayerVisibilityShadowControllerTests
     [TestMethod]
     public void FirstLocalSample_MarksTraceWarmupWhileStillSelecting()
     {
-        var controller = new PlayerVisibilityShadowController();
+        var controller = new PlayerVisibilitySelectionController();
         var entries = new[] { Entry(IdentityA, 0) };
 
         var result = Evaluate(controller, Plan(1, 0, entries), Legacy(entries, IdentityA), 1, Vector3.Zero);
 
-        Assert.AreEqual(PlayerVisibilityShadowStatus.Warmup, result.Trace.Status);
+        Assert.AreEqual(PlayerVisibilitySelectionStatus.Warmup, result.Trace.Status);
         Assert.IsFalse(result.Trace.HasLocalVelocityEstimate);
         Assert.AreEqual(1, result.Trace.SelectedCount);
     }
@@ -181,7 +181,7 @@ public sealed class PlayerVisibilityShadowControllerTests
     [TestMethod]
     public void UnavailableAndFailedEvaluations_DoNotCommitHistory()
     {
-        var controller = new PlayerVisibilityShadowController();
+        var controller = new PlayerVisibilitySelectionController();
         var validEntries = new[] { Entry(IdentityA, 0) };
         Evaluate(controller, Plan(1, 0, validEntries), Legacy(validEntries, IdentityA), 1, Vector3.Zero);
         var historyCount = controller.SelectedHistoryCount;
@@ -190,15 +190,15 @@ public sealed class PlayerVisibilityShadowControllerTests
         var invalidEntries = new[] { Entry(IdentityB, 8) };
         var failed = Evaluate(controller, Plan(3, 2_000, invalidEntries), Legacy(invalidEntries), 1, Vector3.Zero);
 
-        Assert.AreEqual(PlayerVisibilityShadowStatus.Unavailable, unavailable.Trace.Status);
-        Assert.AreEqual(PlayerVisibilityShadowStatus.Failed, failed.Trace.Status);
+        Assert.AreEqual(PlayerVisibilitySelectionStatus.Unavailable, unavailable.Trace.Status);
+        Assert.AreEqual(PlayerVisibilitySelectionStatus.Failed, failed.Trace.Status);
         Assert.AreEqual(historyCount, controller.SelectedHistoryCount);
     }
 
     [TestMethod]
     public void Reset_ClearsSeedHistoryAndAllMotionState()
     {
-        var controller = new PlayerVisibilityShadowController();
+        var controller = new PlayerVisibilitySelectionController();
         var entries = new[] { Entry(IdentityA, 0) };
         Evaluate(controller, Plan(1, 0, entries), Legacy(entries, IdentityA), 1, Vector3.Zero);
         Evaluate(controller, Plan(2, 1_000, entries), Legacy(entries, IdentityA), 1, new Vector3(1, 0, 0));
@@ -210,13 +210,13 @@ public sealed class PlayerVisibilityShadowControllerTests
         Assert.AreEqual(0, controller.TrackedPlayerVelocityCount);
 
         var afterReset = Evaluate(controller, Plan(3, 2_000, entries), Legacy(entries, IdentityA), 1, new Vector3(100, 0, 0));
-        Assert.AreEqual(PlayerVisibilityShadowStatus.Warmup, afterReset.Trace.Status);
+        Assert.AreEqual(PlayerVisibilitySelectionStatus.Warmup, afterReset.Trace.Status);
     }
 
     [TestMethod]
     public void Evaluation_DoesNotModifyPlanOrLegacyInputs()
     {
-        var controller = new PlayerVisibilityShadowController();
+        var controller = new PlayerVisibilitySelectionController();
         var entries = new[] { Entry(IdentityA, 0), Entry(IdentityB, 1) };
         var plan = Plan(1, 0, entries);
         var legacy = Legacy(entries, IdentityA);
@@ -321,18 +321,28 @@ public sealed class PlayerVisibilityShadowControllerTests
         var other = new Vector3(5, 2, -1);
         var local = new Vector3(1, -3, 4);
 
-        Assert.AreEqual(other - local, PlayerVisibilityShadowController.CalculateRelativeVelocity(other, true, local, true));
-        Assert.AreEqual(other, PlayerVisibilityShadowController.CalculateRelativeVelocity(other, true, local, false));
-        Assert.AreEqual(-local, PlayerVisibilityShadowController.CalculateRelativeVelocity(other, false, local, true));
+        Assert.AreEqual(other - local, PlayerVisibilitySelectionController.CalculateRelativeVelocity(other, true, local, true));
+        Assert.AreEqual(other, PlayerVisibilitySelectionController.CalculateRelativeVelocity(other, true, local, false));
+        Assert.AreEqual(-local, PlayerVisibilitySelectionController.CalculateRelativeVelocity(other, false, local, true));
     }
 
-    private static PlayerVisibilityShadowResult Evaluate(
-        PlayerVisibilityShadowController controller,
+    private static PlayerVisibilitySelectionEvaluation Evaluate(
+        PlayerVisibilitySelectionController controller,
         PlayerVisibilityPlan plan,
         PlayerVisibilityTargetSet legacy,
         int budget,
         Vector3 localPosition
-    ) => controller.Evaluate(plan, legacy, true, budget, localPosition);
+    )
+    {
+        var evaluation = controller.Evaluate(plan, legacy, true, budget, localPosition);
+        if (evaluation.Trace.Status is PlayerVisibilitySelectionStatus.Ready or PlayerVisibilitySelectionStatus.Warmup)
+        {
+            var appliedTarget = PlayerVisibilityStableTargetBuilder.Build(plan, evaluation.SelectedIdentities, []);
+            controller.CommitAppliedTarget(appliedTarget);
+        }
+
+        return evaluation;
+    }
 
     private static PlayerVisibilityPlan Plan(int generation, long milliseconds, IReadOnlyList<PlayerVisibilityPlanEntry> entries) =>
         new(generation, milliseconds, entries, default, default);

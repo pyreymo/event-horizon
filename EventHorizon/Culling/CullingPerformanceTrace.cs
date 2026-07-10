@@ -17,7 +17,7 @@ internal readonly record struct CullingPerformanceTrace(
     CullingTickPerformanceTrace Tick,
     CullingPreviewPerformanceTrace Preview = default,
     PlayerVisibilityClassificationCounts PlayerVisibilityClasses = default,
-    PlayerVisibilityShadowTrace Shadow = default
+    PlayerVisibilitySelectionTrace Selection = default
 )
 {
     public bool HasValue => TotalTicks > 0;

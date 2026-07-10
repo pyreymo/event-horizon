@@ -238,3 +238,93 @@ PlayerKeepPlan
 - 尚未在本轮自动化环境中启动游戏确认约 2 秒日志节奏及真实 candidate/churn/耗时分布。
 - 尚未基于实机 shadow 数据调整 motion threshold、EMA half-life、最大可信速度或 retention 参数；当前不得声称改善实际帧率或可见性稳定性。
 - 本轮停在 Phase 3，不进入 Phase 4，不增加正式接管开关。
+
+## 2026-07-10：Phase 4 完成（Stable Top-B 正式接管）
+
+### active target 数据流
+
+```text
+PlayerKeepPlan
+→ PlayerVisibilityPlan
+→ PlayerVisibilityLegacyTargetBuilder（始终先构建）
+→ PlayerVisibilitySelectionController.Evaluate（proposal，不提交 history）
+→ PlayerVisibilityActiveTargetResolver
+    ├─ StableTopB target（Ready）
+    └─ legacy fallback（Legacy/Warmup/Unavailable/Failed/target build failure）
+→ CommitAppliedTarget(active target)
+→ PlayerVisibilityReconciler(active target)
+→ preview(active target)
+→ TickVisibility
+```
+
+- `DefaultPlayerVisibilityTargetSource` 是 `ObjectCuller` 内唯一、集中的 private const，默认值为 `StableTopB`；没有配置字段、命令或 UI。
+- `latestPlayerVisibilityTargetSet` 保存 active target；reconciler、preview 和后续执行层共享同一个 active target。
+- stable target 不直接写 RenderFlags，所有 hide/show、swap、fade、VFX 和执行预算仍通过现有 reconciler/executor。
+
+### 重命名与职责
+
+- `PlayerVisibilityShadowController` 重命名为 `PlayerVisibilitySelectionController`。
+- result、trace、status 同步重命名为 `PlayerVisibilitySelectionEvaluation`、`PlayerVisibilitySelectionTrace`、`PlayerVisibilitySelectionStatus`。
+- 正式代码和测试代码中不再保留误导性的 Shadow 标识符；proposal 与 legacy 的对照字段改为 Proposal 命名。
+
+### source policy 与 fallback
+
+- 新增纯逻辑 `PlayerVisibilityTargetSourcePolicy`：配置为 Legacy 时始终使用 legacy；StableTopB 仅在 Ready 时使用 stable。
+- Warmup、Unavailable、Failed 分别记录明确 fallback reason；stable target 映射异常记录 `TargetBuildFailed` 并同步回退 legacy。
+- 新增 `PlayerVisibilityActiveTargetResolver`，只包围 source decision 和 stable builder；任何失败都返回当前 generation 已先构建的 legacy target，不允许 active target 为 null 或沿用旧 stable target。
+- legacy builder 和 reconciler 位于异常边界之外，其自身错误不会被 silent fallback 吞掉。
+
+### history commit 语义
+
+- `Evaluate(...)` 只生成 proposal，不再修改 seed/history。
+- 新增 `CommitAppliedTarget(...)`，只提取 active target 中 `Competitive && DesiredVisible` 的完整 identity，并原子替换 applied history；不清理运动 tracker。
+- reset 后第一次 evaluation 仍从当前 legacy target 临时播种 previous selection，但只有 active source 决定后才提交实际 target。
+- Stable 成功提交 stable；Legacy 模式及所有 fallback 提交 legacy。下一轮 retention 始终对应上一轮真正交给 reconciler 的集合。
+- `Reset()` 继续同时清理 seed、committed history、本地 EMA 和全部玩家 motion state。
+
+### stable target 与 CutByBudget
+
+- 新增 `PlayerVisibilityStableTargetBuilder`：BypassVisible 始终显示；selected Competitive 显示；未 selected Competitive 隐藏；ForceHidden 隐藏；Unmanaged 不进入 target。
+- Stable 模式下只有 `Competitive && !DesiredVisible` 设置 `CutByBudget=true`，不复用 legacy `entry.CutByBudget`。
+- selected identity 必须映射到当前 plan 的 Competitive entry；缺失或分类不符立即抛出明确异常并触发 fallback。
+- target set 使用 plan generation、创建时间和 classification counts，并复制复用 buffer 的最终内容。
+
+### active budget stats
+
+- 新增纯逻辑 `PlayerVisibilityActiveBudgetStats.Calculate(...)`。
+- `BudgetExemptPlayerCount` 来自 active BypassVisible；`VisibleBudgetedPlayerCount` 来自 active `Competitive && DesiredVisible`；limit 保留配置值的 `[1,100]` Clamp。
+- DTR 和现有 UI 读取的 `keepBudgetStats` 在 active target 确定后重算，不再使用 legacy plan 的 visible count。
+
+### trace 与日志
+
+- selection trace 新增 `ConfiguredSource`、`AppliedSource`、`FallbackReason`、`ProposalSelectedCount`、`AppliedSelectedCount`。
+- churn 字段继续明确表示 proposal churn；fallback 时不会冒充实际可见性切换。
+- 日志前缀改为 `[StableTopB]`，字段明确使用 `proposalRetained/Entered/Left/Missing/Replaced` 和 `proposalLegacyDiff`，并同时输出 configured/applied/status/fallback。
+- 2 秒冷却、motion、retention、三份 rank histogram 和 snapshot/selector/total 耗时继续保留。
+
+### 新增与修改文件
+
+- 新增 `PlayerVisibilityStableTargetBuilder.cs`。
+- 新增 `PlayerVisibilityTargetSourcePolicy.cs`（包含 policy、resolver 和 active resolution）。
+- `PlayerVisibilityShadowController.cs` 重命名为 `PlayerVisibilitySelectionController.cs` 并改为显式 commit。
+- `PlayerVisibilityShadowControllerTests.cs` 重命名为 `PlayerVisibilitySelectionControllerTests.cs`。
+- 新增 `PlayerVisibilityActiveTargetTests.cs`。
+- 修改 `ObjectCuller.cs`、`CullingPerformanceTrace.cs` 和 `Plugin.cs` 完成 active source 接线、stats 与日志。
+
+### 测试与验证
+
+- 保留原 54 个测试，新增 17 个 Phase 4 测试，总计 71 个。
+- 新增覆盖 stable target 分类/CutByBudget/输入只读/错误 identity、Legacy/Ready/Warmup/Unavailable/Failed policy、target build fallback、同一 active target、显式 history commit、fallback 后 retention、stable commit、active stats、proposal/applied trace 分离、failed evaluation legacy continuation，以及默认 source 常量。
+- `dotnet csharpier format .`：通过，64 个文件检查/格式化。
+- `dotnet build EventHorizon.sln -c Debug`：通过，0 warning、0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning、0 error。
+- `dotnet test EventHorizon.sln -c Debug`：实际发现并通过 71/71。
+- `dotnet test EventHorizon.sln -c Release`：实际发现并通过 71/71。
+- 源码和构建产物未发现 OR-Tools；未增加 worker、异步任务、配置 UI、命令或绕过 reconciler 的 RenderFlags 写入。
+- `UpdateObjectArraysHook`、reconciler、ShowTransitionBudget、fade、hidden tracker、VFX、非玩家隐藏和 maintained action 轮转均未修改。
+
+### 明确延期与实机验证
+
+- native detour dirty-signal 迁移未完成，延期到 Phase 4.1 或 Phase 5 前的独立提交；本轮没有声称线程职责迁移完成。
+- 尚需实机验证 Ready 时 `applied=StableTopB`、首轮 Warmup fallback、异常 fallback 日志、DTR active count，以及 stable 正式接管后的实际可见性收敛行为。
+- legacy builder 和可靠 fallback 继续保留；本轮停在 Phase 4，不执行 Phase 5 清理。
