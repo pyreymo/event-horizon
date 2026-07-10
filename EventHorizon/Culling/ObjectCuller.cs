@@ -43,6 +43,10 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly List<PlayerVisibilityTarget> playerVisibilityTargets = [];
     private readonly List<PlayerVisibilityTarget> stablePlayerVisibilityTargets = [];
     private readonly PlayerVisibilitySelectionController playerVisibilitySelectionController = new();
+    private readonly PlayerAdmissionGate playerAdmissionGate = new();
+    private readonly PlayerObjectIdentity?[] playerAdmissionSlotIdentities = new PlayerObjectIdentity?[
+        PlayerAdmissionGate.LastPlayerSlot + 1
+    ];
     private readonly Dictionary<ulong, string> playerPreviewNames = [];
     private readonly List<nint> hiddenPlayerVfxAddresses = [];
     private readonly List<HiddenPlayerVfxCandidate> hiddenPlayerVfxCandidates = [];
@@ -372,6 +376,47 @@ internal sealed unsafe class ObjectCuller : IDisposable
             PreviewTicks: 0,
             Tick: tickTrace,
             PlayerVisibilityClasses: latestPlayerVisibilityTargetSet?.ClassificationCounts ?? default
+        );
+    }
+
+    public void ApplyPlayerAdmissionGate(GameObjectManager* manager)
+    {
+        if (
+            manager == null
+            || !IsCullingEnabled()
+            || !playerState.IsLoaded
+            || ShouldSuspendCullingInDuty()
+            || ShouldSuspendCulling(manager)
+        )
+        {
+            playerAdmissionGate.ResetTracking();
+            return;
+        }
+
+        for (
+            var slot = PlayerAdmissionGate.FirstPlayerSlot;
+            slot <= PlayerAdmissionGate.LastPlayerSlot;
+            slot += PlayerAdmissionGate.PlayerSlotStep
+        )
+        {
+            var gameObject = manager->Objects.IndexSorted[slot].Value;
+            playerAdmissionSlotIdentities[slot] =
+                gameObject != null && gameObject->ObjectKind == ObjectKind.Pc ? PlayerObjectIdentity.From(gameObject) : null;
+        }
+
+        playerAdmissionGate.Apply(
+            playerAdmissionSlotIdentities,
+            latestPlayerVisibilityTargetSet,
+            change =>
+            {
+                var gameObject = manager->Objects.IndexSorted[change.Slot].Value;
+                if (!change.CurrentIdentity.HasValue || !change.CurrentIdentity.Value.Matches(gameObject))
+                {
+                    throw new InvalidOperationException("Admission slot identity changed before the hard hide could be applied.");
+                }
+
+                Hide(gameObject, change.Slot);
+            }
         );
     }
 
@@ -860,6 +905,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         previewSelectedPlayerEntityId = null;
         previewSelectionExpiresAt = 0;
         nextMaintainedVisibilityActionIndex = 0;
+        playerAdmissionGate.ResetTracking();
         playerVisibilitySelectionController.Reset();
         latestPlayerVisibilityTargetSet = null;
         latestPlayerVisibilityReconciliation = null;

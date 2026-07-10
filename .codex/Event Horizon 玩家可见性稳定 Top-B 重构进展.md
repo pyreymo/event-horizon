@@ -328,3 +328,79 @@ PlayerKeepPlan
 - native detour dirty-signal 迁移未完成，延期到 Phase 4.1 或 Phase 5 前的独立提交；本轮没有声称线程职责迁移完成。
 - 尚需实机验证 Ready 时 `applied=StableTopB`、首轮 Warmup fallback、异常 fallback 日志、DTR active count，以及 stable 正式接管后的实际可见性收敛行为。
 - legacy builder 和可靠 fallback 继续保留；本轮停在 Phase 4，不执行 Phase 5 清理。
+
+## 2026-07-10：Phase 4 admission gate 验证实验
+
+### 目的
+
+- 本实验不调整 Stable Top-B 数学模型，而是验证新玩家闪现是否主要来自 `UpdateObjectArrays` 返回后到下一次 200ms refresh 之间缺少即时准入控制。
+- 不阻止 GameObject/Character/DrawObject 建立，不增加新 hook；只在现有 post-original detour 中对新槽位身份执行 fail-closed hard hide。
+
+### detour 数据流
+
+```text
+hook.Original(objectManager)
+→ ApplyPlayerAdmissionGate（实验开启时）
+→ ObjectCuller.Tick（保持原职责）
+```
+
+- `UpdateObjectArraysHook` 内部 private const `EnablePlayerAdmissionExperiment = true`；没有配置、命令或 UI。
+- 扫描范围严格为玩家偶数槽 `2,4,...,198`，不读取 0、1 或奇数槽。
+- 首次有效扫描只建立完整 `PlayerObjectIdentity` 槽位基线，不隐藏任何对象。
+- 后续区分 Appeared、Replaced、Disappeared 和 Unchanged；完整 identity 的地址、GameObjectId 或 EntityId 任一变化均为 Replaced。
+
+### admission 决策与硬隐藏
+
+- Appeared/Replaced 新 identity 只有在当前 active target 中完整 identity 匹配且 `DesiredVisible=true` 时获准保持可见。
+- active target 缺失、identity 未找到或 `DesiredVisible=false` 时，立即调用 `ObjectCuller.Hide(...)`，复用 `HiddenObjectTracker` 和既有 InvisibleFlag。
+- admission 路径不调用 fade controller、ShowTransitionBudget、规则、plan、selector、target builder、reconciler，也不修改 Stable Top-B history。
+- 下一次正常 refresh/reconcile 若选择该玩家，现有 `RestoreIfHidden` 路径可以恢复 admission hide。
+- identity 未变化时不重复隐藏；同槽旧 identity 的许可不会继承给新 identity。
+
+### reset 与失败隔离
+
+- manager 不可用、culling 关闭、玩家未加载、duty suspend、低人数 suspend、Clear/Reset/dispose 时清除 slot tracker；恢复后第一次扫描重新只建基线。
+- hard-hide 前重新校验当前槽位仍匹配 change identity；若期间变化或 hide callback 异常，只增加 failed 计数，不阻止后续 `Tick()`。
+- 实验关闭时 gate 不扫描、不隐藏，也不建立基线。
+
+### 累计日志
+
+- 新增约 2 秒冷却的累计日志，不包含玩家身份：
+
+```text
+[Player Admission Experiment] updates=... appeared=... replaced=... disappeared=... approved=... hidden=... failed=... maxReplaced=... maxHidden=... maxTotalMs=...
+```
+
+- `maxReplaced`、`maxHidden` 和 `maxTotalMs` 用于对照大规模 block swap 与 admission gate 执行成本。
+
+### 新增与修改文件
+
+- 新增 `EventHorizon/Culling/Visibility/PlayerAdmissionGate.cs`：纯槽位 tracker、gate decision、per-update result 和累计 stats。
+- 新增 `EventHorizon.Tests/PlayerAdmissionGateTests.cs`。
+- 修改 `UpdateObjectArraysHook.cs`：post-original admission 实验调用和内部常量。
+- 修改 `ObjectCuller.cs`：构造当前槽位 snapshot、active target 审批、HiddenObjectTracker 硬隐藏及 reset/stats 接口。
+- 修改 `Plugin.cs`：低频累计实验日志。
+
+### 测试与验证
+
+- 保留原 71 个测试，新增 13 个 admission 测试，总计 84 个。
+- 新增覆盖首次基线、Appeared/Replaced/Disappeared、完整 identity 三字段变化、槽位范围、active target approve/deny、旧许可不继承、hard-hide-only callback、unchanged 不重复、reset、disabled、hide failure 计数和实验常量开启。
+- `dotnet csharpier format .`：通过，66 个文件检查/格式化。
+- `dotnet build EventHorizon.sln -c Debug`：通过，0 warning、0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning、0 error。
+- `dotnet test EventHorizon.sln -c Debug`：实际发现并通过 84/84。
+- `dotnet test EventHorizon.sln -c Release`：实际发现并通过 84/84。
+
+### 实机验收边界
+
+- 本轮只建立验证实验，不能据此声称闪烁已经解决。
+- 需要实机对比 admission 实验开启前后闪现，并观察 `replaced/hidden/maxReplaced/maxHidden`：若闪烁消失，说明现有 hook 点足够早而主要缺失即时准入；若仍出现首帧，则需另行寻找模型首次可见前的更早 hook 点。
+
+## 2026-07-10：Player admission gate 收编为正式功能
+
+- 实机确认当前 post-original admission gate 行为没有问题后，移除 `EnablePlayerAdmissionExperiment` 临时常量；gate 现在是 `UpdateObjectArrays` original 返回后的固定正常步骤。
+- 删除全部 `[Player Admission Experiment]` 累计日志、日志冷却状态、累计 stats 和 max timing 统计。
+- 删除 gate 的 `enabled` 参数和实验关闭分支；正常运行时始终扫描并执行准入控制，culling/加载/suspend 状态仍由 `ObjectCuller.ApplyPlayerAdmissionGate` 统一 reset。
+- 保留每次 scan 的纯结果类型和 hard-hide failure 隔离，供单元测试验证，不产生运行时日志。
+- admission 仍只负责槽位身份变化和立即硬隐藏，不进入 fade、ShowTransitionBudget、selection history 或其他正式选择逻辑。
+- 删除仅服务于临时开关的 2 个测试，保留 11 个 admission 行为测试；全套测试总数为 82。

@@ -88,6 +88,7 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
     private void* Detour(GameObjectManager* objectManager)
     {
         var result = hook.Original(objectManager);
+        objectCuller.ApplyPlayerAdmissionGate(objectManager);
         objectCuller.Tick(objectManager);
 
         return result;
