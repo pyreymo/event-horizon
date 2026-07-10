@@ -1,7 +1,5 @@
 using System;
 using System.Diagnostics;
-using System.IO;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Plugin.Services;
@@ -13,27 +11,12 @@ internal sealed class CpSatPhase0Probe(IPluginLog log, string pluginDirectory) :
 {
     private const string SolverParameters = "num_search_workers:1 max_time_in_seconds:1.0";
 
-    private static readonly string[] NativeDependencyNames =
-    [
-        "abseil_dll.dll",
-        "zlib1.dll",
-        "bz2.dll",
-        "re2.dll",
-        "libutf8_validity.dll",
-        "libprotobuf.dll",
-        "highs.dll",
-        "libscip.dll",
-        "ortools.dll",
-        "google-ortools-native.dll",
-    ];
-
     private readonly IPluginLog log = log;
     private readonly string pluginDirectory = pluginDirectory;
     private readonly object gate = new();
     private CancellationTokenSource? cancellationTokenSource;
     private Task? runningTask;
     private bool disposed;
-    private bool nativeLibrariesLoaded;
 
     public bool TryStart()
     {
@@ -144,31 +127,7 @@ internal sealed class CpSatPhase0Probe(IPluginLog log, string pluginDirectory) :
 
     private void EnsureNativeLibrariesLoaded(CancellationToken cancellationToken)
     {
-        var loadedNow = false;
-        lock (gate)
-        {
-            if (disposed || nativeLibrariesLoaded)
-            {
-                return;
-            }
-
-            foreach (var dependencyName in NativeDependencyNames)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var dependencyPath = Path.Combine(pluginDirectory, dependencyName);
-                if (!File.Exists(dependencyPath))
-                {
-                    throw new FileNotFoundException("OR-Tools native dependency was not found.", dependencyPath);
-                }
-
-                NativeLibrary.Load(dependencyPath);
-            }
-
-            nativeLibrariesLoaded = true;
-            loadedNow = true;
-        }
-
-        if (loadedNow)
+        if (OrToolsNativeDependencyLoader.EnsureLoaded(pluginDirectory, cancellationToken))
         {
             log.Information("[CP-SAT Phase 0] Loaded OR-Tools native dependencies from {PluginDirectory}.", pluginDirectory);
         }

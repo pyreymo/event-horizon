@@ -35,32 +35,6 @@
 - 完成游戏内 `/eh cpsat` 验证后，进入 Phase 1：建立 `BypassVisible / Competitive / ForceHidden / Unmanaged` 分类和独立目标集合状态，先继续使用旧排序生成目标集合。
 - Phase 1 起步时优先做数据结构和执行状态边界，不同时删除 preview/fade/VFX；只有发现它们阻碍目标状态分离或线程所有权收敛时再按计划裁剪。
 
----
-实机反馈：
-
-游戏内加载 C:\Users\Administrator\Documents\Repos\event-horizon\EventHorizon\bin\Debug\win-x64\EventHorizon.dll
-
-运行 /eh cpsat 报错，错误日志如下：
-
-22:16:07.843 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe started on a background worker.
-22:16:07.864 | 错误 | [EventHorizon] [CP-SAT Phase 0] Probe failed.
-	System.TypeInitializationException: The type initializer for 'Google.OrTools.Sat.operations_research_satPINVOKE' threw an exception.
-	 ---> System.TypeInitializationException: The type initializer for 'SWIGExceptionHelper' threw an exception.
-	 ---> System.DllNotFoundException: Unable to load DLL 'C:\Users\Administrator\AppData\Local\Temp\tfnvcumw.0uc\google-ortools-native.dll' or one of its dependencies: 找不到指定的模块。 (0x8007007E)
-	   at System.Runtime.InteropServices.NativeLibrary.Load(String libraryPath)
-	   at System.Runtime.Loader.AssemblyLoadContext.LoadUnmanagedDllFromPath(String unmanagedDllPath)
-	   at Dalamud.Plugin.Internal.Loader.ManagedLoadContext.LoadUnmanagedDll(String unmanagedDllName) in /_/Dalamud/Plugin/Internal/Loader/ManagedLoadContext.cs:line 219
-	   at Google.OrTools.Sat.operations_research_satPINVOKE.SWIGExceptionHelper.SWIGRegisterExceptionCallbacks_operations_research_sat(ExceptionDelegate applicationDelegate, ExceptionDelegate arithmeticDelegate, ExceptionDelegate divideByZeroDelegate, ExceptionDelegate indexOutOfRangeDelegate, ExceptionDelegate invalidCastDelegate, ExceptionDelegate invalidOperationDelegate, ExceptionDelegate ioDelegate, ExceptionDelegate nullReferenceDelegate, ExceptionDelegate outOfMemoryDelegate, ExceptionDelegate overflowDelegate, ExceptionDelegate systemExceptionDelegate)
-	   at Google.OrTools.Sat.operations_research_satPINVOKE.SWIGExceptionHelper.SWIGRegisterExceptionCallbacks_operations_research_sat(ExceptionDelegate applicationDelegate, ExceptionDelegate arithmeticDelegate, ExceptionDelegate divideByZeroDelegate, ExceptionDelegate indexOutOfRangeDelegate, ExceptionDelegate invalidCastDelegate, ExceptionDelegate invalidOperationDelegate, ExceptionDelegate ioDelegate, ExceptionDelegate nullReferenceDelegate, ExceptionDelegate outOfMemoryDelegate, ExceptionDelegate overflowDelegate, ExceptionDelegate systemExceptionDelegate)
-	   at Google.OrTools.Sat.operations_research_satPINVOKE.SWIGExceptionHelper..cctor()
-	   --- End of inner exception stack trace ---
-	   at Google.OrTools.Sat.operations_research_satPINVOKE..cctor()
-	   --- End of inner exception stack trace ---
-	   at Google.OrTools.Sat.operations_research_satPINVOKE.new_SolveWrapper()
-	   at Google.OrTools.Sat.CpSolver.CreateSolveWrapper()
-	   at Google.OrTools.Sat.CpSolver.Solve(CpModel model, SolutionCallback cb)
-	   at EventHorizon.Culling.Optimization.CpSatPhase0Probe.Run(CancellationToken cancellationToken) in C:\Users\Administrator\Documents\Repos\event-horizon\EventHorizon\Culling\Optimization\CpSatPhase0Probe.cs:line 82
-
 ## 2026-07-09 22:20 +08:00
 
 针对实机反馈处理：
@@ -80,15 +54,6 @@
 
 - 重新加载 Debug/win-x64 插件后执行 `/eh cpsat`。
 - 预期先看到 `[CP-SAT Phase 0] Loaded OR-Tools native dependencies from ...`，随后看到 `[CP-SAT Phase 0] Probe finished status=Optimal ...`。
-
----
-实机反馈：
-
-验收通过。
-
-22:20:59.661 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe started on a background worker.
-22:20:59.684 | 信息 | [EventHorizon] [CP-SAT Phase 0] Loaded OR-Tools native dependencies from "C:\Users\Administrator\Documents\Repos\event-horizon\EventHorizon\bin\Debug\win-x64".
-22:20:59.720 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe finished status=Optimal objective=180 selected=2/3 model=10.665ms solve=35.480ms total=56.436ms wall=1.120ms parameters="num_search_workers:1 max_time_in_seconds:1.0"
 
 ## 2026-07-09 22:26 +08:00
 
@@ -158,25 +123,6 @@
 
 - Phase 1 继续小步：整理 `ObjectCuller.Update` 的阶段命名，使 `分类快照 -> 目标集合 -> reconcile -> apply` 的顺序在代码中更直观。
 - 随后进入 Phase 2：建立不可变快照、generation、位置历史、速度预测、单 worker 和 latest-wins 提交机制。
-
----
-实机反馈：
-
-性能补测结果，首次加载时间较长，后续计算速度正常。
-
-22:37:19.327 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe started on a background worker.
-22:37:19.341 | 信息 | [EventHorizon] [CP-SAT Phase 0] Loaded OR-Tools native dependencies from "C:\Users\Administrator\Documents\Repos\event-horizon\EventHorizon\bin\Debug\win-x64".
-22:37:19.374 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe finished status=Optimal objective=180 selected=2/3 model=10.908ms solve=32.918ms total=44.759ms wall=0.420ms parameters="num_search_workers:1 max_time_in_seconds:1.0"
-22:37:21.034 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe started on a background worker.
-22:37:21.035 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe finished status=Optimal objective=180 selected=2/3 model=0.034ms solve=0.417ms total=0.452ms wall=0.329ms parameters="num_search_workers:1 max_time_in_seconds:1.0"
-22:37:22.232 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe started on a background worker.
-22:37:22.233 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe finished status=Optimal objective=180 selected=2/3 model=0.020ms solve=0.401ms total=0.422ms wall=0.329ms parameters="num_search_workers:1 max_time_in_seconds:1.0"
-22:37:23.399 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe started on a background worker.
-22:37:23.399 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe finished status=Optimal objective=180 selected=2/3 model=0.013ms solve=0.401ms total=0.416ms wall=0.330ms parameters="num_search_workers:1 max_time_in_seconds:1.0"
-22:37:24.374 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe started on a background worker.
-22:37:24.374 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe finished status=Optimal objective=180 selected=2/3 model=0.013ms solve=0.407ms total=0.421ms wall=0.336ms parameters="num_search_workers:1 max_time_in_seconds:1.0"
-22:37:25.365 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe started on a background worker.
-22:37:25.366 | 信息 | [EventHorizon] [CP-SAT Phase 0] Probe finished status=Optimal objective=180 selected=2/3 model=0.022ms solve=0.539ms total=0.563ms wall=0.464ms parameters="num_search_workers:1 max_time_in_seconds:1.0"
 
 ## 2026-07-09 22:44 +08:00
 
@@ -309,13 +255,145 @@
 - Phase 2 继续：实机观察慢帧日志中的 `worker[...]`，确认 `submitted/completed/replaced/exceptions/lastAge` 符合 latest-wins 预期。
 - 若统计稳定，下一步进入 Phase 3 的不可见 CP-SAT worker 求解：先构造模型并发布求解统计，仍不采纳目标结果。
 
----
+## 2026-07-10 10:26 +08:00
+
+本轮步长：进入 Phase 3，接入不可见的 CP-SAT worker 影子求解和统计；求解结果仍不生成或采纳目标集合。
+
+实机反馈结论：
+
+- Phase 2 worker 在约 40-53 个 competitive 玩家、预算 25 的场景中累计完成 2833 次提交，`completed == submitted`、`replaced=0`、`exceptions=0`。
+- worker 输入统计耗时约 0.001-0.004 ms，结果年龄为 0 ms；latest-wins 骨架可以继续承载真实后台求解。
+
+本轮实现：
+
+- `PlayerVisibilitySolverSnapshot` 增加本地玩家位置纯托管值，供 worker 计算其他玩家预测位置到本地参考点的距离；worker 仍不读取游戏对象或 Dalamud service。
+- 新增 `PlayerVisibilityCpSatOptimizer`：固定 8 个预测步、200 ms 步长、`Gamma=0.85`、`Epsilon=0.03`、`UtilityScale=10000`。
+- 量化效用第一版由 keep-rule rank 主项和预测距离软项构成；预测使用快照中的玩家位置/速度，本地参考位置在当前 8 步内保持不动。第一版仍不使用视口效用。
+- 直接以每步 Top-B 计算 `JStar`，并加入 `J >= ceil(0.97 * JStar)`。
+- 模型为每位 competitive 玩家、每个预测步建立可见变量和切换变量，加入逐步预算与绝对值切换约束，单次求解 `minimize M * D - J`。
+- solver 固定 `num_search_workers:1 max_time_in_seconds:0.002`，只在已有专用 worker 中执行。
+- OR-Tools native 依赖加载提取为可复用的 `OrToolsNativeDependencyLoader`；Phase 0 探针与真实 worker 共用同一加载状态。
+- worker trace 增加 `cpSat[status vars constraints jStar threshold finalJ finalD stepSwitch model solve]`。
+
+保留行为：
+
+- CP-SAT 结果仅用于统计；`PlayerVisibilityLegacyTargetBuilder` 仍是唯一目标集合来源。
+- 不发布 solver target result，不采纳 `x[:,0]`，不改变 RenderFlags、fade、show budget 或 reconciliation 行为。
+- 超时/非可行状态的目标 fallback 尚未接入，因为当前没有结果采纳。
+
+验证结果：
+
+- `dotnet csharpier format .`：已运行。
+- `dotnet build EventHorizon.sln`：通过，0 warning，0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning，0 error。
+- `git diff --check`：通过；仅有仓库现有换行符提示。
+
+下一步建议：
+
+- 实机观察 `cpSat[...]`：重点记录 `status`、`solve`、`lastWorker`、`replaced`、`exceptions`、`lastAge`，确认 40-60 人规模下 2 ms 上限的可行/最优比例和尾延迟。
+- 同时观察 `finalJ >= threshold`、`finalD` 和 `stepSwitch` 是否合理；在数据稳定前不接入目标结果。
+
+## 2026-07-10 10:49 +08:00
+
+本轮步长：增加 CP-SAT worker 定期统计日志，避免只能等待超过慢帧阈值的 Framework 日志。
+
+实现：
+
+- `Plugin.OnFrameworkUpdate` 增加轻量时间检查，每约 30 秒上报一次最近缓存的 worker/CP-SAT 统计。
+- 日志格式为 `[CP-SAT] Periodic worker[...]`，复用现有 `FormatSolverWorkerStats`，包含 submitted/completed/replaced/exceptions、结果年龄、worker 总耗时及完整 `cpSat[...]`。
+- 首次获得有效 worker 统计后会立即输出第一条，之后按 30 秒间隔输出。
+- 定期上报不扫描玩家、不提交额外快照、不触发额外求解，也不改变慢帧日志原有行为。
+
+验证结果：
+
+- `dotnet csharpier format .`：已运行。
+- `dotnet build EventHorizon.sln`：通过，0 warning，0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning，0 error。
+- `git diff --check`：通过；仅有仓库现有换行符提示。
+
+下一步观察：
+
+- 实机收集若干条 `[CP-SAT] Periodic worker[...]`，重点比较 `status`、`solve`、`lastWorker`、`replaced`、`exceptions` 和 `lastAge`。
+
+## 2026-07-10 10:51 +08:00
+
 实机反馈：
 
-23:05:37.120 | 信息 | [EventHorizon] [Perf] Slow Plugin.OnFrameworkUpdate total=3.460ms dtr=0.000ms layoutGraphics=0.001ms highlight=0.000ms dynamicCheck=0.001ms tick=0.051ms refresh=3.405ms didRefresh=True tickTrace="total=0.050 guard=0.001 keep=0.000 plan=0.000 reconcile=0.000 preview=0.000 solver[input=40 budget=25 pos=40 resultAge=250ms worker[submitted=370 completed=370 replaced=0 exceptions=0 lastGen=370 lastInput=40 lastBudget=25 lastPos=40 lastVel=40 lastAge=0ms lastWorker=0.001ms ok=True]] previewTrace[n/a] classes[bypass=4 competitive=40 forceHidden=55 unmanaged=1] actions=99 pendingShow=0 pendingHide=0 previewActive=False tick[total=0.048 playerActions=0.005 nonPlayer=0.031 pruneHidden=0.011 pruneFades=0.000 hiddenVfx=0.001 hiddenVfxTrace[collect=0.000 project=0.000 show=0.000 prune=0.000 clear=0.000 hidden=0 visible=0 active=0 created=0 updated=0 skipped=0 removed=0 deferred=0] unaccounted=0.000 actions=99]" refreshTrace="total=3.405 guard=0.020 keep=0.070 plan=3.266 reconcile=0.009 preview=0.000 solver[input=40 budget=25 pos=40 resultAge=0ms worker[submitted=371 completed=371 replaced=0 exceptions=0 lastGen=371 lastInput=40 lastBudget=25 lastPos=40 lastVel=40 lastAge=0ms lastWorker=0.004ms ok=True]] previewTrace[n/a] classes[bypass=4 competitive=40 forceHidden=55 unmanaged=1] actions=99 pendingShow=0 pendingHide=0 previewActive=False tick[total=0.040 playerActions=0.002 nonPlayer=0.028 pruneHidden=0.010 pruneFades=0.000 hiddenVfx=0.000 hiddenVfxTrace[collect=0.000 project=0.000 show=0.000 prune=0.000 clear=0.000 hidden=0 visible=0 active=0 created=0 updated=0 skipped=0 removed=0 deferred=0] unaccounted=0.000 actions=99]"
-23:06:17.453 | 信息 | [EventHorizon] [Perf] Slow Plugin.OnFrameworkUpdate total=2.404ms dtr=0.000ms layoutGraphics=0.001ms highlight=0.000ms dynamicCheck=0.001ms tick=0.049ms refresh=2.352ms didRefresh=True tickTrace="total=0.049 guard=0.001 keep=0.000 plan=0.000 reconcile=0.000 preview=0.000 solver[input=42 budget=25 pos=42 resultAge=234ms worker[submitted=534 completed=534 replaced=0 exceptions=0 lastGen=534 lastInput=42 lastBudget=25 lastPos=42 lastVel=42 lastAge=0ms lastWorker=0.001ms ok=True]] previewTrace[n/a] classes[bypass=4 competitive=42 forceHidden=53 unmanaged=1] actions=99 pendingShow=0 pendingHide=0 previewActive=False tick[total=0.046 playerActions=0.004 nonPlayer=0.030 pruneHidden=0.011 pruneFades=0.000 hiddenVfx=0.001 hiddenVfxTrace[collect=0.000 project=0.000 show=0.000 prune=0.000 clear=0.000 hidden=0 visible=0 active=0 created=0 updated=0 skipped=0 removed=0 deferred=0] unaccounted=0.000 actions=99]" refreshTrace="total=2.351 guard=0.021 keep=0.070 plan=2.192 reconcile=0.008 preview=0.000 solver[input=42 budget=25 pos=42 resultAge=0ms worker[submitted=535 completed=535 replaced=0 exceptions=0 lastGen=535 lastInput=42 lastBudget=25 lastPos=42 lastVel=42 lastAge=0ms lastWorker=0.004ms ok=True]] previewTrace[n/a] classes[bypass=4 competitive=42 forceHidden=53 unmanaged=1] actions=99 pendingShow=0 pendingHide=1 previewActive=False tick[total=0.059 playerActions=0.007 nonPlayer=0.025 pruneHidden=0.010 pruneFades=0.016 hiddenVfx=0.000 hiddenVfxTrace[collect=0.000 project=0.000 show=0.000 prune=0.000 clear=0.000 hidden=0 visible=0 active=0 created=0 updated=0 skipped=0 removed=0 deferred=0] unaccounted=0.000 actions=99]"
-23:08:27.861 | 信息 | [EventHorizon] [Perf] Slow Plugin.OnFrameworkUpdate total=2.426ms dtr=0.026ms layoutGraphics=0.001ms highlight=0.000ms dynamicCheck=0.000ms tick=0.050ms refresh=2.349ms didRefresh=True tickTrace="total=0.049 guard=0.001 keep=0.000 plan=0.000 reconcile=0.000 preview=0.000 solver[input=45 budget=25 pos=45 resultAge=235ms worker[submitted=1066 completed=1066 replaced=0 exceptions=0 lastGen=1066 lastInput=45 lastBudget=25 lastPos=45 lastVel=45 lastAge=0ms lastWorker=0.002ms ok=True]] previewTrace[n/a] classes[bypass=4 competitive=45 forceHidden=49 unmanaged=1] actions=98 pendingShow=0 pendingHide=1 previewActive=False tick[total=0.047 playerActions=0.009 nonPlayer=0.027 pruneHidden=0.010 pruneFades=0.000 hiddenVfx=0.001 hiddenVfxTrace[collect=0.000 project=0.000 show=0.000 prune=0.000 clear=0.000 hidden=0 visible=0 active=0 created=0 updated=0 skipped=0 removed=0 deferred=0] unaccounted=0.000 actions=98]" refreshTrace="total=2.348 guard=0.019 keep=0.068 plan=2.194 reconcile=0.011 preview=0.000 solver[input=45 budget=25 pos=45 resultAge=0ms worker[submitted=1067 completed=1067 replaced=0 exceptions=0 lastGen=1067 lastInput=45 lastBudget=25 lastPos=45 lastVel=45 lastAge=0ms lastWorker=0.002ms ok=True]] previewTrace[n/a] classes[bypass=4 competitive=45 forceHidden=49 unmanaged=1] actions=98 pendingShow=0 pendingHide=0 previewActive=False tick[total=0.054 playerActions=0.002 nonPlayer=0.041 pruneHidden=0.010 pruneFades=0.000 hiddenVfx=0.001 hiddenVfxTrace[collect=0.000 project=0.000 show=0.000 prune=0.000 clear=0.000 hidden=0 visible=0 active=0 created=0 updated=0 skipped=0 removed=0 deferred=0] unaccounted=0.000 actions=98]"
-23:10:38.002 | 信息 | [EventHorizon] [Perf] Slow Plugin.OnFrameworkUpdate total=2.982ms dtr=0.001ms layoutGraphics=0.001ms highlight=0.000ms dynamicCheck=0.001ms tick=0.055ms refresh=2.924ms didRefresh=True tickTrace="total=0.054 guard=0.001 keep=0.000 plan=0.000 reconcile=0.000 preview=0.000 solver[input=47 budget=25 pos=47 resultAge=250ms worker[submitted=1597 completed=1597 replaced=0 exceptions=0 lastGen=1597 lastInput=47 lastBudget=25 lastPos=47 lastVel=45 lastAge=0ms lastWorker=0.003ms ok=True]] previewTrace[n/a] classes[bypass=4 competitive=47 forceHidden=47 unmanaged=1] actions=97 pendingShow=1 pendingHide=11 previewActive=False tick[total=0.052 playerActions=0.012 nonPlayer=0.028 pruneHidden=0.011 pruneFades=0.000 hiddenVfx=0.001 hiddenVfxTrace[collect=0.000 project=0.000 show=0.000 prune=0.000 clear=0.000 hidden=0 visible=0 active=0 created=0 updated=0 skipped=0 removed=0 deferred=0] unaccounted=0.000 actions=97]" refreshTrace="total=2.923 guard=0.019 keep=2.782 plan=0.076 reconcile=0.009 preview=0.000 solver[input=47 budget=25 pos=47 resultAge=0ms worker[submitted=1598 completed=1598 replaced=0 exceptions=0 lastGen=1598 lastInput=47 lastBudget=25 lastPos=47 lastVel=47 lastAge=0ms lastWorker=0.002ms ok=True]] previewTrace[n/a] classes[bypass=4 competitive=47 forceHidden=47 unmanaged=1] actions=98 pendingShow=0 pendingHide=0 previewActive=False tick[total=0.036 playerActions=0.002 nonPlayer=0.023 pruneHidden=0.011 pruneFades=0.000 hiddenVfx=0.000 hiddenVfxTrace[collect=0.000 project=0.000 show=0.000 prune=0.000 clear=0.000 hidden=0 visible=0 active=0 created=0 updated=0 skipped=0 removed=0 deferred=0] unaccounted=0.000 actions=98]"
-23:10:55.258 | 信息 | [EventHorizon] [Perf] Slow Plugin.OnFrameworkUpdate total=2.862ms dtr=0.000ms layoutGraphics=0.001ms highlight=0.000ms dynamicCheck=0.001ms tick=0.051ms refresh=2.808ms didRefresh=True tickTrace="total=0.051 guard=0.001 keep=0.000 plan=0.000 reconcile=0.000 preview=0.000 solver[input=46 budget=25 pos=46 resultAge=250ms worker[submitted=1668 completed=1668 replaced=0 exceptions=0 lastGen=1668 lastInput=46 lastBudget=25 lastPos=46 lastVel=44 lastAge=0ms lastWorker=0.002ms ok=True]] previewTrace[n/a] classes[bypass=4 competitive=46 forceHidden=49 unmanaged=1] actions=99 pendingShow=0 pendingHide=5 previewActive=False tick[total=0.048 playerActions=0.009 nonPlayer=0.027 pruneHidden=0.011 pruneFades=0.000 hiddenVfx=0.001 hiddenVfxTrace[collect=0.000 project=0.000 show=0.000 prune=0.000 clear=0.000 hidden=0 visible=0 active=0 created=0 updated=0 skipped=0 removed=0 deferred=0] unaccounted=0.000 actions=99]" refreshTrace="total=2.808 guard=0.019 keep=2.655 plan=0.089 reconcile=0.009 preview=0.000 solver[input=46 budget=25 pos=46 resultAge=0ms worker[submitted=1669 completed=1669 replaced=0 exceptions=0 lastGen=1669 lastInput=46 lastBudget=25 lastPos=46 lastVel=46 lastAge=0ms lastWorker=0.004ms ok=True]] previewTrace[n/a] classes[bypass=4 competitive=46 forceHidden=49 unmanaged=1] actions=99 pendingShow=0 pendingHide=0 previewActive=False tick[total=0.034 playerActions=0.002 nonPlayer=0.022 pruneHidden=0.010 pruneFades=0.000 hiddenVfx=0.000 hiddenVfxTrace[collect=0.000 project=0.000 show=0.000 prune=0.000 clear=0.000 hidden=0 visible=0 active=0 created=0 updated=0 skipped=0 removed=0 deferred=0] unaccounted=0.000 actions=99]"
-23:11:40.238 | 信息 | [EventHorizon] [Perf] Slow Plugin.OnFrameworkUpdate total=2.045ms dtr=0.026ms layoutGraphics=0.001ms highlight=0.000ms dynamicCheck=0.000ms tick=0.051ms refresh=1.965ms didRefresh=True tickTrace="total=0.051 guard=0.001 keep=0.000 plan=0.000 reconcile=0.000 preview=0.000 solver[input=50 budget=25 pos=50 resultAge=250ms worker[submitted=1851 completed=1851 replaced=0 exceptions=0 lastGen=1851 lastInput=50 lastBudget=25 lastPos=50 lastVel=50 lastAge=0ms lastWorker=0.002ms ok=True]] previewTrace[n/a] classes[bypass=4 competitive=50 forceHidden=45 unmanaged=1] actions=98 pendingShow=1 pendingHide=1 previewActive=False tick[total=0.049 playerActions=0.010 nonPlayer=0.027 pruneHidden=0.011 pruneFades=0.000 hiddenVfx=0.001 hiddenVfxTrace[collect=0.000 project=0.000 show=0.000 prune=0.000 clear=0.000 hidden=0 visible=0 active=0 created=0 updated=0 skipped=0 removed=0 deferred=0] unaccounted=0.000 actions=98]" refreshTrace="total=1.965 guard=0.019 keep=0.072 plan=1.829 reconcile=0.008 preview=0.000 solver[input=50 budget=25 pos=50 resultAge=0ms worker[submitted=1852 completed=1852 replaced=0 exceptions=0 lastGen=1852 lastInput=50 lastBudget=25 lastPos=50 lastVel=50 lastAge=0ms lastWorker=0.002ms ok=True]] previewTrace[n/a] classes[bypass=4 competitive=50 forceHidden=45 unmanaged=1] actions=99 pendingShow=0 pendingHide=0 previewActive=False tick[total=0.036 playerActions=0.002 nonPlayer=0.024 pruneHidden=0.010 pruneFades=0.000 hiddenVfx=0.000 hiddenVfxTrace[collect=0.000 project=0.000 show=0.000 prune=0.000 clear=0.000 hidden=0 visible=0 active=0 created=0 updated=0 skipped=0 removed=0 deferred=0] unaccounted=0.000 actions=99]"
-23:15:41.393 | 信息 | [EventHorizon] [Perf] Slow Plugin.OnFrameworkUpdate total=3.739ms dtr=0.000ms layoutGraphics=0.001ms highlight=0.000ms dynamicCheck=0.001ms tick=0.064ms refresh=3.671ms didRefresh=True tickTrace="total=0.064 guard=0.001 keep=0.000 plan=0.000 reconcile=0.000 preview=0.000 solver[input=53 budget=25 pos=53 resultAge=234ms worker[submitted=2832 completed=2832 replaced=0 exceptions=0 lastGen=2832 lastInput=53 lastBudget=25 lastPos=53 lastVel=53 lastAge=0ms lastWorker=0.002ms ok=True]] previewTrace[n/a] classes[bypass=4 competitive=53 forceHidden=41 unmanaged=1] actions=98 pendingShow=0 pendingHide=0 previewActive=False tick[total=0.061 playerActions=0.005 nonPlayer=0.029 pruneHidden=0.026 pruneFades=0.000 hiddenVfx=0.001 hiddenVfxTrace[collect=0.000 project=0.000 show=0.000 prune=0.000 clear=0.000 hidden=0 visible=0 active=0 created=0 updated=0 skipped=0 removed=0 deferred=0] unaccounted=0.000 actions=98]" refreshTrace="total=3.670 guard=0.019 keep=0.074 plan=0.133 reconcile=0.009 preview=0.000 solver[input=53 budget=25 pos=53 resultAge=0ms worker[submitted=2833 completed=2833 replaced=0 exceptions=0 lastGen=2833 lastInput=53 lastBudget=25 lastPos=53 lastVel=53 lastAge=0ms lastWorker=0.002ms ok=True]] previewTrace[n/a] classes[bypass=4 competitive=53 forceHidden=41 unmanaged=1] actions=98 pendingShow=0 pendingHide=0 previewActive=False tick[total=0.037 playerActions=0.002 nonPlayer=0.023 pruneHidden=0.011 pruneFades=0.000 hiddenVfx=0.001 hiddenVfxTrace[collect=0.000 project=0.000 show=0.000 prune=0.000 clear=0.000 hidden=0 visible=0 active=0 created=0 updated=0 skipped=0 removed=0 deferred=0] unaccounted=0.000 actions=98]"
+- worker 连续出现 `completed=0`、`exceptions=submitted`、`cpSat[status=n/a]`，说明每次处理都在完成 CP-SAT 统计前抛出异常，不是 2 ms 求解超时。
+- 首次失败约 0.508 ms，后续失败约 0.024-0.030 ms；结合代码路径，最可能是 worker 使用 `Assembly.Location` 推导出的目录并非 Dalamud 插件实际依赖目录。
+
+针对实机反馈处理：
+
+- 删除 worker 对 `Assembly.GetExecutingAssembly().Location` 的目录推导。
+- 将已由 Phase 0 实机验证的 `PluginInterface.AssemblyLocation.DirectoryName` 从 `Plugin` 经 `UpdateObjectArraysHook`、`ObjectCuller` 显式传入 `PlayerVisibilitySolverWorker`。
+- worker 捕获异常后保存 `异常类型: 消息`；慢帧和定期统计增加 `lastError=...`，仍由游戏线程负责日志输出。
+- 已确认 Debug 输出目录存在 `google-ortools-native.dll`。
+
+验证结果：
+
+- `dotnet csharpier format .`：已运行。
+- `dotnet build EventHorizon.sln`：通过，0 warning，0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning，0 error。
+- `git diff --check`：通过；仅有仓库现有换行符提示。
+
+下一步观察：
+
+- 重新加载后预期 `completed` 开始增长、`exceptions` 保持 0，并出现实际 `cpSat[status=...]`。
+- 如果仍失败，直接依据新增的 `lastError` 定位，不再依赖异常计数猜测。
+
+## 2026-07-10 10:53 +08:00
+
+实机反馈：
+
+- native 目录修复有效：worker 已达到 `exceptions=0`，并持续完成所有提交，`lastError=n/a`。
+- 2 ms 上限下观测到的 CP-SAT 状态全部为 `Unknown`，`finalJ/finalD/stepSwitch` 因无可用解均为 0。
+- 约 15-30 个 competitive 玩家时，模型约 240-480 个变量、129-249 个约束；模型构建约 0.076-0.145 ms，求解调用实际约 2.763-4.111 ms。
+- 即使 `budget == input` 的简单场景仍为 `Unknown`，说明 2 ms 上限不足以跨过当前模型的初始化/预求解开销，不能进入结果采纳。
+- worker 仍无积压：观测期间 `replaced=0`，结果年龄为 0 ms。
+
+针对实机反馈处理：
+
+- 按计划中的实验预案，将后台单线程求解上限从 2 ms 小步提高到 4 ms；仍固定 `num_search_workers:1`。
+- worker 增加累计 `OptimalCount`、`FeasibleCount`、`UnknownCount`。
+- 慢帧和 30 秒定期日志增加 `statuses[optimal=... feasible=... unknown=...]`，用于直接评估成功率，而不是只观察最后一次状态。
+- 仍不采纳 CP-SAT 结果，不改变目标集合或 RenderFlags 行为。
+
+验证结果：
+
+- `dotnet csharpier format .`：已运行。
+- `dotnet build EventHorizon.sln`：通过，0 warning，0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning，0 error。
+- `git diff --check`：通过；仅有仓库现有换行符提示。
+
+下一步观察：
+
+- 重新加载后收集至少两条 `[CP-SAT] Periodic`，检查 `statuses` 中 Optimal/Feasible 是否开始增长，以及 Unknown 占比。
+- 同时观察 4 ms 配置下的 `solve`、`lastWorker` 和 `replaced`；若仍几乎全 Unknown，应先缩减模型或调整求解建模方式，而不是继续盲目提高上限。
+
+## 2026-07-10 10:56 +08:00
+
+实机反馈：
+
+- 4 ms 上限下累计 437 次完成仍全部为 `Unknown`，`optimal=0 feasible=0 unknown=437`。
+- 实际求解调用约 3.151-5.372 ms；约 15-36 个 competitive 玩家、240-576 个变量时均未得到可用解。
+- `replaced=0`、`exceptions=0`、结果年龄 0-15 ms，线程调度和 latest-wins 没有问题，瓶颈集中在 CP-SAT 在短时限内尚未建立 incumbent。
+
+针对实机反馈处理：
+
+- 保持 8 步模型、4 ms 上限和单线程，不继续提高时限。
+- 计算 Top-B `JStar` 时同时保留每一步的理论最优选择，并通过 `AddHint` 为全部可见变量和切换变量提供一个满足预算且达到 `JStar` 的完整初始解。
+- 当 `competitiveBudget == competitivePlayers.Count` 时没有预算竞争，直接解析得到全员可见的最优解，状态记为 `OptimalByInspection`，`solve=0`；初始隐藏到全员可见的变化计入 `finalD/stepSwitch`。
+- `OptimalByInspection` 计入累计 `optimal`，便于定期日志统一统计。
+- CP-SAT 结果仍仅用于影子统计，不采纳目标集合。
+
+验证结果：
+
+- `dotnet csharpier format .`：已运行。
+- `dotnet build EventHorizon.sln`：通过，0 warning，0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning，0 error。
+- `git diff --check`：通过；仅有仓库现有换行符提示。
+
+下一步观察：
+
+- `budget == input` 场景应出现 `status=OptimalByInspection`、`solve=0`，累计 optimal 增长。
+- `input > budget` 场景观察完整 Top-B hint 是否使 Feasible/Optimal 开始增长；若仍全部 Unknown，下一步缩减或重写 CP-SAT 模型结构。

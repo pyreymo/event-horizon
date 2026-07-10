@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+using EventHorizon.Culling.Optimization;
 
 namespace EventHorizon.Culling.Visibility;
 
@@ -11,6 +12,7 @@ internal sealed class PlayerVisibilitySolverWorker : IDisposable
     private readonly AutoResetEvent snapshotAvailable = new(false);
     private readonly CancellationTokenSource cancellationTokenSource = new();
     private readonly Task workerTask;
+    private readonly string pluginDirectory;
 
     private PlayerVisibilitySolverSnapshot? pendingSnapshot;
     private PlayerVisibilitySolverWorkerStats latestStats;
@@ -21,9 +23,13 @@ internal sealed class PlayerVisibilitySolverWorker : IDisposable
     private int completedCount;
     private int pendingSnapshotReplacedCount;
     private int exceptionCount;
+    private int optimalCount;
+    private int feasibleCount;
+    private int unknownCount;
 
-    public PlayerVisibilitySolverWorker()
+    public PlayerVisibilitySolverWorker(string pluginDirectory)
     {
+        this.pluginDirectory = pluginDirectory;
         workerTask = Task.Run(WorkerLoop);
     }
 
@@ -74,6 +80,9 @@ internal sealed class PlayerVisibilitySolverWorker : IDisposable
             completedCount = 0;
             pendingSnapshotReplacedCount = 0;
             exceptionCount = 0;
+            optimalCount = 0;
+            feasibleCount = 0;
+            unknownCount = 0;
             latestStats = default;
         }
     }
@@ -142,13 +151,23 @@ internal sealed class PlayerVisibilitySolverWorker : IDisposable
         try
         {
             var velocitySampleCount = CountVelocitySamples(snapshot);
+            OrToolsNativeDependencyLoader.EnsureLoaded(pluginDirectory);
+            var cpSatStats = PlayerVisibilityCpSatOptimizer.Solve(snapshot);
             var workerTicks = Stopwatch.GetTimestamp() - start;
-            PublishStats(snapshot, snapshotEpoch, velocitySampleCount, workerTicks, succeeded: true);
+            PublishStats(snapshot, snapshotEpoch, velocitySampleCount, workerTicks, cpSatStats, succeeded: true);
         }
-        catch
+        catch (Exception ex)
         {
             var workerTicks = Stopwatch.GetTimestamp() - start;
-            PublishStats(snapshot, snapshotEpoch, velocitySampleCount: 0, workerTicks, succeeded: false);
+            PublishStats(
+                snapshot,
+                snapshotEpoch,
+                velocitySampleCount: 0,
+                workerTicks,
+                default,
+                succeeded: false,
+                lastError: $"{ex.GetType().Name}: {ex.Message}"
+            );
         }
     }
 
@@ -171,7 +190,9 @@ internal sealed class PlayerVisibilitySolverWorker : IDisposable
         int snapshotEpoch,
         int velocitySampleCount,
         long workerTicks,
-        bool succeeded
+        PlayerVisibilityCpSatStats cpSatStats,
+        bool succeeded,
+        string? lastError = null
     )
     {
         lock (gate)
@@ -184,6 +205,19 @@ internal sealed class PlayerVisibilitySolverWorker : IDisposable
             if (succeeded)
             {
                 completedCount++;
+                switch (cpSatStats.Status)
+                {
+                    case "Optimal":
+                    case "OptimalByInspection":
+                        optimalCount++;
+                        break;
+                    case "Feasible":
+                        feasibleCount++;
+                        break;
+                    case "Unknown":
+                        unknownCount++;
+                        break;
+                }
             }
             else
             {
@@ -202,7 +236,12 @@ internal sealed class PlayerVisibilitySolverWorker : IDisposable
                 velocitySampleCount,
                 workerTicks,
                 snapshot.GetAgeMilliseconds(Environment.TickCount64),
-                succeeded
+                succeeded,
+                cpSatStats,
+                lastError,
+                optimalCount,
+                feasibleCount,
+                unknownCount
             );
         }
     }
@@ -220,7 +259,12 @@ internal readonly record struct PlayerVisibilitySolverWorkerStats(
     int LastVelocitySampleCount,
     long LastWorkerTicks,
     long LastResultAgeMs,
-    bool LastSucceeded
+    bool LastSucceeded,
+    PlayerVisibilityCpSatStats CpSat = default,
+    string? LastError = null,
+    int OptimalCount = 0,
+    int FeasibleCount = 0,
+    int UnknownCount = 0
 )
 {
     public bool HasValue => SubmittedCount > 0 || CompletedCount > 0 || PendingSnapshotReplacedCount > 0 || ExceptionCount > 0;

@@ -37,10 +37,20 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         IObjectTable objectTable,
         ITargetManager targetManager,
         IGameGui gameGui,
-        StaticVfxController staticVfxController
+        StaticVfxController staticVfxController,
+        string pluginDirectory
     )
     {
-        objectCuller = new ObjectCuller(configuration, playerState, condition, objectTable, targetManager, gameGui, staticVfxController);
+        objectCuller = new ObjectCuller(
+            configuration,
+            playerState,
+            condition,
+            objectTable,
+            targetManager,
+            gameGui,
+            staticVfxController,
+            pluginDirectory
+        );
         hook = gameInteropProvider.HookFromSignature<UpdateObjectArraysDelegate>(Signature, Detour);
     }
 

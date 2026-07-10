@@ -12,6 +12,8 @@ internal sealed class PlayerVisibilitySolverSnapshot
         int generation,
         long createdAtTickCount64,
         int competitiveBudget,
+        Vector3 localPlayerPosition,
+        bool hasLocalPlayerPosition,
         int positionSampleCount,
         IReadOnlyList<PlayerVisibilitySolverPlayer> competitivePlayers,
         PlayerVisibilityClassificationCounts classificationCounts
@@ -20,6 +22,8 @@ internal sealed class PlayerVisibilitySolverSnapshot
         Generation = generation;
         CreatedAtTickCount64 = createdAtTickCount64;
         CompetitiveBudget = competitiveBudget;
+        LocalPlayerPosition = localPlayerPosition;
+        HasLocalPlayerPosition = hasLocalPlayerPosition;
         PositionSampleCount = positionSampleCount;
         CompetitivePlayers = competitivePlayers;
         ClassificationCounts = classificationCounts;
@@ -28,6 +32,8 @@ internal sealed class PlayerVisibilitySolverSnapshot
     public int Generation { get; }
     public long CreatedAtTickCount64 { get; }
     public int CompetitiveBudget { get; }
+    public Vector3 LocalPlayerPosition { get; }
+    public bool HasLocalPlayerPosition { get; }
     public int PositionSampleCount { get; }
     public IReadOnlyList<PlayerVisibilitySolverPlayer> CompetitivePlayers { get; }
     public PlayerVisibilityClassificationCounts ClassificationCounts { get; }
@@ -43,9 +49,17 @@ internal sealed class PlayerVisibilitySolverSnapshot
     )
     {
         competitivePlayers.Clear();
+        var localPlayerPosition = default(Vector3);
+        var hasLocalPlayerPosition = false;
         var positionSampleCount = 0;
         foreach (var entry in plan.Entries)
         {
+            if (entry.ObjectIndex == 0 && entry.HasPosition)
+            {
+                localPlayerPosition = entry.Position;
+                hasLocalPlayerPosition = true;
+            }
+
             if (entry.Classification != PlayerVisibilityClassification.Competitive)
             {
                 continue;
@@ -82,6 +96,8 @@ internal sealed class PlayerVisibilitySolverSnapshot
             plan.Generation,
             plan.CreatedAtTickCount64,
             Math.Min(budget, competitivePlayers.Count),
+            localPlayerPosition,
+            hasLocalPlayerPosition,
             positionSampleCount,
             [.. competitivePlayers],
             plan.ClassificationCounts

@@ -41,7 +41,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly List<PlayerVisibilityTarget> playerVisibilityTargets = [];
     private readonly List<PlayerVisibilitySolverPlayer> playerVisibilitySolverPlayers = [];
     private readonly PlayerVisibilityMotionTracker playerVisibilityMotionTracker = new();
-    private readonly PlayerVisibilitySolverWorker playerVisibilitySolverWorker = new();
+    private readonly PlayerVisibilitySolverWorker playerVisibilitySolverWorker;
     private readonly Dictionary<ulong, string> playerPreviewNames = [];
     private readonly List<nint> hiddenPlayerVfxAddresses = [];
     private readonly List<HiddenPlayerVfxCandidate> hiddenPlayerVfxCandidates = [];
@@ -68,7 +68,8 @@ internal sealed unsafe class ObjectCuller : IDisposable
         IObjectTable objectTable,
         ITargetManager targetManager,
         IGameGui gameGui,
-        StaticVfxController staticVfxController
+        StaticVfxController staticVfxController,
+        string pluginDirectory
     )
     {
         this.configuration = configuration;
@@ -76,6 +77,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         this.condition = condition;
         this.gameGui = gameGui;
         this.staticVfxController = staticVfxController;
+        playerVisibilitySolverWorker = new PlayerVisibilitySolverWorker(pluginDirectory);
         playerKeepRules = new(configuration, objectTable, targetManager);
         hiddenObjectTracker = new();
         fadeController = new(hiddenObjectTracker, InvisibleFlag);
