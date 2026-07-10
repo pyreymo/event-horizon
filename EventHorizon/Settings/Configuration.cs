@@ -37,16 +37,10 @@ internal class Configuration : IPluginConfiguration
     public bool HideBgPartGraphicsObjects { get; set; } = false;
     public bool HideTerrainGraphicsObjects { get; set; } = false;
     public bool EnableTargetingMeMarker { get; set; } = false;
-
-    [JsonProperty(nameof(EnableTargetingMeNamePlateMarker))]
-    private bool? enableTargetingMeNamePlateMarker;
-
-    [JsonProperty(nameof(EnableTargetingMeVfxMarker))]
-    private bool? enableTargetingMeVfxMarker;
-
+    public bool EnableTargetingMeNamePlateMarker { get; set; } = true;
+    public bool EnableTargetingMeVfxMarker { get; set; } = false;
     public bool EnableTargetingMeMarkerCurrentTargetTest { get; set; } = false;
     public bool DisableTargetingMeMarkerVfxInDuty { get; set; } = true;
-    public TargetingMeMarkerVisualStyle TargetingMeMarkerVisualStyle { get; set; } = TargetingMeMarkerVisualStyle.GazeMarker;
     public float TargetingMeMarkerOffsetX { get; set; } = DefaultTargetingMeMarkerOffsetX;
     public float TargetingMeMarkerOffsetY { get; set; } = DefaultTargetingMeMarkerOffsetY;
     public float TargetingMeMarkerScale { get; set; } = DefaultTargetingMeMarkerScale;
@@ -78,20 +72,6 @@ internal class Configuration : IPluginConfiguration
         PlayerKeepRuleBudgetDefaults.Create();
 
     public HashSet<byte> KeptRaceSex { get; set; } = [];
-
-    [JsonIgnore]
-    public bool EnableTargetingMeNamePlateMarker
-    {
-        get => enableTargetingMeNamePlateMarker ?? (TargetingMeMarkerVisualStyle == TargetingMeMarkerVisualStyle.GazeMarker);
-        set => enableTargetingMeNamePlateMarker = value;
-    }
-
-    [JsonIgnore]
-    public bool EnableTargetingMeVfxMarker
-    {
-        get => enableTargetingMeVfxMarker ?? (TargetingMeMarkerVisualStyle == TargetingMeMarkerVisualStyle.Vfx);
-        set => enableTargetingMeVfxMarker = value;
-    }
 
     public void Save()
     {
