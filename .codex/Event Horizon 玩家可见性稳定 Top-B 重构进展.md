@@ -46,3 +46,78 @@
 ### 下一阶段入口
 
 Phase 2 从新的纯同步 selection 数据边界开始：建立 selection snapshot、parameters、candidate 和 result，并实现确定性稳定 Top-B 选择器及单元测试。本阶段尚未实现任何 Phase 2 内容。
+
+## 2026-07-10：Phase 2 完成
+
+### 文档修正
+
+- 修复新计划中丢失的 `\(`、`\[` 数学分隔符和 `\lambda_t` 附近误生成的 Markdown 标题分隔线，仅修复排版，未改变公式语义。
+- 将完全移动测试条件收紧为：有效旧目标数量不超过预算时全部保留；预算小于有效旧目标数量时只保留其中 `B` 个。
+
+### 新增与修改文件
+
+- 新增 `EventHorizon/Culling/Selection/PlayerVisibilitySelectionModels.cs`：candidate、snapshot、scored candidate 和独立只读 result。
+- 新增 `EventHorizon/Culling/Selection/PlayerVisibilitySelectionParameters.cs`：集中默认参数与构造时不变量验证。
+- 新增 `EventHorizon/Culling/Selection/PlayerVisibilitySelector.cs`：同步纯计算的软分、运动因子、保留奖励和确定性 Top-B。
+- 新增 `EventHorizon/Culling/Selection/LocalSpeedSmoother.cs`：按时间间隔计算 alpha 的本地速度 EMA。
+- 新增 `EventHorizon.Tests/EventHorizon.Tests.csproj`、`packages.lock.json` 和 `PlayerVisibilitySelectorTests.cs`：真实 MSTest 项目与 23 个测试。
+- 修改 `EventHorizon/EventHorizon.csproj`：仅增加 `InternalsVisibleTo`。
+- 修改 `EventHorizon.sln`：加入测试项目。
+- 修改新计划文档：修复公式排版与移动预算测试条件。
+
+### 最终默认参数
+
+```text
+RankCount                 = 8
+RankStep                  = 3000
+SoftScoreScale            = 1000
+RestRetentionBonus        = 500
+MoveRetentionBonus        = 23000
+PredictionSteps           = 4
+PredictionStepSeconds     = 0.2
+PredictionGamma           = 0.85
+DistanceSigma             = 30.0
+MotionStartSpeed          = 0.5
+MotionFullSpeed           = 4.0
+LocalSpeedHalfLifeSeconds = 0.35
+MaxTrustedLocalSpeed      = 50.0
+```
+
+运动阈值、半衰期和最大可信速度是 Phase 3 影子验证前的保守内部初值，不是实机调优结论，未增加配置 UI。
+
+### 不变量与确定性保证
+
+- 参数构造立即验证 `RankCount >= 2`、rank 层级严格主导静止保留奖励、完全移动奖励覆盖全部 rank/软分范围、预测参数范围、运动阈值顺序、EMA 半衰期和最大可信速度；非法值抛出带参数名和约束说明的 `ArgumentOutOfRangeException`。
+- selector 在计算前复制 candidate 集合，验证 rank 范围和 `SourceIndex` 唯一性，不修改 snapshot 或调用方集合。
+- 非有限 position 软分为 0；非有限 velocity 按零速度；任何非有限预测结果回退为 0；最终软分只在浮点误差边界 Clamp 到 `[0,1]`。
+- 软分按 `MidpointRounding.AwayFromZero` 量化；`SoftPoints`、`BaseScore`、`AdjustedScore` 和 retention bonus 使用 `long`，排序不比较浮点数。
+- 排序严格使用 AdjustedScore、旧目标标记、BaseScore、GameObjectId、EntityId、ObjectIndex、SourceIndex。
+- result 使用 selector 内新建数组的只读包装，不引用 selector 工作列表或调用方 candidate 集合。
+- EMA 使用 `alpha = 1 - exp(-ln(2) * dt / HalfLife)`；首样本为 0，非正 `dt` 不更新，非有限位置不更新，瞬移/超速样本按零速度处理并重建位置和时间基线。
+
+### 测试
+
+Debug 和 Release 均实际发现并执行 23 个测试，范围包括：
+
+- 预算边界、全部选中、空选择、预算缩小；
+- 重复输入确定性、完整稳定键排序、输入集合不变；
+- 零 retention、静止 rank 主导、完全移动旧目标保留、旧目标缺失填补、retention 单调性；
+- 正常/零/远距/相对运动软分、无效 position/velocity；
+- rank 和参数不变量异常；
+- EMA 首样本、不同采样间隔一致性、非正 `dt`、非有限位置、瞬移恢复；
+- NaN、负值和正 Infinity 本地速度的确定行为。
+
+### 验证结果
+
+- `dotnet csharpier format .`：通过，58 个文件检查/格式化。
+- `dotnet build EventHorizon.sln -c Debug`：通过，0 warning、0 error。
+- `dotnet build EventHorizon.sln -c Release`：通过，0 warning、0 error。
+- `dotnet test EventHorizon.sln -c Debug`：发现并通过 23/23。
+- `dotnet test EventHorizon.sln -c Release`：发现并通过 23/23。
+- Debug/Release 插件与测试产物、两个 lockfile 均未发现 OR-Tools 或其 native runtime 文件。
+
+### 边界确认与下一阶段入口
+
+- Phase 2 代码没有接入 `ObjectCuller`、`Plugin`、`UpdateObjectArraysHook`、legacy builder、正式 target set、reconciler、RenderFlags、fade、VFX 或 preview。
+- 没有后台 worker、日志、Dalamud/FFCS 访问或全局配置读取。
+- Phase 3 的入口是由未来 Framework 适配层构造 selection snapshot，并仅做 legacy/Top-B 影子差异验证；本阶段未实现该调用、日志或正式接管。
