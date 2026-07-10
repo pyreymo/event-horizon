@@ -1,6 +1,9 @@
 # Event Horizon 玩家可见性 CP-SAT 优化跟踪
 
-状态：设计阶段，尚未实现
+状态：已废止，仅保留为 CP-SAT 原型历史。
+后续不得继续执行本文 Phase 3 及之后阶段。
+替代计划：`.codex/Event Horizon 玩家可见性稳定 Top-B 重构.md`
+
 创建日期：2026-07-09
 
 ## 1. 目标

@@ -39,9 +39,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private readonly ShowTransitionBudget showTransitionBudget = new();
     private readonly List<PlayerVisibilityPlanEntry> playerVisibilityPlanEntries = [];
     private readonly List<PlayerVisibilityTarget> playerVisibilityTargets = [];
-    private readonly List<PlayerVisibilitySolverPlayer> playerVisibilitySolverPlayers = [];
-    private readonly PlayerVisibilityMotionTracker playerVisibilityMotionTracker = new();
-    private readonly PlayerVisibilitySolverWorker playerVisibilitySolverWorker;
     private readonly Dictionary<ulong, string> playerPreviewNames = [];
     private readonly List<nint> hiddenPlayerVfxAddresses = [];
     private readonly List<HiddenPlayerVfxCandidate> hiddenPlayerVfxCandidates = [];
@@ -54,7 +51,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
     private long previewSelectionExpiresAt;
     private int nextPlayerVisibilityGeneration;
     private int nextMaintainedVisibilityActionIndex;
-    private PlayerVisibilitySolverSnapshot? latestPlayerVisibilitySolverSnapshot;
     private PlayerVisibilityTargetSet? latestPlayerVisibilityTargetSet;
     private PlayerVisibilityReconciliation? latestPlayerVisibilityReconciliation;
 
@@ -68,8 +64,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
         IObjectTable objectTable,
         ITargetManager targetManager,
         IGameGui gameGui,
-        StaticVfxController staticVfxController,
-        string pluginDirectory
+        StaticVfxController staticVfxController
     )
     {
         this.configuration = configuration;
@@ -77,7 +72,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
         this.condition = condition;
         this.gameGui = gameGui;
         this.staticVfxController = staticVfxController;
-        playerVisibilitySolverWorker = new PlayerVisibilitySolverWorker(pluginDirectory);
         playerKeepRules = new(configuration, objectTable, targetManager);
         hiddenObjectTracker = new();
         fadeController = new(hiddenObjectTracker, InvisibleFlag);
@@ -198,16 +192,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
             playerVisibilityPlanEntries
         );
         keepBudgetStats = playerVisibilityPlan.BudgetStats;
-        playerVisibilityMotionTracker.Update(playerVisibilityPlan);
-        var playerVisibilitySolverSnapshot = PlayerVisibilitySolverSnapshot.Build(
-            configuration,
-            playerVisibilityPlan,
-            playerVisibilityMotionTracker,
-            latestPlayerVisibilityTargetSet,
-            playerVisibilitySolverPlayers
-        );
-        latestPlayerVisibilitySolverSnapshot = playerVisibilitySolverSnapshot;
-        playerVisibilitySolverWorker.Submit(playerVisibilitySolverSnapshot);
         var playerVisibilityTargetSet = PlayerVisibilityLegacyTargetBuilder.Build(playerVisibilityPlan, playerVisibilityTargets);
         latestPlayerVisibilityTargetSet = playerVisibilityTargetSet;
         var visibilityPlanTicks = Stopwatch.GetTimestamp() - phaseStart;
@@ -260,12 +244,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
             PreviewTicks: previewTicks,
             Tick: tickTrace,
             Preview: new CullingPreviewPerformanceTrace(previewBuilder?.Count ?? 0, previewBeginTicks, previewAddTicks, previewBuildTicks),
-            PlayerVisibilityClasses: playerVisibilityTargetSet.ClassificationCounts,
-            PlayerVisibilitySolverInputCount: playerVisibilitySolverSnapshot.CompetitivePlayers.Count,
-            PlayerVisibilitySolverBudget: playerVisibilitySolverSnapshot.CompetitiveBudget,
-            PlayerVisibilitySolverPositionSampleCount: playerVisibilitySolverSnapshot.PositionSampleCount,
-            PlayerVisibilityResultAgeMs: playerVisibilityTargetSet.GetAgeMilliseconds(Environment.TickCount64),
-            PlayerVisibilitySolverWorker: playerVisibilitySolverWorker.GetStats()
+            PlayerVisibilityClasses: playerVisibilityTargetSet.ClassificationCounts
         );
     }
 
@@ -345,12 +324,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
             ReconcileTicks: 0,
             PreviewTicks: 0,
             Tick: tickTrace,
-            PlayerVisibilityClasses: latestPlayerVisibilityTargetSet?.ClassificationCounts ?? default,
-            PlayerVisibilitySolverInputCount: latestPlayerVisibilitySolverSnapshot?.CompetitivePlayers.Count ?? 0,
-            PlayerVisibilitySolverBudget: latestPlayerVisibilitySolverSnapshot?.CompetitiveBudget ?? 0,
-            PlayerVisibilitySolverPositionSampleCount: latestPlayerVisibilitySolverSnapshot?.PositionSampleCount ?? 0,
-            PlayerVisibilityResultAgeMs: latestPlayerVisibilityTargetSet?.GetAgeMilliseconds(Environment.TickCount64) ?? 0,
-            PlayerVisibilitySolverWorker: playerVisibilitySolverWorker.GetStats()
+            PlayerVisibilityClasses: latestPlayerVisibilityTargetSet?.ClassificationCounts ?? default
         );
     }
 
@@ -415,7 +389,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
     public void Dispose()
     {
         Reset(GameObjectManager.Instance());
-        playerVisibilitySolverWorker.Dispose();
     }
 
     #endregion
@@ -587,12 +560,7 @@ internal sealed unsafe class ObjectCuller : IDisposable
                 hiddenVfxTicks,
                 hiddenVfxTrace
             ),
-            PlayerVisibilityClasses: latestPlayerVisibilityTargetSet?.ClassificationCounts ?? default,
-            PlayerVisibilitySolverInputCount: latestPlayerVisibilitySolverSnapshot?.CompetitivePlayers.Count ?? 0,
-            PlayerVisibilitySolverBudget: latestPlayerVisibilitySolverSnapshot?.CompetitiveBudget ?? 0,
-            PlayerVisibilitySolverPositionSampleCount: latestPlayerVisibilitySolverSnapshot?.PositionSampleCount ?? 0,
-            PlayerVisibilityResultAgeMs: latestPlayerVisibilityTargetSet?.GetAgeMilliseconds(Environment.TickCount64) ?? 0,
-            PlayerVisibilitySolverWorker: playerVisibilitySolverWorker.GetStats()
+            PlayerVisibilityClasses: latestPlayerVisibilityTargetSet?.ClassificationCounts ?? default
         );
     }
 
@@ -844,9 +812,6 @@ internal sealed unsafe class ObjectCuller : IDisposable
         previewSelectedPlayerEntityId = null;
         previewSelectionExpiresAt = 0;
         nextMaintainedVisibilityActionIndex = 0;
-        playerVisibilityMotionTracker.Clear();
-        playerVisibilitySolverWorker.Clear();
-        latestPlayerVisibilitySolverSnapshot = null;
         latestPlayerVisibilityTargetSet = null;
         latestPlayerVisibilityReconciliation = null;
     }

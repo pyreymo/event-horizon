@@ -1,5 +1,8 @@
 # Event Horizon 玩家可见性 CP-SAT 优化进展
 
+状态：已废止，仅保留为 CP-SAT 原型历史进展。
+替代计划：`.codex/Event Horizon 玩家可见性稳定 Top-B 重构.md`
+
 源计划：`.codex/Event Horizon 玩家可见性 CP-SAT 优化跟踪.md`
 
 ## 2026-07-09 22:13 +08:00

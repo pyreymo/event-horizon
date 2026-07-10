@@ -10,7 +10,6 @@ using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using EventHorizon.Culling;
 using EventHorizon.Culling.Hooks;
-using EventHorizon.Culling.Optimization;
 using EventHorizon.Culling.Rules;
 using EventHorizon.Culling.Visibility;
 using EventHorizon.Integration.Dtr;
@@ -34,7 +33,6 @@ public sealed class Plugin : IDalamudPlugin
     private const int DtrBarRefreshIntervalMs = 1_000;
     private const double SlowFrameworkUpdateLogThresholdMs = 2.0;
     private const int SlowFrameworkUpdateLogCooldownMs = 1_000;
-    private const int CpSatPeriodicLogIntervalMs = 30_000;
 
     #region Services
 
@@ -111,12 +109,10 @@ public sealed class Plugin : IDalamudPlugin
     private LayoutGraphicsVisibilityController LayoutGraphicsVisibilityController { get; init; }
     private NamePlateTargetingMeMarkerController NamePlateTargetingMeMarkerController { get; init; }
     private CharacterAlphaController CharacterAlphaController { get; init; }
-    private CpSatPhase0Probe CpSatPhase0Probe { get; init; }
 
     private long nextDynamicCullingRefresh;
     private long nextDtrBarRefresh;
     private long nextSlowFrameworkUpdateLog;
-    private long nextCpSatPeriodicLog;
     public int HiddenPlayerCount => UpdateObjectArraysHook.HiddenPlayerCount;
     internal PlayerKeepBudgetStats KeepBudgetStats => UpdateObjectArraysHook.KeepBudgetStats;
     internal PlayerPreviewSnapshot PlayerPreviewSnapshot => UpdateObjectArraysHook.PlayerPreviewSnapshot;
@@ -149,14 +145,12 @@ public sealed class Plugin : IDalamudPlugin
             ObjectTable,
             TargetManager,
             GameGui,
-            StaticVfxController,
-            PluginInterface.AssemblyLocation.DirectoryName!
+            StaticVfxController
         );
         CharacterAlphaController = new CharacterAlphaController(ObjectTable);
         DtrBarIntegration = new DtrBarIntegration(DtrBar, Configuration, GetDtrBarState, SetPlayerHidingEnabled, ToggleConfigUi);
         DtrBackgroundController = new DtrBackgroundController(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
         LayoutGraphicsVisibilityController = new LayoutGraphicsVisibilityController(GameInteropProvider, ClientState, Log);
-        CpSatPhase0Probe = new CpSatPhase0Probe(Log, PluginInterface.AssemblyLocation.DirectoryName!);
         NamePlateTargetingMeMarkerController = new NamePlateTargetingMeMarkerController(
             AddonLifecycle,
             GameGui,
@@ -204,7 +198,6 @@ public sealed class Plugin : IDalamudPlugin
         DtrBarIntegration.Dispose();
         DtrBackgroundController.Dispose();
         LayoutGraphicsVisibilityController.Dispose();
-        CpSatPhase0Probe.Dispose();
         NamePlateTargetingMeMarkerController.Dispose();
         CharacterAlphaController.Dispose();
         UpdateObjectArraysHook.Dispose();
@@ -235,10 +228,6 @@ public sealed class Plugin : IDalamudPlugin
                 break;
             case "preview":
                 TogglePlayerPreviewWindow();
-                break;
-            case "cpsat":
-            case "cp-sat":
-                CpSatPhase0Probe.TryStart();
                 break;
             default:
                 ToggleConfigUi();
@@ -314,7 +303,6 @@ public sealed class Plugin : IDalamudPlugin
         phaseStart = Stopwatch.GetTimestamp();
         PlayerPreviewHighlighter.Update();
         var highlightTicks = Stopwatch.GetTimestamp() - phaseStart;
-        LogCpSatStatsIfNeeded();
 
         phaseStart = Stopwatch.GetTimestamp();
         if (!NeedsDynamicCullingRefresh())
@@ -386,24 +374,6 @@ public sealed class Plugin : IDalamudPlugin
         nextDtrBarRefresh = Environment.TickCount64 + DtrBarRefreshIntervalMs;
     }
 
-    private void LogCpSatStatsIfNeeded()
-    {
-        var now = Environment.TickCount64;
-        if (now < nextCpSatPeriodicLog)
-        {
-            return;
-        }
-
-        var stats = UpdateObjectArraysHook.LastRefreshTrace.PlayerVisibilitySolverWorker;
-        if (!stats.HasValue)
-        {
-            return;
-        }
-
-        nextCpSatPeriodicLog = now + CpSatPeriodicLogIntervalMs;
-        Log.Information("[CP-SAT] Periodic worker[{WorkerStats}]", FormatSolverWorkerStats(stats));
-    }
-
     private bool NeedsDynamicCullingRefresh()
     {
         return UpdateObjectArraysHook.NeedsDynamicRefresh;
@@ -457,18 +427,13 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         return string.Format(
-            "total={0:F3} guard={1:F3} keep={2:F3} plan={3:F3} reconcile={4:F3} preview={5:F3} solver[input={6} budget={7} pos={8} resultAge={9}ms worker[{10}]] previewTrace[{11}] classes[{12}] actions={13} pendingShow={14} pendingHide={15} previewActive={16} tick[{17}]",
+            "total={0:F3} guard={1:F3} keep={2:F3} plan={3:F3} reconcile={4:F3} preview={5:F3} previewTrace[{6}] classes[{7}] actions={8} pendingShow={9} pendingHide={10} previewActive={11} tick[{12}]",
             ToMilliseconds(trace.TotalTicks),
             ToMilliseconds(trace.GuardTicks),
             ToMilliseconds(trace.KeepPlanTicks),
             ToMilliseconds(trace.VisibilityPlanTicks),
             ToMilliseconds(trace.ReconcileTicks),
             ToMilliseconds(trace.PreviewTicks),
-            trace.PlayerVisibilitySolverInputCount,
-            trace.PlayerVisibilitySolverBudget,
-            trace.PlayerVisibilitySolverPositionSampleCount,
-            trace.PlayerVisibilityResultAgeMs,
-            FormatSolverWorkerStats(trace.PlayerVisibilitySolverWorker),
             FormatPreviewTrace(trace.Preview),
             FormatVisibilityClasses(trace.PlayerVisibilityClasses),
             trace.ActionCount,
@@ -476,46 +441,6 @@ public sealed class Plugin : IDalamudPlugin
             trace.PendingHideCount,
             trace.RefreshPlayerPreview,
             FormatTickTrace(trace.Tick)
-        );
-    }
-
-    private static string FormatSolverWorkerStats(PlayerVisibilitySolverWorkerStats stats)
-    {
-        if (!stats.HasValue)
-        {
-            return "n/a";
-        }
-
-        return string.Format(
-            "submitted={0} completed={1} replaced={2} exceptions={3} statuses[optimal={23} feasible={24} unknown={25} inspected={26}] init={27:F3}ms lastGen={4} lastInput={5} lastBudget={6} lastPos={7} lastVel={8} lastAge={9}ms lastWorker={10:F3}ms ok={11} cpSat[status={12} vars={13} constraints={14} jStar={15} threshold={16} finalJ={17} finalD={18} stepSwitch={19} model={20:F3}ms solve={21:F3}ms] lastError={22}",
-            stats.SubmittedCount,
-            stats.CompletedCount,
-            stats.PendingSnapshotReplacedCount,
-            stats.ExceptionCount,
-            stats.LastGeneration,
-            stats.LastInputCount,
-            stats.LastBudget,
-            stats.LastPositionSampleCount,
-            stats.LastVelocitySampleCount,
-            stats.LastResultAgeMs,
-            ToMilliseconds(stats.LastWorkerTicks),
-            stats.LastSucceeded,
-            stats.CpSat.Status ?? "n/a",
-            stats.CpSat.VariableCount,
-            stats.CpSat.ConstraintCount,
-            stats.CpSat.JStar,
-            stats.CpSat.JThreshold,
-            stats.CpSat.FinalJ,
-            stats.CpSat.FinalD,
-            stats.CpSat.CurrentStepSwitchCount,
-            ToMilliseconds(stats.CpSat.ModelTicks),
-            ToMilliseconds(stats.CpSat.SolveTicks),
-            stats.LastError ?? "n/a",
-            stats.OptimalCount,
-            stats.FeasibleCount,
-            stats.UnknownCount,
-            stats.InspectedCount,
-            ToMilliseconds(stats.InitializationTicks)
         );
     }
 
