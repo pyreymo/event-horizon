@@ -49,6 +49,10 @@ internal sealed unsafe class CullingController : IDisposable
     public int HiddenPlayerCount => hiddenObjects.HiddenPlayerCount;
     public PlayerKeepBudgetStats KeepBudgetStats => players.GetKeepBudgetStats();
     public PlayerPreviewSnapshot PlayerPreviewSnapshot => playerPreview.Snapshot;
+    public bool IsDutyCullingSuspended =>
+        configuration.HideAllOtherPlayers
+        && configuration.DisableInDuty
+        && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]);
 
     public void Enable() => hook.Enable();
 

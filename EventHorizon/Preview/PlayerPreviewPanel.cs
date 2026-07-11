@@ -6,12 +6,19 @@ using EventHorizon.Localization;
 
 namespace EventHorizon.Preview;
 
-internal sealed class PlayerPreviewPanel(Plugin plugin, IGameGui gameGui)
+internal sealed class PlayerPreviewPanel(
+    Func<PlayerPreviewSnapshot> getSnapshot,
+    Action refreshPreview,
+    Action<uint?> setSelectedPlayer,
+    IGameGui gameGui
+)
 {
     private readonly PlayerPreviewRenderer renderer = new();
 
     private long nextRefresh;
     private int worldArrowFrame = -1;
+    private int selectionRouteFrame = -1;
+    private uint? routedSelectedPlayerEntityId;
 
     public void DrawInlineContent(Func<PlayerKeepRuleId, string> getRuleLabel)
     {
@@ -41,13 +48,26 @@ internal sealed class PlayerPreviewPanel(Plugin plugin, IGameGui gameGui)
 
     private void DrawPreview(float side, Func<PlayerKeepRuleId, string> getRuleLabel)
     {
-        var renderResult = renderer.Draw(plugin.PlayerPreviewSnapshot, side, getRuleLabel);
-        plugin.SetPreviewSelectedPlayer(renderResult.SelectedPlayerEntityId);
+        var renderResult = renderer.Draw(getSnapshot(), side, getRuleLabel);
+        RouteSelectedPlayer(renderResult.SelectedPlayerEntityId);
 
         if (renderResult.PointedPlayer.HasValue)
         {
             DrawWorldArrow(renderResult.PointedPlayer.Value);
         }
+    }
+
+    private void RouteSelectedPlayer(uint? selectedPlayerEntityId)
+    {
+        var frame = ImGui.GetFrameCount();
+        if (selectionRouteFrame == frame && routedSelectedPlayerEntityId == selectedPlayerEntityId)
+        {
+            return;
+        }
+
+        selectionRouteFrame = frame;
+        routedSelectedPlayerEntityId = selectedPlayerEntityId;
+        setSelectedPlayer(selectedPlayerEntityId);
     }
 
     private void DrawWorldArrow(PlayerPreviewEntry player)
@@ -70,7 +90,7 @@ internal sealed class PlayerPreviewPanel(Plugin plugin, IGameGui gameGui)
             return;
         }
 
-        plugin.RefreshPlayerPreview();
+        refreshPreview();
         nextRefresh = now + PlayerPreviewConstants.FastRefreshIntervalMs;
     }
 

@@ -10,7 +10,7 @@ using EventHorizon.Settings;
 
 namespace EventHorizon.UI.Config;
 
-public partial class ConfigWindow : Window, IDisposable
+public partial class ConfigWindow : Window
 {
     public enum Tab
     {
@@ -30,7 +30,6 @@ public partial class ConfigWindow : Window, IDisposable
     private float cullingLeftColumnWidth = 690f;
     private bool keepRuleOrderChanged;
     private bool showRaceSexEditor;
-    private readonly string chatLogSearchText = string.Empty;
 
     private readonly record struct ImGuiItemState(bool Hovered, bool Active = false);
 
@@ -54,11 +53,6 @@ public partial class ConfigWindow : Window, IDisposable
         this.isPlayerPreviewWindowOpen = isPlayerPreviewWindowOpen;
         this.togglePlayerPreviewWindow = togglePlayerPreviewWindow;
         configuration = plugin.Configuration;
-    }
-
-    public void Dispose()
-    {
-        GC.SuppressFinalize(this);
     }
 
     public void Open(Tab tab)

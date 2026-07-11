@@ -3,13 +3,12 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Windowing;
-using EventHorizon.Culling;
 using EventHorizon.Localization;
 using EventHorizon.UI;
 
 namespace EventHorizon.Preview;
 
-internal sealed class PlayerPreviewWindow : Window, IDisposable
+internal sealed class PlayerPreviewWindow : Window
 {
     private readonly PlayerPreviewPanel previewPanel;
     private readonly Action openMainWindow;
@@ -38,8 +37,6 @@ internal sealed class PlayerPreviewWindow : Window, IDisposable
             }
         );
     }
-
-    public void Dispose() { }
 
     public override void PreDraw()
     {

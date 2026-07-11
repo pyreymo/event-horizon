@@ -1,7 +1,6 @@
 using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
-using EventHorizon.Culling;
 using EventHorizon.Localization;
 
 namespace EventHorizon.UI.Config;

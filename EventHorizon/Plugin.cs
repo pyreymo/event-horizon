@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using Dalamud.Game.Chat;
-using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
@@ -100,12 +98,7 @@ public sealed class Plugin : IDalamudPlugin
     private TargetingMarkerController TargetingMarkerController { get; init; }
 
     public int HiddenPlayerCount => Culling.HiddenPlayerCount;
-    internal PlayerKeepBudgetStats KeepBudgetStats => Culling.KeepBudgetStats;
-    internal PlayerPreviewSnapshot PlayerPreviewSnapshot => Culling.PlayerPreviewSnapshot;
-    public bool IsDutyCullingSuspended =>
-        Configuration.HideAllOtherPlayers
-        && Configuration.DisableInDuty
-        && (Condition[ConditionFlag.BoundByDuty] || Condition[ConditionFlag.BoundByDuty56]);
+    public bool IsDutyCullingSuspended => Culling.IsDutyCullingSuspended;
 
     #endregion
 
@@ -116,9 +109,6 @@ public sealed class Plugin : IDalamudPlugin
         Loc.Load(PluginInterface);
 
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
-        var playerPreviewPanel = new PlayerPreviewPanel(this, GameGui);
-        ConfigWindow = new ConfigWindow(this, DataManager, playerPreviewPanel, IsPlayerPreviewWindowOpen, TogglePlayerPreviewWindow);
-        PlayerPreviewWindow = new PlayerPreviewWindow(playerPreviewPanel, OpenMainUi);
         PlayerPreviewHighlighter = new PlayerPreviewHighlighter();
         ActorVfxController = new ActorVfxController(GameInteropProvider, SigScanner, Log);
         StaticVfxResourceRedirector = new StaticVfxResourceRedirector(PluginInterface, GameInteropProvider, Log);
@@ -134,7 +124,15 @@ public sealed class Plugin : IDalamudPlugin
             StaticVfxController,
             Log
         );
-        DtrStatusBar = new DtrBar(DtrBar, Configuration, GetDtrBarState, SetPlayerHidingEnabled, ToggleConfigUi);
+        var playerPreviewPanel = new PlayerPreviewPanel(
+            () => Culling.PlayerPreviewSnapshot,
+            CullingRefreshPlayerPreview,
+            SetPreviewSelectedPlayer,
+            GameGui
+        );
+        ConfigWindow = new ConfigWindow(this, DataManager, playerPreviewPanel, IsPlayerPreviewWindowOpen, TogglePlayerPreviewWindow);
+        PlayerPreviewWindow = new PlayerPreviewWindow(playerPreviewPanel, OpenMainUi);
+        DtrStatusBar = new DtrBar(DtrBar, Configuration, Condition, SetPlayerHidingEnabled, ToggleConfigUi);
         DtrBackground = new DtrBackground(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
         LayoutGraphics = new LayoutGraphics(GameInteropProvider, ClientState, Log);
         TargetingMarkerController = new TargetingMarkerController(
@@ -174,22 +172,19 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.LanguageChanged -= OnLanguageChanged;
         ChatGui.ChatMessage -= OnChatMessage;
         Framework.Update -= OnFrameworkUpdate;
+        CommandManager.RemoveHandler(PrimaryCommandName);
+        CommandManager.RemoveHandler(ShortCommandName);
 
         WindowSystem.RemoveAllWindows();
-        ConfigWindow.Dispose();
-        PlayerPreviewWindow.Dispose();
-        PlayerPreviewHighlighter.Dispose();
-        DtrStatusBar.Dispose();
-        DtrBackground.Dispose();
-        LayoutGraphics.Dispose();
         TargetingMarkerController.Dispose();
+        LayoutGraphics.Dispose();
+        DtrBackground.Dispose();
+        DtrStatusBar.Dispose();
         Culling.Dispose();
         StaticVfxController.Dispose();
         StaticVfxResourceRedirector.Dispose();
         ActorVfxController.Dispose();
-
-        CommandManager.RemoveHandler(PrimaryCommandName);
-        CommandManager.RemoveHandler(ShortCommandName);
+        PlayerPreviewHighlighter.Dispose();
     }
 
     #endregion
@@ -286,10 +281,7 @@ public sealed class Plugin : IDalamudPlugin
         Culling.Refresh(resetRuleState);
     }
 
-    internal void RefreshPlayerPreview()
-    {
-        Culling.RefreshPlayerPreview();
-    }
+    private void CullingRefreshPlayerPreview() => Culling.RefreshPlayerPreview();
 
     internal void SetPreviewSelectedPlayer(uint? entityId)
     {
@@ -317,31 +309,6 @@ public sealed class Plugin : IDalamudPlugin
     private void OnChatMessage(IChatMessage message)
     {
         Culling.RecordChatMessage(message);
-    }
-
-    private DtrBarState GetDtrBarState()
-    {
-        if (!Configuration.HideAllOtherPlayers)
-        {
-            return new DtrBarState(false, []);
-        }
-
-        var pauseReasonKeys = new List<string>();
-
-        if (IsDutyCullingSuspended)
-        {
-            pauseReasonKeys.Add("Dtr.PauseReason.InDuty");
-        }
-
-        if (
-            Configuration.DisableCullingBelowPlayerCount
-            && ObjectTableStats.CurrentOtherPlayerCount() < Configuration.DisableCullingPlayerCountThreshold
-        )
-        {
-            pauseReasonKeys.Add("Dtr.PauseReason.LowPlayerCount");
-        }
-
-        return new DtrBarState(true, pauseReasonKeys);
     }
 
     #endregion

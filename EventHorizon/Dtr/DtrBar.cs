@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Gui.Dtr;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Plugin.Services;
+using EventHorizon.Culling;
 using EventHorizon.Localization;
 using EventHorizon.Settings;
 
@@ -12,7 +14,7 @@ internal sealed class DtrBar : IDisposable
 {
     private const int RefreshIntervalMs = 1_000;
     private readonly Configuration configuration;
-    private readonly Func<DtrBarState> getState;
+    private readonly ICondition condition;
     private readonly Action<bool> setPlayerHidingEnabled;
     private readonly Action openSettings;
     private readonly IDtrBar dtrBar;
@@ -22,13 +24,13 @@ internal sealed class DtrBar : IDisposable
     public DtrBar(
         IDtrBar dtrBar,
         Configuration configuration,
-        Func<DtrBarState> getState,
+        ICondition condition,
         Action<bool> setPlayerHidingEnabled,
         Action openSettings
     )
     {
         this.configuration = configuration;
-        this.getState = getState;
+        this.condition = condition;
         this.setPlayerHidingEnabled = setPlayerHidingEnabled;
         this.openSettings = openSettings;
         this.dtrBar = dtrBar;
@@ -57,7 +59,7 @@ internal sealed class DtrBar : IDisposable
         }
 
         var entry = EnsureEntry();
-        var state = getState();
+        var state = GetState();
         entry.Text = GetEntryText(state);
         entry.Tooltip = BuildTooltip(state);
         entry.Shown = true;
@@ -119,6 +121,30 @@ internal sealed class DtrBar : IDisposable
         return state.PauseReasonKeys.Count > 0 ? "Dtr.Text.Paused" : "Dtr.Text.Enabled";
     }
 
+    private DtrBarState GetState()
+    {
+        if (!configuration.HideAllOtherPlayers)
+        {
+            return new(false, []);
+        }
+
+        var pauseReasonKeys = new List<string>();
+        if (configuration.DisableInDuty && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]))
+        {
+            pauseReasonKeys.Add("Dtr.PauseReason.InDuty");
+        }
+
+        if (
+            configuration.DisableCullingBelowPlayerCount
+            && ObjectTableStats.CurrentOtherPlayerCount() < configuration.DisableCullingPlayerCountThreshold
+        )
+        {
+            pauseReasonKeys.Add("Dtr.PauseReason.LowPlayerCount");
+        }
+
+        return new(true, pauseReasonKeys);
+    }
+
     private unsafe string GetEntryText(DtrBarState state)
     {
         var text = Loc.Text(GetTextKey(state));
@@ -162,6 +188,6 @@ internal sealed class DtrBar : IDisposable
 
         return string.Format(Loc.Text("Dtr.Status.Paused"), string.Join(Loc.Text("Dtr.PauseReason.Separator"), reasons));
     }
-}
 
-internal sealed record DtrBarState(bool Enabled, IReadOnlyList<string> PauseReasonKeys);
+    private sealed record DtrBarState(bool Enabled, IReadOnlyList<string> PauseReasonKeys);
+}
