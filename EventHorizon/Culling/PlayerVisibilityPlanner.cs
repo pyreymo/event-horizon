@@ -24,12 +24,12 @@ internal sealed class PlayerVisibilityPlanner(Action<Exception> reportSelectionF
     )
     {
         var evaluation = selectionController.Evaluate(plan, legacyTarget, limitVisiblePlayerCount, visiblePlayerCountLimit, localPosition);
-        var resolution = PlayerVisibilityActiveTargetResolver.Resolve(plan, legacyTarget, evaluation, stableTargetBuffer);
+        var resolution = ResolveActiveTarget(plan, legacyTarget, evaluation);
         if (resolution.FailureException != null)
         {
             reportFailure(resolution.FailureException);
         }
-        var budgetStats = PlayerVisibilityActiveBudgetStats.Calculate(resolution.ActiveTarget, visiblePlayerCountLimit);
+        var budgetStats = CalculateBudgetStats(resolution.ActiveTarget, visiblePlayerCountLimit);
         var reconciliation = reconciler.Reconcile(resolution.ActiveTarget, hiddenObjectTracker);
         return new PlayerVisibilityFrameState(resolution.ActiveTarget, reconciliation, budgetStats);
     }
@@ -38,32 +38,9 @@ internal sealed class PlayerVisibilityPlanner(Action<Exception> reportSelectionF
 
     public void Reset() => selectionController.Reset();
 
-    public unsafe PlayerVisibilityPlan BuildPlan(GameObjectManager* manager, PlayerKeepPlan keepPlan, uint? previewVisibleEntityId) =>
-        PlayerVisibilityPlan.Build(manager, keepPlan, previewVisibleEntityId, planEntryBuffer);
-
-    public PlayerVisibilityTargetSet BuildLegacyTarget(PlayerVisibilityPlan plan) =>
-        PlayerVisibilityLegacyTargetBuilder.Build(plan, legacyTargetBuffer);
-}
-
-internal sealed unsafe class PlayerVisibilityPlan
-{
-    internal PlayerVisibilityPlan(TimeSpan sampleTime, IReadOnlyList<PlayerVisibilityPlanEntry> entries)
+    public unsafe PlayerVisibilityPlan BuildPlan(GameObjectManager* manager, PlayerKeepPlan keepPlan, uint? previewVisibleEntityId)
     {
-        SampleTime = sampleTime;
-        Entries = entries;
-    }
-
-    public TimeSpan SampleTime { get; }
-    public IReadOnlyList<PlayerVisibilityPlanEntry> Entries { get; }
-
-    public static PlayerVisibilityPlan Build(
-        GameObjectManager* manager,
-        PlayerKeepPlan keepPlan,
-        uint? previewVisibleEntityId,
-        List<PlayerVisibilityPlanEntry> entries
-    )
-    {
-        entries.Clear();
+        planEntryBuffer.Clear();
         for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
         {
             var gameObject = manager->Objects.IndexSorted[index].Value;
@@ -75,22 +52,146 @@ internal sealed unsafe class PlayerVisibilityPlan
             var address = (nint)gameObject;
             var keepDecision = keepPlan.GetDecision(address);
             var classification = Classify(index, keepDecision, previewVisibleEntityId == gameObject->EntityId);
-            var cutByBudget = keepPlan.IsCutByBudget(address);
             var hasPosition = TryGetPosition(gameObject, out var position);
-
-            var entry = new PlayerVisibilityPlanEntry(
-                PlayerObjectIdentity.From(gameObject),
-                index,
-                classification,
-                keepDecision,
-                cutByBudget,
-                position,
-                hasPosition
+            planEntryBuffer.Add(
+                new PlayerVisibilityPlanEntry(
+                    PlayerObjectIdentity.From(gameObject),
+                    index,
+                    classification,
+                    keepDecision,
+                    keepPlan.IsCutByBudget(address),
+                    position,
+                    hasPosition
+                )
             );
-            entries.Add(entry);
         }
 
-        return new PlayerVisibilityPlan(TimeSpan.FromMilliseconds(Environment.TickCount64), [.. entries]);
+        return new PlayerVisibilityPlan(TimeSpan.FromMilliseconds(Environment.TickCount64), [.. planEntryBuffer]);
+    }
+
+    public PlayerVisibilityTargetSet BuildLegacyTarget(PlayerVisibilityPlan plan)
+    {
+        legacyTargetBuffer.Clear();
+        foreach (var entry in plan.Entries)
+        {
+            if (entry.IsManaged)
+            {
+                legacyTargetBuffer.Add(
+                    new PlayerVisibilityTarget(
+                        entry.Identity,
+                        entry.ObjectIndex,
+                        entry.Classification,
+                        GetLegacyDesiredVisible(entry),
+                        entry.Decision,
+                        entry.CutByBudget
+                    )
+                );
+            }
+        }
+
+        return new PlayerVisibilityTargetSet([.. legacyTargetBuffer]);
+    }
+
+    private ActiveTargetResolution ResolveActiveTarget(
+        PlayerVisibilityPlan plan,
+        PlayerVisibilityTargetSet legacyTarget,
+        PlayerVisibilitySelectionEvaluation evaluation
+    )
+    {
+        if (evaluation.Status != PlayerVisibilitySelectionStatus.Ready)
+        {
+            return new(legacyTarget);
+        }
+
+        try
+        {
+            return new(BuildStableTarget(plan, evaluation.SelectedKeys));
+        }
+        catch (Exception exception)
+        {
+            return new(legacyTarget, exception);
+        }
+    }
+
+    private PlayerVisibilityTargetSet BuildStableTarget(
+        PlayerVisibilityPlan plan,
+        IReadOnlyCollection<PlayerVisibilitySelectionKey> selectedCompetitiveKeys
+    )
+    {
+        var competitiveSourceIndices = new HashSet<int>();
+        for (var sourceIndex = 0; sourceIndex < plan.Entries.Count; sourceIndex++)
+        {
+            if (plan.Entries[sourceIndex].Classification == PlayerVisibilityClassification.Competitive)
+            {
+                competitiveSourceIndices.Add(sourceIndex);
+            }
+        }
+
+        var selected = new HashSet<int>();
+        foreach (var key in selectedCompetitiveKeys)
+        {
+            if (
+                !competitiveSourceIndices.Contains(key.SourceIndex)
+                || plan.Entries[key.SourceIndex].Identity != key.Identity
+                || plan.Entries[key.SourceIndex].ObjectIndex != key.ObjectIndex
+            )
+            {
+                throw new ArgumentException(
+                    "Selected key does not map to the same Competitive entry in the current player visibility plan.",
+                    nameof(selectedCompetitiveKeys)
+                );
+            }
+            selected.Add(key.SourceIndex);
+        }
+
+        stableTargetBuffer.Clear();
+        for (var sourceIndex = 0; sourceIndex < plan.Entries.Count; sourceIndex++)
+        {
+            var entry = plan.Entries[sourceIndex];
+            if (!entry.IsManaged)
+            {
+                continue;
+            }
+
+            var desiredVisible = entry.Classification switch
+            {
+                PlayerVisibilityClassification.BypassVisible => true,
+                PlayerVisibilityClassification.Competitive => selected.Contains(sourceIndex),
+                PlayerVisibilityClassification.ForceHidden => false,
+                _ => throw new InvalidOperationException($"Unsupported player visibility classification: {entry.Classification}."),
+            };
+            stableTargetBuffer.Add(
+                new PlayerVisibilityTarget(
+                    entry.Identity,
+                    entry.ObjectIndex,
+                    entry.Classification,
+                    desiredVisible,
+                    entry.Decision,
+                    entry.Classification == PlayerVisibilityClassification.Competitive && !desiredVisible
+                )
+            );
+        }
+
+        return new PlayerVisibilityTargetSet([.. stableTargetBuffer]);
+    }
+
+    private static PlayerKeepBudgetStats CalculateBudgetStats(PlayerVisibilityTargetSet activeTarget, int visiblePlayerCountLimit)
+    {
+        var bypassVisibleCount = 0;
+        var visibleCompetitiveCount = 0;
+        foreach (var target in activeTarget.Targets)
+        {
+            if (target.Classification == PlayerVisibilityClassification.BypassVisible && target.DesiredVisible)
+            {
+                bypassVisibleCount++;
+            }
+            else if (target.Classification == PlayerVisibilityClassification.Competitive && target.DesiredVisible)
+            {
+                visibleCompetitiveCount++;
+            }
+        }
+
+        return new(bypassVisibleCount, visibleCompetitiveCount, Math.Clamp(visiblePlayerCountLimit, 1, 100));
     }
 
     private static PlayerVisibilityClassification Classify(int index, PlayerKeepDecision keepDecision, bool previewVisible)
@@ -115,7 +216,17 @@ internal sealed unsafe class PlayerVisibilityPlan
         };
     }
 
-    private static bool TryGetPosition(GameObject* gameObject, out Vector3 position)
+    private static bool GetLegacyDesiredVisible(PlayerVisibilityPlanEntry entry) =>
+        entry.Classification switch
+        {
+            PlayerVisibilityClassification.BypassVisible => true,
+            PlayerVisibilityClassification.Competitive => !entry.CutByBudget,
+            PlayerVisibilityClassification.ForceHidden => false,
+            PlayerVisibilityClassification.Unmanaged => true,
+            _ => true,
+        };
+
+    private static unsafe bool TryGetPosition(GameObject* gameObject, out Vector3 position)
     {
         position = default;
         if (gameObject == null || gameObject->VirtualTable == null)
@@ -132,91 +243,8 @@ internal sealed unsafe class PlayerVisibilityPlan
         position = (Vector3)(*positionPtr);
         return true;
     }
-}
 
-internal readonly record struct PlayerVisibilityPlanEntry(
-    PlayerObjectIdentity Identity,
-    int ObjectIndex,
-    PlayerVisibilityClassification Classification,
-    PlayerKeepDecision Decision,
-    bool CutByBudget,
-    Vector3 Position,
-    bool HasPosition
-)
-{
-    public bool IsManaged => Classification != PlayerVisibilityClassification.Unmanaged;
-}
-
-internal sealed class PlayerVisibilityTargetSet(IReadOnlyList<PlayerVisibilityTarget> targets)
-{
-    public IReadOnlyList<PlayerVisibilityTarget> Targets { get; } = targets;
-}
-
-file static class PlayerVisibilityLegacyTargetBuilder
-{
-    public static PlayerVisibilityTargetSet Build(PlayerVisibilityPlan plan, List<PlayerVisibilityTarget> targets)
-    {
-        targets.Clear();
-        foreach (var entry in plan.Entries)
-        {
-            if (!entry.IsManaged)
-            {
-                continue;
-            }
-
-            targets.Add(
-                new PlayerVisibilityTarget(
-                    entry.Identity,
-                    entry.ObjectIndex,
-                    entry.Classification,
-                    GetDesiredVisible(entry),
-                    entry.Decision,
-                    entry.CutByBudget
-                )
-            );
-        }
-
-        return new PlayerVisibilityTargetSet([.. targets]);
-    }
-
-    private static bool GetDesiredVisible(PlayerVisibilityPlanEntry entry) =>
-        entry.Classification switch
-        {
-            PlayerVisibilityClassification.BypassVisible => true,
-            PlayerVisibilityClassification.Competitive => !entry.CutByBudget,
-            PlayerVisibilityClassification.ForceHidden => false,
-            PlayerVisibilityClassification.Unmanaged => true,
-            _ => true,
-        };
-}
-
-internal readonly record struct PlayerVisibilityTarget(
-    PlayerObjectIdentity Identity,
-    int ObjectIndex,
-    PlayerVisibilityClassification Classification,
-    bool DesiredVisible,
-    PlayerKeepDecision Decision,
-    bool CutByBudget
-);
-
-internal enum PlayerVisibilityClassification
-{
-    BypassVisible,
-    Competitive,
-    ForceHidden,
-    Unmanaged,
-}
-
-internal readonly record struct PlayerObjectIdentity(nint Address, ulong GameObjectId, uint EntityId)
-{
-    public static unsafe PlayerObjectIdentity From(GameObject* gameObject) =>
-        new((nint)gameObject, (ulong)gameObject->GetGameObjectId(), gameObject->EntityId);
-
-    public unsafe bool Matches(GameObject* gameObject) =>
-        gameObject != null
-        && (nint)gameObject == Address
-        && (ulong)gameObject->GetGameObjectId() == GameObjectId
-        && gameObject->EntityId == EntityId;
+    private sealed record ActiveTargetResolution(PlayerVisibilityTargetSet ActiveTarget, Exception? FailureException = null);
 }
 
 internal sealed class PlayerVisibilitySelectionController
@@ -408,132 +436,4 @@ internal enum PlayerVisibilitySelectionStatus
     Warmup,
     Unavailable,
     Failed,
-}
-
-file static class PlayerVisibilityStableTargetBuilder
-{
-    public static PlayerVisibilityTargetSet Build(
-        PlayerVisibilityPlan plan,
-        IReadOnlyCollection<PlayerVisibilitySelectionKey> selectedCompetitiveKeys,
-        List<PlayerVisibilityTarget> targets
-    )
-    {
-        ArgumentNullException.ThrowIfNull(plan);
-        ArgumentNullException.ThrowIfNull(selectedCompetitiveKeys);
-        ArgumentNullException.ThrowIfNull(targets);
-
-        var competitiveSourceIndices = new HashSet<int>();
-        for (var sourceIndex = 0; sourceIndex < plan.Entries.Count; sourceIndex++)
-        {
-            var entry = plan.Entries[sourceIndex];
-            if (entry.Classification == PlayerVisibilityClassification.Competitive)
-            {
-                competitiveSourceIndices.Add(sourceIndex);
-            }
-        }
-
-        var selected = new HashSet<int>();
-        foreach (var key in selectedCompetitiveKeys)
-        {
-            if (
-                !competitiveSourceIndices.Contains(key.SourceIndex)
-                || plan.Entries[key.SourceIndex].Identity != key.Identity
-                || plan.Entries[key.SourceIndex].ObjectIndex != key.ObjectIndex
-            )
-            {
-                throw new ArgumentException(
-                    "Selected key does not map to the same Competitive entry in the current player visibility plan.",
-                    nameof(selectedCompetitiveKeys)
-                );
-            }
-            selected.Add(key.SourceIndex);
-        }
-
-        targets.Clear();
-        for (var sourceIndex = 0; sourceIndex < plan.Entries.Count; sourceIndex++)
-        {
-            var entry = plan.Entries[sourceIndex];
-            if (!entry.IsManaged)
-            {
-                continue;
-            }
-
-            var desiredVisible = entry.Classification switch
-            {
-                PlayerVisibilityClassification.BypassVisible => true,
-                PlayerVisibilityClassification.Competitive => selected.Contains(sourceIndex),
-                PlayerVisibilityClassification.ForceHidden => false,
-                _ => throw new InvalidOperationException($"Unsupported player visibility classification: {entry.Classification}."),
-            };
-            targets.Add(
-                new PlayerVisibilityTarget(
-                    entry.Identity,
-                    entry.ObjectIndex,
-                    entry.Classification,
-                    desiredVisible,
-                    entry.Decision,
-                    entry.Classification == PlayerVisibilityClassification.Competitive && !desiredVisible
-                )
-            );
-        }
-
-        return new PlayerVisibilityTargetSet([.. targets]);
-    }
-}
-
-file static class PlayerVisibilityActiveBudgetStats
-{
-    public static PlayerKeepBudgetStats Calculate(PlayerVisibilityTargetSet activeTarget, int visiblePlayerCountLimit)
-    {
-        ArgumentNullException.ThrowIfNull(activeTarget);
-        var bypassVisibleCount = 0;
-        var visibleCompetitiveCount = 0;
-        foreach (var target in activeTarget.Targets)
-        {
-            if (target.Classification == PlayerVisibilityClassification.BypassVisible && target.DesiredVisible)
-            {
-                bypassVisibleCount++;
-            }
-            else if (target.Classification == PlayerVisibilityClassification.Competitive && target.DesiredVisible)
-            {
-                visibleCompetitiveCount++;
-            }
-        }
-
-        return new PlayerKeepBudgetStats(bypassVisibleCount, visibleCompetitiveCount, Math.Clamp(visiblePlayerCountLimit, 1, 100));
-    }
-}
-
-file sealed record PlayerVisibilityActiveTargetResolution(PlayerVisibilityTargetSet ActiveTarget, Exception? FailureException = null);
-
-file static class PlayerVisibilityActiveTargetResolver
-{
-    public static PlayerVisibilityActiveTargetResolution Resolve(
-        PlayerVisibilityPlan plan,
-        PlayerVisibilityTargetSet legacyTarget,
-        PlayerVisibilitySelectionEvaluation evaluation,
-        List<PlayerVisibilityTarget> stableTargetBuffer
-    )
-    {
-        ArgumentNullException.ThrowIfNull(plan);
-        ArgumentNullException.ThrowIfNull(legacyTarget);
-        ArgumentNullException.ThrowIfNull(evaluation);
-        ArgumentNullException.ThrowIfNull(stableTargetBuffer);
-
-        var activeTarget = legacyTarget;
-        Exception? failureException = null;
-        if (evaluation.Status == PlayerVisibilitySelectionStatus.Ready)
-        {
-            try
-            {
-                activeTarget = PlayerVisibilityStableTargetBuilder.Build(plan, evaluation.SelectedKeys, stableTargetBuffer);
-            }
-            catch (Exception exception)
-            {
-                failureException = exception;
-                activeTarget = legacyTarget;
-            }
-        }
-        return new PlayerVisibilityActiveTargetResolution(activeTarget, failureException);
-    }
 }

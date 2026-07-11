@@ -2,9 +2,64 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using System.Threading;
+using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.Culling;
+
+internal sealed class PlayerVisibilityPlan(TimeSpan sampleTime, IReadOnlyList<PlayerVisibilityPlanEntry> entries)
+{
+    public TimeSpan SampleTime { get; } = sampleTime;
+    public IReadOnlyList<PlayerVisibilityPlanEntry> Entries { get; } = entries;
+}
+
+internal readonly record struct PlayerVisibilityPlanEntry(
+    PlayerObjectIdentity Identity,
+    int ObjectIndex,
+    PlayerVisibilityClassification Classification,
+    PlayerKeepDecision Decision,
+    bool CutByBudget,
+    Vector3 Position,
+    bool HasPosition
+)
+{
+    public bool IsManaged => Classification != PlayerVisibilityClassification.Unmanaged;
+}
+
+internal sealed class PlayerVisibilityTargetSet(IReadOnlyList<PlayerVisibilityTarget> targets)
+{
+    public IReadOnlyList<PlayerVisibilityTarget> Targets { get; } = targets;
+}
+
+internal readonly record struct PlayerVisibilityTarget(
+    PlayerObjectIdentity Identity,
+    int ObjectIndex,
+    PlayerVisibilityClassification Classification,
+    bool DesiredVisible,
+    PlayerKeepDecision Decision,
+    bool CutByBudget
+);
+
+internal enum PlayerVisibilityClassification
+{
+    BypassVisible,
+    Competitive,
+    ForceHidden,
+    Unmanaged,
+}
+
+internal readonly record struct PlayerObjectIdentity(nint Address, ulong GameObjectId, uint EntityId)
+{
+    public static unsafe PlayerObjectIdentity From(GameObject* gameObject) =>
+        new((nint)gameObject, (ulong)gameObject->GetGameObjectId(), gameObject->EntityId);
+
+    public unsafe bool Matches(GameObject* gameObject) =>
+        gameObject != null
+        && (nint)gameObject == Address
+        && (ulong)gameObject->GetGameObjectId() == GameObjectId
+        && gameObject->EntityId == EntityId;
+}
 
 internal sealed class PlayerVisibilityAppliedState
 {
