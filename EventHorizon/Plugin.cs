@@ -34,9 +34,6 @@ public sealed class Plugin : IDalamudPlugin
     internal static IGameInteropProvider GameInteropProvider { get; private set; } = null!;
 
     [PluginService]
-    internal static ISigScanner SigScanner { get; private set; } = null!;
-
-    [PluginService]
     internal static IPlayerState PlayerState { get; private set; } = null!;
 
     [PluginService]
@@ -110,9 +107,9 @@ public sealed class Plugin : IDalamudPlugin
 
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         PlayerPreviewHighlighter = new PlayerPreviewHighlighter();
-        ActorVfxController = new ActorVfxController(GameInteropProvider, SigScanner, Log);
+        ActorVfxController = new ActorVfxController(GameInteropProvider, Log);
         StaticVfxResourceRedirector = new StaticVfxResourceRedirector(PluginInterface, GameInteropProvider, Log);
-        StaticVfxController = new StaticVfxController(GameInteropProvider, SigScanner, Log);
+        StaticVfxController = new StaticVfxController(GameInteropProvider, Log);
         Culling = new CullingController(
             GameInteropProvider,
             Configuration,

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
 using System.Text;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
@@ -18,6 +17,7 @@ internal sealed unsafe class StaticVfxController : IDisposable
     private const float PositionEpsilonSq = 0.0001f;
     private const float RotationEpsilon = 0.001f;
     private const string StaticVfxPoolName = "Client.System.Scheduler.Instance.VfxObject";
+    private const string StaticVfxCreateSig = "E8 ?? ?? ?? ?? F3 0F 10 35 ?? ?? ?? ?? 48 89 43 08";
     private const string StaticVfxRunSig = "E8 ?? ?? ?? ?? B0 02 EB 02";
     private const string StaticVfxRemoveSig =
         "40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 74 28 33 D2 E8 ?? ?? ?? ?? 48 8B 8B ?? ?? ?? ?? 48 85 C9";
@@ -25,7 +25,6 @@ internal sealed unsafe class StaticVfxController : IDisposable
     private readonly Dictionary<string, byte[]> vfxPathBytes = [];
     private readonly byte[] staticVfxPoolNameBytes = GetNullTerminatedUtf8Bytes(StaticVfxPoolName);
     private readonly IPluginLog log;
-    private readonly VfxObject.Delegates.Create? staticVfxCreate;
     private readonly Hook<StaticVfxRemoveDelegate>? staticVfxRemoveHook;
     private bool loggedInteropUnavailable;
     private bool disposed;
@@ -33,7 +32,13 @@ internal sealed unsafe class StaticVfxController : IDisposable
     [Signature(StaticVfxRunSig)]
     private readonly StaticVfxRunDelegate? staticVfxRun = null;
 
-    public StaticVfxController(IGameInteropProvider gameInteropProvider, ISigScanner sigScanner, IPluginLog log)
+    [Signature(StaticVfxCreateSig)]
+    private readonly VfxObject.Delegates.Create? staticVfxCreate = null;
+
+    [Signature(StaticVfxRemoveSig)]
+    private readonly nint staticVfxRemoveAddress = nint.Zero;
+
+    public StaticVfxController(IGameInteropProvider gameInteropProvider, IPluginLog log)
     {
         this.log = log;
 
@@ -41,15 +46,14 @@ internal sealed unsafe class StaticVfxController : IDisposable
         {
             gameInteropProvider.InitializeFromAttributes(this);
 
-            var staticVfxCreateAddress = sigScanner.ScanText(VfxObject.Addresses.Create.String);
-            staticVfxCreate = Marshal.GetDelegateForFunctionPointer<VfxObject.Delegates.Create>(staticVfxCreateAddress);
-
-            var staticVfxRemoveAddress = sigScanner.ScanText(StaticVfxRemoveSig);
-            staticVfxRemoveHook = gameInteropProvider.HookFromAddress<StaticVfxRemoveDelegate>(
-                staticVfxRemoveAddress,
-                StaticVfxRemoveDetour
-            );
-            staticVfxRemoveHook.Enable();
+            if (staticVfxRemoveAddress != nint.Zero)
+            {
+                staticVfxRemoveHook = gameInteropProvider.HookFromAddress<StaticVfxRemoveDelegate>(
+                    staticVfxRemoveAddress,
+                    StaticVfxRemoveDetour
+                );
+                staticVfxRemoveHook.Enable();
+            }
         }
         catch (Exception ex)
         {
