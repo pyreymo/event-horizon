@@ -79,6 +79,55 @@ internal partial class ConfigWindow
             configuration.EnableHiddenPlayerGroundMarker = enableHiddenPlayerGroundMarker;
             SaveAndRefreshWithoutRuleReset();
         }
+
+        if (!configuration.EnableHiddenPlayerGroundMarker)
+        {
+            return;
+        }
+
+        ImGui.Indent();
+        var useDot = configuration.UseHiddenPlayerMarkerDot;
+        if (DrawAutoFitCheckbox("UseHiddenPlayerMarkerDot", Loc.Text("Config.UseHiddenPlayerMarkerDot"), ref useDot))
+        {
+            configuration.UseHiddenPlayerMarkerDot = useDot;
+            SaveAndRefreshWithoutRuleReset();
+        }
+
+        if (configuration.UseHiddenPlayerMarkerDot)
+        {
+            var color = new Vector4(
+                configuration.HiddenPlayerMarkerDotColorRed / 255f,
+                configuration.HiddenPlayerMarkerDotColorGreen / 255f,
+                configuration.HiddenPlayerMarkerDotColorBlue / 255f,
+                configuration.HiddenPlayerMarkerDotColorAlpha / 255f
+            );
+            ImGui.SetNextItemWidth(-1f);
+            if (ImGui.ColorEdit4($"{Loc.Text("Config.HiddenPlayerMarkerDotColor")}##HiddenPlayerMarkerDotColor", ref color))
+            {
+                configuration.HiddenPlayerMarkerDotColorRed = ToColorByte(color.X);
+                configuration.HiddenPlayerMarkerDotColorGreen = ToColorByte(color.Y);
+                configuration.HiddenPlayerMarkerDotColorBlue = ToColorByte(color.Z);
+                configuration.HiddenPlayerMarkerDotColorAlpha = ToColorByte(color.W);
+            }
+            SaveConfigurationIfEditFinished();
+
+            var radius = Math.Clamp(configuration.HiddenPlayerMarkerDotRadius, 1f, 20f);
+            ImGui.SetNextItemWidth(-1f);
+            if (
+                ImGui.SliderFloat(
+                    $"{Loc.Text("Config.HiddenPlayerMarkerDotSize")}##HiddenPlayerMarkerDotSize",
+                    ref radius,
+                    1f,
+                    20f,
+                    "%.0f px"
+                )
+            )
+            {
+                configuration.HiddenPlayerMarkerDotRadius = radius;
+            }
+            SaveConfigurationIfEditFinished();
+        }
+        ImGui.Unindent();
     }
 
     private void DrawLayoutGraphicsControls()
@@ -117,7 +166,11 @@ internal partial class ConfigWindow
         ImGui.Indent();
 
         DrawTargetingMeNamePlateMarkerSection();
+        ImGui.Spacing();
+        DrawTargetingMeDotMarkerSection();
+        ImGui.Spacing();
         DrawTargetingMeVfxMarkerSection();
+        ImGui.Spacing();
         DrawTargetingMeMarkerTestControls();
 
         ImGui.Unindent();
@@ -204,6 +257,72 @@ internal partial class ConfigWindow
         ImGui.Unindent();
     }
 
+    private void DrawTargetingMeDotMarkerSection()
+    {
+        var enableDotMarker = configuration.EnableTargetingMeDotMarker;
+        if (DrawAutoFitCheckbox("EnableTargetingMeDotMarker", Loc.Text("Config.EnableTargetingMeDotMarker"), ref enableDotMarker))
+        {
+            configuration.EnableTargetingMeDotMarker = enableDotMarker;
+            SaveAndRequestTargetingMeMarkerRefresh();
+        }
+
+        if (!configuration.EnableTargetingMeDotMarker)
+        {
+            return;
+        }
+
+        ImGui.Spacing();
+        if (ImGui.TreeNodeEx($"{Loc.Text("Config.Section.MarkerStyle")}##TargetingMeDotMarkerStyle", ImGuiTreeNodeFlags.SpanAvailWidth))
+        {
+            if (BeginBehaviorControlTable("TargetingMeDotMarkerStyleTable"))
+            {
+                var useCustomColor = configuration.UseCustomTargetingMeDotColor;
+                if (
+                    DrawBehaviorCheckbox(
+                        "UseCustomTargetingMeDotColor",
+                        Loc.Text("Config.UseCustomTargetingMeDotColor"),
+                        ref useCustomColor
+                    )
+                )
+                {
+                    configuration.UseCustomTargetingMeDotColor = useCustomColor;
+                    SaveAndRequestTargetingMeMarkerRefresh();
+                }
+
+                if (configuration.UseCustomTargetingMeDotColor)
+                {
+                    var color = new Vector4(
+                        configuration.TargetingMeDotColorRed / 255f,
+                        configuration.TargetingMeDotColorGreen / 255f,
+                        configuration.TargetingMeDotColorBlue / 255f,
+                        configuration.TargetingMeDotColorAlpha / 255f
+                    );
+                    DrawBehaviorControlLabel(Loc.Text("Config.TargetingMeDotColor"));
+                    ImGui.SetNextItemWidth(-1f);
+                    if (ImGui.ColorEdit4("##TargetingMeDotColor", ref color))
+                    {
+                        configuration.TargetingMeDotColorRed = ToColorByte(color.X);
+                        configuration.TargetingMeDotColorGreen = ToColorByte(color.Y);
+                        configuration.TargetingMeDotColorBlue = ToColorByte(color.Z);
+                        configuration.TargetingMeDotColorAlpha = ToColorByte(color.W);
+                    }
+                    SaveConfigurationIfEditFinished();
+                }
+
+                var radius = Math.Clamp(configuration.TargetingMeDotRadius, 1f, 20f);
+                if (DrawBehaviorSliderFloat("TargetingMeDotRadius", Loc.Text("Config.TargetingMeDotSize"), ref radius, 1f, 20f, "%.0f px"))
+                {
+                    configuration.TargetingMeDotRadius = radius;
+                }
+                SaveConfigurationIfEditFinished();
+
+                ImGui.EndTable();
+            }
+
+            ImGui.TreePop();
+        }
+    }
+
     private void DrawDtrBackgroundStyleControls()
     {
         if (!BeginBehaviorControlTable("DtrBackgroundStyleTable"))
@@ -217,7 +336,7 @@ internal partial class ConfigWindow
             configuration.DtrBackgroundAlpha = (byte)alphaValue;
             RefreshDtrBackground();
         }
-        SaveDtrBackgroundIfEditFinished();
+        SaveConfigurationIfEditFinished();
 
         var horizontalPadding = Math.Clamp(configuration.DtrBackgroundHorizontalPadding, 0f, 80f);
         if (
@@ -234,7 +353,7 @@ internal partial class ConfigWindow
             configuration.DtrBackgroundHorizontalPadding = horizontalPadding;
             RefreshDtrBackground();
         }
-        SaveDtrBackgroundIfEditFinished();
+        SaveConfigurationIfEditFinished();
 
         var top = Math.Clamp(configuration.DtrBackgroundPaddingTop, 0f, 80f);
         if (DrawBehaviorSliderFloat("DtrBackgroundPaddingTop", Loc.Text("Config.DtrBackgroundPaddingTop"), ref top, 0f, 80f, "%.0f"))
@@ -242,7 +361,7 @@ internal partial class ConfigWindow
             configuration.DtrBackgroundPaddingTop = top;
             RefreshDtrBackground();
         }
-        SaveDtrBackgroundIfEditFinished();
+        SaveConfigurationIfEditFinished();
 
         var bottom = Math.Clamp(configuration.DtrBackgroundPaddingBottom, 0f, 80f);
         if (
@@ -259,7 +378,7 @@ internal partial class ConfigWindow
             configuration.DtrBackgroundPaddingBottom = bottom;
             RefreshDtrBackground();
         }
-        SaveDtrBackgroundIfEditFinished();
+        SaveConfigurationIfEditFinished();
 
         ImGui.EndTable();
     }
@@ -434,7 +553,7 @@ internal partial class ConfigWindow
         plugin.RefreshDtrBackground();
     }
 
-    private void SaveDtrBackgroundIfEditFinished()
+    private void SaveConfigurationIfEditFinished()
     {
         if (ImGui.IsItemDeactivatedAfterEdit())
         {

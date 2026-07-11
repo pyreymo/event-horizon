@@ -12,6 +12,11 @@ using SystemVector3 = System.Numerics.Vector3;
 
 namespace EventHorizon.Interop.Vfx;
 
+internal enum StaticVfxScope
+{
+    HiddenPlayerMarker,
+}
+
 internal sealed unsafe class StaticVfxController : IDisposable
 {
     private const float PositionEpsilonSq = 0.0001f;
@@ -21,7 +26,7 @@ internal sealed unsafe class StaticVfxController : IDisposable
     private const string StaticVfxRunSig = "E8 ?? ?? ?? ?? B0 02 EB 02";
     private const string StaticVfxRemoveSig =
         "40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 74 28 33 D2 E8 ?? ?? ?? ?? 48 8B 8B ?? ?? ?? ?? 48 85 C9";
-    private readonly Dictionary<ulong, ActiveStaticVfx> activeVfx = [];
+    private readonly Dictionary<StaticVfxKey, ActiveStaticVfx> activeVfx = [];
     private readonly Dictionary<string, byte[]> vfxPathBytes = [];
     private readonly byte[] staticVfxPoolNameBytes = GetNullTerminatedUtf8Bytes(StaticVfxPoolName);
     private readonly IPluginLog log;
@@ -65,19 +70,20 @@ internal sealed unsafe class StaticVfxController : IDisposable
 
     private delegate nint StaticVfxRemoveDelegate(VfxObject* vfx);
 
-    public bool IsActive(ulong gameObjectId, string path)
+    public bool IsActive(StaticVfxScope scope, ulong gameObjectId, string path)
     {
-        return activeVfx.TryGetValue(gameObjectId, out var active) && active.Path == path && active.VfxAddress != nint.Zero;
+        return activeVfx.TryGetValue(new(scope, gameObjectId), out var active) && active.Path == path && active.VfxAddress != nint.Zero;
     }
 
-    public void ShowOrUpdate(ulong gameObjectId, string path, SystemVector3 position, float rotation = 0f)
+    public void ShowOrUpdate(StaticVfxScope scope, ulong gameObjectId, string path, SystemVector3 position, float rotation = 0f)
     {
         if (disposed || gameObjectId == 0 || string.IsNullOrEmpty(path))
         {
             return;
         }
 
-        if (activeVfx.TryGetValue(gameObjectId, out var active) && active.Path == path && active.VfxAddress != nint.Zero)
+        var key = new StaticVfxKey(scope, gameObjectId);
+        if (activeVfx.TryGetValue(key, out var active) && active.Path == path && active.VfxAddress != nint.Zero)
         {
             if (active.IsSameTransform(position, rotation))
             {
@@ -85,28 +91,55 @@ internal sealed unsafe class StaticVfxController : IDisposable
             }
 
             UpdateTransform((VfxObject*)active.VfxAddress, position, rotation);
-            activeVfx[gameObjectId] = active with { Position = position, Rotation = rotation };
+            activeVfx[key] = active with { Position = position, Rotation = rotation };
             return;
         }
 
-        Remove(gameObjectId);
-        Create(gameObjectId, path, position, rotation);
+        Remove(key);
+        Create(key, path, position, rotation);
     }
 
-    public void PruneExcept(HashSet<ulong> gameObjectIds)
+    public void PruneScopeExcept(StaticVfxScope scope, HashSet<ulong> gameObjectIds)
     {
-        var keysToRemove = new List<ulong>();
-        foreach (var gameObjectId in activeVfx.Keys)
+        if (activeVfx.Count == 0)
         {
-            if (!gameObjectIds.Contains(gameObjectId))
+            return;
+        }
+
+        var keysToRemove = new List<StaticVfxKey>();
+        foreach (var key in activeVfx.Keys)
+        {
+            if (key.Scope == scope && !gameObjectIds.Contains(key.GameObjectId))
             {
-                keysToRemove.Add(gameObjectId);
+                keysToRemove.Add(key);
             }
         }
 
-        foreach (var gameObjectId in keysToRemove)
+        foreach (var key in keysToRemove)
         {
-            Remove(gameObjectId);
+            Remove(key);
+        }
+    }
+
+    public void ClearScope(StaticVfxScope scope)
+    {
+        if (activeVfx.Count == 0)
+        {
+            return;
+        }
+
+        var keysToRemove = new List<StaticVfxKey>();
+        foreach (var key in activeVfx.Keys)
+        {
+            if (key.Scope == scope)
+            {
+                keysToRemove.Add(key);
+            }
+        }
+
+        foreach (var key in keysToRemove)
+        {
+            Remove(key);
         }
     }
 
@@ -117,10 +150,10 @@ internal sealed unsafe class StaticVfxController : IDisposable
             return;
         }
 
-        var gameObjectIds = new List<ulong>(activeVfx.Keys);
-        foreach (var gameObjectId in gameObjectIds)
+        var keys = new List<StaticVfxKey>(activeVfx.Keys);
+        foreach (var key in keys)
         {
-            Remove(gameObjectId);
+            Remove(key);
         }
     }
 
@@ -136,7 +169,7 @@ internal sealed unsafe class StaticVfxController : IDisposable
         disposed = true;
     }
 
-    private void Create(ulong gameObjectId, string path, SystemVector3 position, float rotation)
+    private void Create(StaticVfxKey key, string path, SystemVector3 position, float rotation)
     {
         var create = staticVfxCreate;
         var run = staticVfxRun;
@@ -168,19 +201,19 @@ internal sealed unsafe class StaticVfxController : IDisposable
 
             if (vfx == null)
             {
-                log.Warning("[HiddenVfx] VfxObject.Create returned null. gameObjectId={GameObjectId} path={Path}", gameObjectId, path);
+                log.Warning("[HiddenVfx] VfxObject.Create returned null. gameObjectId={GameObjectId} path={Path}", key.GameObjectId, path);
                 return;
             }
 
-            activeVfx[gameObjectId] = new ActiveStaticVfx((nint)vfx, path, position, rotation);
+            activeVfx[key] = new ActiveStaticVfx((nint)vfx, path, position, rotation);
             run(vfx, 0f, 0xFFFFFFFF);
             UpdateTransform(vfx, position, rotation);
             return;
         }
         catch (Exception ex)
         {
-            log.Warning(ex, "[HiddenVfx] Failed to create static VFX. gameObjectId={GameObjectId} path={Path}", gameObjectId, path);
-            activeVfx.Remove(gameObjectId);
+            log.Warning(ex, "[HiddenVfx] Failed to create static VFX. gameObjectId={GameObjectId} path={Path}", key.GameObjectId, path);
+            activeVfx.Remove(key);
             return;
         }
     }
@@ -205,9 +238,9 @@ internal sealed unsafe class StaticVfxController : IDisposable
         return bytes;
     }
 
-    private bool Remove(ulong gameObjectId)
+    private bool Remove(StaticVfxKey key)
     {
-        if (!activeVfx.Remove(gameObjectId, out var active) || staticVfxRemoveHook is null)
+        if (!activeVfx.Remove(key, out var active) || staticVfxRemoveHook is null)
         {
             return false;
         }
@@ -254,21 +287,23 @@ internal sealed unsafe class StaticVfxController : IDisposable
             return;
         }
 
-        ulong? removedGameObjectId = null;
-        foreach (var (gameObjectId, active) in activeVfx)
+        StaticVfxKey? removedKey = null;
+        foreach (var (key, active) in activeVfx)
         {
             if (active.VfxAddress == vfxAddress)
             {
-                removedGameObjectId = gameObjectId;
+                removedKey = key;
                 break;
             }
         }
 
-        if (removedGameObjectId.HasValue)
+        if (removedKey.HasValue)
         {
-            activeVfx.Remove(removedGameObjectId.Value);
+            activeVfx.Remove(removedKey.Value);
         }
     }
+
+    private readonly record struct StaticVfxKey(StaticVfxScope Scope, ulong GameObjectId);
 
     private readonly record struct ActiveStaticVfx(nint VfxAddress, string Path, SystemVector3 Position, float Rotation)
     {

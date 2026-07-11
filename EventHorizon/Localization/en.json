@@ -113,6 +113,7 @@
     "Config.Section.TargetingMeMarker": "Targeting-me marker",
     "Config.EnableTargetingMeMarker": "Mark players targeting me",
     "Config.EnableTargetingMeNamePlateMarker": "Enable nameplate marker",
+    "Config.EnableTargetingMeDotMarker": "Enable dot marker",
     "Config.EnableTargetingMeVfxMarker": "Enable VFX marker",
     "Config.DisableTargetingMeMarkerVfxInDuty": "Disable VFX marker in duties",
     "Config.EnableTargetingMeMarkerCurrentTargetTest": "Test using current target",
@@ -126,6 +127,9 @@
     "Config.TargetingMeMarkerGlowOpacity": "Glow layer opacity",
     "Config.UseCustomTargetingMeMarkerColor": "Use fixed marker color",
     "Config.TargetingMeMarkerColor": "Marker color",
+    "Config.TargetingMeDotColor": "Dot color",
+    "Config.UseCustomTargetingMeDotColor": "Use fixed dot color",
+    "Config.TargetingMeDotSize": "Dot size",
 
     "Config.Section.DtrBar": "Server Info Bar",
     "Config.ShowDtrBar": "Enable Server Info Bar button",
@@ -145,5 +149,8 @@
     "Config.Debug.ChatSearchTextHint": "Text to find in chat",
     "Config.Debug.JumpChatPreviousMatch": "Previous matching line",
     "Config.Debug.JumpChatNextMatch": "Next matching line",
-    "Config.EnableHiddenPlayerGroundMarker": "Show an effect at hidden players' feet (experimental)"
+    "Config.EnableHiddenPlayerGroundMarker": "Show a marker at hidden players' feet",
+    "Config.UseHiddenPlayerMarkerDot": "Use a less resource-intensive dot (does not handle in-game occlusion)",
+    "Config.HiddenPlayerMarkerDotColor": "Dot color",
+    "Config.HiddenPlayerMarkerDotSize": "Dot size"
 }

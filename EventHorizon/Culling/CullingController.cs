@@ -5,6 +5,7 @@ using Dalamud.Plugin.Services;
 using EventHorizon.Interop.Vfx;
 using EventHorizon.Preview;
 using EventHorizon.Settings;
+using EventHorizon.WorldGraphics;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.Culling;
@@ -33,6 +34,7 @@ internal sealed unsafe class CullingController : IDisposable
         ITargetManager targetManager,
         IGameGui gameGui,
         StaticVfxController staticVfxController,
+        IWorldDotOverlay worldDotOverlay,
         IPluginLog log
     )
     {
@@ -41,7 +43,7 @@ internal sealed unsafe class CullingController : IDisposable
         this.condition = condition;
         players = new PlayerCuller(configuration, playerState, objectTable, targetManager, gameGui, log);
         nonPlayers = new NonPlayerCuller(configuration);
-        hiddenPlayerMarker = new HiddenPlayerMarker(configuration, gameGui, staticVfxController);
+        hiddenPlayerMarker = new HiddenPlayerMarker(configuration, gameGui, staticVfxController, worldDotOverlay);
         playerPreview = new PlayerPreview(configuration);
         hook = new UpdateObjectArraysHook(gameInteropProvider, OnObjectArraysUpdated);
     }

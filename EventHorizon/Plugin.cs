@@ -89,6 +89,7 @@ public sealed class Plugin : IDalamudPlugin
     private ActorVfxController ActorVfxController { get; init; }
     private StaticVfxResourceRedirector StaticVfxResourceRedirector { get; init; }
     private StaticVfxController StaticVfxController { get; init; }
+    private WorldDotOverlay WorldDotOverlay { get; init; }
     private DtrBar DtrStatusBar { get; init; }
     private DtrBackground DtrBackground { get; init; }
     private LayoutGraphics LayoutGraphics { get; init; }
@@ -110,6 +111,7 @@ public sealed class Plugin : IDalamudPlugin
         ActorVfxController = new ActorVfxController(GameInteropProvider, Log);
         StaticVfxResourceRedirector = new StaticVfxResourceRedirector(PluginInterface, GameInteropProvider, Log);
         StaticVfxController = new StaticVfxController(GameInteropProvider, Log);
+        WorldDotOverlay = new WorldDotOverlay(GameGui, PluginInterface);
         Culling = new CullingController(
             GameInteropProvider,
             Configuration,
@@ -119,6 +121,7 @@ public sealed class Plugin : IDalamudPlugin
             TargetManager,
             GameGui,
             StaticVfxController,
+            WorldDotOverlay,
             Log
         );
         var playerPreviewPanel = new PlayerPreviewPanel(
@@ -143,6 +146,7 @@ public sealed class Plugin : IDalamudPlugin
             Framework,
             TextureProvider,
             ActorVfxController,
+            WorldDotOverlay,
             Log
         );
 
@@ -178,6 +182,7 @@ public sealed class Plugin : IDalamudPlugin
         DtrBackground.Dispose();
         DtrStatusBar.Dispose();
         Culling.Dispose();
+        WorldDotOverlay.Dispose();
         StaticVfxController.Dispose();
         StaticVfxResourceRedirector.Dispose();
         ActorVfxController.Dispose();

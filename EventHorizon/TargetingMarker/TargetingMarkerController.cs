@@ -1,13 +1,16 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.Gui.NamePlate;
+using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using EventHorizon.Interop.Vfx;
 using EventHorizon.Settings;
+using EventHorizon.WorldGraphics;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
@@ -48,6 +51,8 @@ internal sealed unsafe class TargetingMarkerController : IDisposable
     private readonly EmbeddedMarkerTextureResources markerResources;
     private readonly ActorVfxController actorVfxController;
     private readonly IPluginLog log;
+    private readonly IWorldDotOverlay worldDotOverlay;
+    private readonly List<WorldDot> dots = [];
 
     private TargetingMeMarkerStyle appliedStyle;
     private int styleRevision;
@@ -66,6 +71,7 @@ internal sealed unsafe class TargetingMarkerController : IDisposable
         IFramework framework,
         ITextureProvider textureProvider,
         ActorVfxController actorVfxController,
+        IWorldDotOverlay worldDotOverlay,
         IPluginLog log
     )
     {
@@ -78,6 +84,7 @@ internal sealed unsafe class TargetingMarkerController : IDisposable
         this.configuration = configuration;
         this.framework = framework;
         this.actorVfxController = actorVfxController;
+        this.worldDotOverlay = worldDotOverlay;
         this.log = log;
         markerResources = new EmbeddedMarkerTextureResources(textureProvider, log, GazeMarker);
 
@@ -117,6 +124,7 @@ internal sealed unsafe class TargetingMarkerController : IDisposable
 
         RemoveAllMarkerNodes();
         actorVfxController.ClearScope(ActorVfxScope.TargetingMeMarker);
+        worldDotOverlay.Clear(WorldDotScope.TargetingMe);
         ReleaseMarkerResources();
     }
 
@@ -155,6 +163,11 @@ internal sealed unsafe class TargetingMarkerController : IDisposable
         }
 
         RefreshStyleRevision();
+        if (!configuration.EnableTargetingMeMarker || !configuration.EnableTargetingMeDotMarker)
+        {
+            worldDotOverlay.Clear(WorldDotScope.TargetingMe);
+        }
+
         if (!ShouldUseNamePlateMarker())
         {
             RemoveAllMarkerNodes();
@@ -189,6 +202,7 @@ internal sealed unsafe class TargetingMarkerController : IDisposable
         {
             RemoveMarkerNodes((AddonNamePlate*)args.Addon.Address);
             actorVfxController.ClearScope(ActorVfxScope.TargetingMeMarker);
+            worldDotOverlay.Clear(WorldDotScope.TargetingMe);
         }
     }
 
@@ -203,6 +217,7 @@ internal sealed unsafe class TargetingMarkerController : IDisposable
         {
             HideAllMarkers();
             actorVfxController.ClearScope(ActorVfxScope.TargetingMeMarker);
+            worldDotOverlay.Clear(WorldDotScope.TargetingMe);
             return;
         }
 
@@ -225,6 +240,47 @@ internal sealed unsafe class TargetingMarkerController : IDisposable
         {
             actorVfxController.ClearScope(ActorVfxScope.TargetingMeMarker);
         }
+
+        UpdateTargetingMeDots(handlers);
+    }
+
+    private void UpdateTargetingMeDots(IReadOnlyList<INamePlateUpdateHandler> handlers)
+    {
+        if (!configuration.EnableTargetingMeDotMarker)
+        {
+            worldDotOverlay.Clear(WorldDotScope.TargetingMe);
+            return;
+        }
+
+        var customColor = WorldDot.PackColor(
+            configuration.TargetingMeDotColorRed,
+            configuration.TargetingMeDotColorGreen,
+            configuration.TargetingMeDotColorBlue,
+            configuration.TargetingMeDotColorAlpha
+        );
+        var radius = Math.Clamp(configuration.TargetingMeDotRadius, 1f, 20f);
+        var addonPointer = gameGui.GetAddonByName(NamePlateAddonName);
+        var addon = addonPointer == nint.Zero ? null : (AddonNamePlate*)addonPointer.Address;
+        dots.Clear();
+        foreach (var handler in handlers)
+        {
+            var player = handler.PlayerCharacter;
+            if (player is not null && IsTargetingLocalPlayer(player))
+            {
+                var namePlateIndex = handler.NamePlateIndex;
+                var nameText =
+                    addon != null && (uint)namePlateIndex < NamePlateSlotCount
+                        ? addon->NamePlateObjectArray[namePlateIndex].NameText
+                        : null;
+                var color =
+                    configuration.UseCustomTargetingMeDotColor || nameText == null
+                        ? customColor
+                        : WorldDot.PackColor(nameText->TextColor.R, nameText->TextColor.G, nameText->TextColor.B, nameText->TextColor.A);
+                dots.Add(new(player.Position, color, radius));
+            }
+        }
+
+        worldDotOverlay.Replace(WorldDotScope.TargetingMe, CollectionsMarshal.AsSpan(dots));
     }
 
     private void UpdateTargetingMeNamePlateMarkers(IReadOnlyList<INamePlateUpdateHandler> handlers)

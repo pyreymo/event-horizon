@@ -113,6 +113,7 @@
     "Config.Section.TargetingMeMarker": "注视标记",
     "Config.EnableTargetingMeMarker": "标记正在看我的玩家",
     "Config.EnableTargetingMeNamePlateMarker": "启用名牌标记",
+    "Config.EnableTargetingMeDotMarker": "启用圆点标记",
     "Config.EnableTargetingMeVfxMarker": "启用特效标记",
     "Config.DisableTargetingMeMarkerVfxInDuty": "副本内禁用特效标记",
     "Config.EnableTargetingMeMarkerCurrentTargetTest": "用当前目标测试",
@@ -126,6 +127,9 @@
     "Config.TargetingMeMarkerGlowOpacity": "发光层不透明度",
     "Config.UseCustomTargetingMeMarkerColor": "使用固定标记颜色",
     "Config.TargetingMeMarkerColor": "标记颜色",
+    "Config.TargetingMeDotColor": "圆点颜色",
+    "Config.UseCustomTargetingMeDotColor": "使用固定圆点颜色",
+    "Config.TargetingMeDotSize": "圆点大小",
 
     "Config.Section.DtrBar": "服务器信息栏",
     "Config.ShowDtrBar": "启用服务器信息栏按钮",
@@ -145,5 +149,8 @@
     "Config.Debug.ChatSearchTextHint": "要在聊天中查找的文本",
     "Config.Debug.JumpChatPreviousMatch": "上一条匹配行",
     "Config.Debug.JumpChatNextMatch": "下一条匹配行",
-    "Config.EnableHiddenPlayerGroundMarker": "在隐藏玩家脚下显示特效（实验性）"
+    "Config.EnableHiddenPlayerGroundMarker": "在隐藏玩家脚下显示标记",
+    "Config.UseHiddenPlayerMarkerDot": "使用开销更低的圆点（无法处理游戏内遮挡）",
+    "Config.HiddenPlayerMarkerDotColor": "圆点颜色",
+    "Config.HiddenPlayerMarkerDotSize": "圆点大小"
 }
