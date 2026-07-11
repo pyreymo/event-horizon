@@ -8,21 +8,26 @@ namespace EventHorizon.Culling;
 internal sealed class PlayerVisibilityPlanner(Action<Exception> reportSelectionFailure)
 {
     private readonly PlayerVisibilitySelectionController selectionController = new(reportFailure: reportSelectionFailure);
-    private readonly PlayerVisibilityReconciler reconciler = new();
     private readonly Action<Exception> reportFailure = reportSelectionFailure;
     private readonly List<PlayerVisibilityPlanEntry> planEntryBuffer = [];
     private readonly List<PlayerVisibilityTarget> legacyTargetBuffer = [];
     private readonly List<PlayerVisibilityTarget> stableTargetBuffer = [];
+    private readonly List<PlayerVisibilityTarget> targetsToShow = [];
+    private readonly List<PlayerVisibilityTarget> targetsToHide = [];
+    private readonly List<PlayerVisibilityAction> reconciliationActions = [];
 
-    public PlayerVisibilityFrameState BuildFrame(
-        PlayerVisibilityPlan plan,
-        PlayerVisibilityTargetSet legacyTarget,
+    public unsafe PlayerVisibilityFrameState BuildFrame(
+        GameObjectManager* manager,
+        PlayerKeepPlan keepPlan,
+        uint? previewVisibleEntityId,
         bool limitVisiblePlayerCount,
         int visiblePlayerCountLimit,
         Vector3? localPosition,
         HiddenObjectTracker hiddenObjectTracker
     )
     {
+        var plan = BuildPlan(manager, keepPlan, previewVisibleEntityId);
+        var legacyTarget = BuildLegacyTarget(plan);
         var evaluation = selectionController.Evaluate(plan, legacyTarget, limitVisiblePlayerCount, visiblePlayerCountLimit, localPosition);
         var resolution = ResolveActiveTarget(plan, legacyTarget, evaluation);
         if (resolution.FailureException != null)
@@ -30,7 +35,7 @@ internal sealed class PlayerVisibilityPlanner(Action<Exception> reportSelectionF
             reportFailure(resolution.FailureException);
         }
         var budgetStats = CalculateBudgetStats(resolution.ActiveTarget, visiblePlayerCountLimit);
-        var reconciliation = reconciler.Reconcile(resolution.ActiveTarget, hiddenObjectTracker);
+        var reconciliation = Reconcile(resolution.ActiveTarget, hiddenObjectTracker);
         return new PlayerVisibilityFrameState(resolution.ActiveTarget, reconciliation, budgetStats);
     }
 
@@ -38,7 +43,7 @@ internal sealed class PlayerVisibilityPlanner(Action<Exception> reportSelectionF
 
     public void Reset() => selectionController.Reset();
 
-    public unsafe PlayerVisibilityPlan BuildPlan(GameObjectManager* manager, PlayerKeepPlan keepPlan, uint? previewVisibleEntityId)
+    private unsafe PlayerVisibilityPlan BuildPlan(GameObjectManager* manager, PlayerKeepPlan keepPlan, uint? previewVisibleEntityId)
     {
         planEntryBuffer.Clear();
         for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
@@ -69,7 +74,7 @@ internal sealed class PlayerVisibilityPlanner(Action<Exception> reportSelectionF
         return new PlayerVisibilityPlan(TimeSpan.FromMilliseconds(Environment.TickCount64), [.. planEntryBuffer]);
     }
 
-    public PlayerVisibilityTargetSet BuildLegacyTarget(PlayerVisibilityPlan plan)
+    private PlayerVisibilityTargetSet BuildLegacyTarget(PlayerVisibilityPlan plan)
     {
         legacyTargetBuffer.Clear();
         foreach (var entry in plan.Entries)
@@ -193,6 +198,74 @@ internal sealed class PlayerVisibilityPlanner(Action<Exception> reportSelectionF
 
         return new(bypassVisibleCount, visibleCompetitiveCount, Math.Clamp(visiblePlayerCountLimit, 1, 100));
     }
+
+    private PlayerVisibilityReconciliation Reconcile(PlayerVisibilityTargetSet targetSet, HiddenObjectTracker hiddenObjectTracker)
+    {
+        targetsToShow.Clear();
+        targetsToHide.Clear();
+        reconciliationActions.Clear();
+
+        foreach (var target in targetSet.Targets)
+        {
+            var appliedVisible = !hiddenObjectTracker.IsHidden(target.Identity);
+            if (target.DesiredVisible && !appliedVisible)
+            {
+                targetsToShow.Add(target);
+            }
+            else if (!target.DesiredVisible && appliedVisible)
+            {
+                targetsToHide.Add(target);
+            }
+        }
+
+        targetsToShow.Sort(CompareShowPriority);
+        targetsToHide.Sort(CompareHidePriority);
+        AddTransitions(reconciliationActions, targetsToShow, targetsToHide);
+        return new([.. reconciliationActions]);
+    }
+
+    private static void AddTransitions(
+        List<PlayerVisibilityAction> actions,
+        List<PlayerVisibilityTarget> toShow,
+        List<PlayerVisibilityTarget> toHide
+    )
+    {
+        var swapCount = Math.Min(toShow.Count, toHide.Count);
+        for (var index = 0; index < swapCount; index++)
+        {
+            actions.Add(PlayerVisibilityAction.Swap(toHide[index], toShow[index]));
+        }
+
+        for (var index = swapCount; index < toHide.Count; index++)
+        {
+            actions.Add(PlayerVisibilityAction.Hide(toHide[index]));
+        }
+
+        for (var index = swapCount; index < toShow.Count; index++)
+        {
+            actions.Add(PlayerVisibilityAction.Show(toShow[index]));
+        }
+    }
+
+    private static int CompareShowPriority(PlayerVisibilityTarget left, PlayerVisibilityTarget right)
+    {
+        var rankComparison = left.Decision.Rank.CompareTo(right.Decision.Rank);
+        if (rankComparison != 0)
+        {
+            return rankComparison;
+        }
+
+        var tieBreakerComparison = PlayerKeepTieBreaker.Compare(left.Decision.TieBreaker, right.Decision.TieBreaker);
+        if (tieBreakerComparison != 0)
+        {
+            return tieBreakerComparison;
+        }
+
+        var entityComparison = left.Identity.EntityId.CompareTo(right.Identity.EntityId);
+        return entityComparison != 0 ? entityComparison : left.Identity.Address.ToInt64().CompareTo(right.Identity.Address.ToInt64());
+    }
+
+    private static int CompareHidePriority(PlayerVisibilityTarget left, PlayerVisibilityTarget right) => CompareShowPriority(right, left);
 
     private static PlayerVisibilityClassification Classify(int index, PlayerKeepDecision keepDecision, bool previewVisible)
     {

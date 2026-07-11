@@ -27,12 +27,12 @@ internal sealed class CullingRuntimeModeTransition
     {
         if (Current == next)
         {
-            return new(next, Changed: false, EnterInactive: false, RebuildActive: false);
+            return new(Changed: false, EnterInactive: false, RebuildActive: false);
         }
 
         Current = next;
-        return new(next, Changed: true, EnterInactive: next != CullingRuntimeMode.Active, RebuildActive: next == CullingRuntimeMode.Active);
+        return new(Changed: true, EnterInactive: next != CullingRuntimeMode.Active, RebuildActive: next == CullingRuntimeMode.Active);
     }
 }
 
-internal readonly record struct CullingRuntimeTransition(CullingRuntimeMode Mode, bool Changed, bool EnterInactive, bool RebuildActive);
+internal readonly record struct CullingRuntimeTransition(bool Changed, bool EnterInactive, bool RebuildActive);

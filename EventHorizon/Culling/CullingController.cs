@@ -112,7 +112,7 @@ internal sealed unsafe class CullingController : IDisposable
     public void Dispose()
     {
         hook.Dispose();
-        RestoreAndClear(GameObjectManager.Instance());
+        RestoreAndClearAllState(GameObjectManager.Instance());
         nonPlayers.Clear();
         hiddenPlayerMarker.Clear();
         playerPreview.Clear();
@@ -129,7 +129,14 @@ internal sealed unsafe class CullingController : IDisposable
 
         if (transition.EnterInactive)
         {
-            RestoreAndClear(manager, nextMode == CullingRuntimeMode.Disabled);
+            if (nextMode == CullingRuntimeMode.Disabled)
+            {
+                RestoreAndClearAllState(manager);
+            }
+            else
+            {
+                RestoreAndClearRuntimeState(manager);
+            }
         }
         else if (transition.RebuildActive)
         {
@@ -163,25 +170,27 @@ internal sealed unsafe class CullingController : IDisposable
             : CullingRuntimeMode.Active;
     }
 
-    private void RestoreAndClear(GameObjectManager* manager, bool clearLongTermRuleState = true)
+    private void RestoreAndClearAllState(GameObjectManager* manager)
+    {
+        RestoreHiddenObjects(manager);
+        players.ClearAllState();
+    }
+
+    private void RestoreAndClearRuntimeState(GameObjectManager* manager)
+    {
+        RestoreHiddenObjects(manager);
+        players.ClearRuntimeState();
+    }
+
+    private void RestoreHiddenObjects(GameObjectManager* manager)
     {
         if (manager != null)
         {
             hiddenObjects.RestoreAll(manager);
-        }
-        else
-        {
-            hiddenObjects.Clear();
+            return;
         }
 
-        if (clearLongTermRuleState)
-        {
-            players.ClearAllState();
-        }
-        else
-        {
-            players.ClearRuntimeState();
-        }
+        hiddenObjects.Clear();
     }
 
     private void OnObjectArraysUpdated(GameObjectManager* manager)
