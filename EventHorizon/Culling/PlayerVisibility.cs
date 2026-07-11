@@ -27,11 +27,6 @@ internal readonly record struct PlayerVisibilityPlanEntry(
     public bool IsManaged => Classification != PlayerVisibilityClassification.Unmanaged;
 }
 
-internal sealed class PlayerVisibilityTargetSet(IReadOnlyList<PlayerVisibilityTarget> targets)
-{
-    public IReadOnlyList<PlayerVisibilityTarget> Targets { get; } = targets;
-}
-
 internal readonly record struct PlayerVisibilityTarget(
     PlayerObjectIdentity Identity,
     int ObjectIndex,
@@ -66,7 +61,7 @@ internal sealed class PlayerVisibilityAppliedState
     private PlayerVisibilityFrameState? activeFrame;
 
     public PlayerVisibilityFrameState? ActiveFrame => Volatile.Read(ref activeFrame);
-    public PlayerVisibilityTargetSet? ActiveTarget => ActiveFrame?.ActiveTarget;
+    public PlayerVisibilityTarget[]? ActiveTarget => ActiveFrame?.ActiveTarget;
 
     public void Publish(PlayerVisibilityFrameState frame) => Volatile.Write(ref activeFrame, frame);
 
@@ -81,22 +76,20 @@ internal sealed class PlayerVisibilityAppliedState
 
 internal sealed record PlayerVisibilityFrameState
 {
-    public PlayerVisibilityFrameState(PlayerVisibilityTargetSet activeTarget, PlayerVisibilityReconciliation reconciliation)
+    public PlayerVisibilityFrameState(PlayerVisibilityTarget[] activeTarget, PlayerVisibilityAction[] actions)
     {
         ActiveTarget = activeTarget;
-        Reconciliation = reconciliation;
+        Actions = actions;
         VisibleSlots = activeTarget
-            .Targets.Where(static target => target.DesiredVisible)
+            .Where(static target => target.DesiredVisible)
             .Select(static target => (target.Identity, target.ObjectIndex))
             .ToFrozenSet();
     }
 
-    public PlayerVisibilityTargetSet ActiveTarget { get; }
-    public PlayerVisibilityReconciliation Reconciliation { get; }
+    public PlayerVisibilityTarget[] ActiveTarget { get; }
+    public PlayerVisibilityAction[] Actions { get; }
     public FrozenSet<(PlayerObjectIdentity Identity, int ObjectIndex)> VisibleSlots { get; }
 }
-
-internal sealed record PlayerVisibilityReconciliation(IReadOnlyList<PlayerVisibilityAction> Actions);
 
 internal readonly record struct PlayerVisibilityAction(
     PlayerVisibilityActionKind Kind,

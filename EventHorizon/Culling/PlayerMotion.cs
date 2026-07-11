@@ -89,14 +89,13 @@ internal sealed class LocalSpeedSmoother(PlayerVisibilitySelectionParameters par
     private static bool IsFinite(Vector3 value) => float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
 }
 
-internal sealed class PlayerVelocityTracker<TKey>(PlayerVisibilitySelectionParameters parameters)
-    where TKey : notnull
+internal sealed class PlayerVelocityTracker(PlayerVisibilitySelectionParameters parameters)
 {
     private static readonly double Ln2 = Math.Log(2);
     private readonly PlayerVisibilitySelectionParameters parameters = parameters ?? throw new ArgumentNullException(nameof(parameters));
-    private readonly Dictionary<TKey, MotionState> states = [];
+    private readonly Dictionary<PlayerObjectIdentity, MotionState> states = [];
 
-    public PlayerVelocityEstimate AddSample(TimeSpan timestamp, TKey identity, Vector3 position)
+    public PlayerVelocityEstimate AddSample(TimeSpan timestamp, PlayerObjectIdentity identity, Vector3 position)
     {
         if (!IsFinite(position))
         {
@@ -137,15 +136,15 @@ internal sealed class PlayerVelocityTracker<TKey>(PlayerVisibilitySelectionParam
         return new PlayerVelocityEstimate(smoothedVelocity, true);
     }
 
-    public PlayerVelocityEstimate GetEstimate(TKey identity) =>
+    public PlayerVelocityEstimate GetEstimate(PlayerObjectIdentity identity) =>
         states.TryGetValue(identity, out var state)
             ? new PlayerVelocityEstimate(state.SmoothedVelocity, state.HasVelocityEstimate)
             : default;
 
-    public void PruneExcept(IReadOnlySet<TKey> activeIdentities)
+    public void PruneExcept(IReadOnlySet<PlayerObjectIdentity> activeIdentities)
     {
         ArgumentNullException.ThrowIfNull(activeIdentities);
-        var staleIdentities = new List<TKey>();
+        var staleIdentities = new List<PlayerObjectIdentity>();
         foreach (var identity in states.Keys)
         {
             if (!activeIdentities.Contains(identity))

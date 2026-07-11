@@ -54,10 +54,10 @@ internal sealed unsafe class PlayerPreview(Configuration configuration)
         return previousEntityId != ActiveSelectedPlayerEntityId;
     }
 
-    public void Refresh(GameObjectManager* manager, PlayerVisibilityTargetSet targetSet)
+    public void Refresh(GameObjectManager* manager, PlayerVisibilityTarget[] targets)
     {
         var builder = PlayerPreviewBuilder.Begin(manager, configuration);
-        foreach (var target in targetSet.Targets)
+        foreach (var target in targets)
         {
             if (!PlayerObjectSlots.IsPlayer(target.ObjectIndex))
             {

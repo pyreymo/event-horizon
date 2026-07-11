@@ -30,14 +30,14 @@ internal sealed unsafe class PlayerCuller(
     private readonly PlayerVisibilityPlanner playerVisibilityPlanner = new(exception =>
         log.Error(exception, "Player visibility selection failed; using legacy fallback.")
     );
-    private readonly ShowTransitionBudgetState showTransitionBudget = new();
+    private readonly ShowTransitionBudget showTransitionBudget = new();
     private readonly PlayerAdmissionGate playerAdmissionGate = new();
     private readonly PlayerTopologyDirtySignal playerTopologyDirtySignal = new();
     private readonly PlayerVisibilityAppliedState appliedVisibilityState = new();
     private readonly PlayerObjectIdentity?[] playerAdmissionSlotIdentities = new PlayerObjectIdentity?[
         PlayerAdmissionGate.LastPlayerSlot + 1
     ];
-    private PlayerVisibilityReconciliation? latestPlayerVisibilityReconciliation;
+    private PlayerVisibilityAction[]? latestPlayerVisibilityActions;
 
     #region Lifecycle
 
@@ -62,7 +62,7 @@ internal sealed unsafe class PlayerCuller(
             hiddenObjects
         );
         appliedVisibilityState.Publish(frameState);
-        latestPlayerVisibilityReconciliation = frameState.Reconciliation;
+        latestPlayerVisibilityActions = frameState.Actions;
         playerVisibilityPlanner.Commit(frameState);
     }
 
@@ -74,7 +74,7 @@ internal sealed unsafe class PlayerCuller(
             return;
         }
 
-        if (latestPlayerVisibilityReconciliation == null)
+        if (latestPlayerVisibilityActions == null)
         {
             return;
         }
@@ -155,11 +155,11 @@ internal sealed unsafe class PlayerCuller(
 
     private void ApplyPlayerVisibilityReconciliation(
         GameObjectManager* manager,
-        PlayerVisibilityReconciliation reconciliation,
+        PlayerVisibilityAction[] actions,
         HiddenObjectTracker hiddenObjects
     )
     {
-        foreach (var action in reconciliation.Actions)
+        foreach (var action in actions)
         {
             ApplyPlayerVisibilityAction(manager, action, hiddenObjects);
         }
@@ -183,13 +183,13 @@ internal sealed unsafe class PlayerCuller(
 
     private void TickVisibility(GameObjectManager* manager, HiddenObjectTracker hiddenObjects)
     {
-        if (latestPlayerVisibilityReconciliation == null)
+        if (latestPlayerVisibilityActions == null)
         {
             return;
         }
 
-        ShowTransitionBudget.BeginFrame(showTransitionBudget);
-        ApplyPlayerVisibilityReconciliation(manager, latestPlayerVisibilityReconciliation, hiddenObjects);
+        showTransitionBudget.BeginFrame();
+        ApplyPlayerVisibilityReconciliation(manager, latestPlayerVisibilityActions, hiddenObjects);
     }
 
     private void ApplyShowAction(GameObjectManager* manager, PlayerVisibilityTarget target, HiddenObjectTracker hiddenObjects)
@@ -201,7 +201,7 @@ internal sealed unsafe class PlayerCuller(
         }
 
         var wasHidden = hiddenObjects.IsHidden(gameObject);
-        if (wasHidden && !ShowTransitionBudget.CanStartShow(showTransitionBudget))
+        if (wasHidden && !showTransitionBudget.CanStartShow())
         {
             return;
         }
@@ -209,7 +209,7 @@ internal sealed unsafe class PlayerCuller(
         RestoreIfHidden(gameObject, hiddenObjects);
         if (wasHidden && !hiddenObjects.IsHidden(gameObject))
         {
-            ShowTransitionBudget.ConsumeShow(showTransitionBudget);
+            showTransitionBudget.ConsumeShow();
         }
     }
 
@@ -237,7 +237,7 @@ internal sealed unsafe class PlayerCuller(
         }
 
         var incomingWasHidden = hiddenObjects.IsHidden(incoming);
-        if (incomingWasHidden && !ShowTransitionBudget.CanStartShow(showTransitionBudget))
+        if (incomingWasHidden && !showTransitionBudget.CanStartShow())
         {
             return;
         }
@@ -252,18 +252,18 @@ internal sealed unsafe class PlayerCuller(
         RestoreIfHidden(incoming, hiddenObjects);
         if (incomingWasHidden && !hiddenObjects.IsHidden(incoming))
         {
-            ShowTransitionBudget.ConsumeShow(showTransitionBudget);
+            showTransitionBudget.ConsumeShow();
         }
     }
 
     public void ClearRuntimeState()
     {
-        ShowTransitionBudget.Reset(showTransitionBudget);
+        showTransitionBudget.Reset();
         playerAdmissionGate.RequestReset();
         playerTopologyDirtySignal.Clear();
         appliedVisibilityState.Clear();
         playerVisibilityPlanner.Reset();
-        latestPlayerVisibilityReconciliation = null;
+        latestPlayerVisibilityActions = null;
     }
 
     public void ClearAllState()
@@ -368,44 +368,41 @@ internal sealed unsafe class PlayerCuller(
 
     #endregion
 
-    internal sealed class ShowTransitionBudgetState
+    private sealed class ShowTransitionBudget
     {
-        public double Tokens { get; set; } = 1.0;
-        public long LastRefill { get; set; } = Environment.TickCount64;
-        public int ShowStartsThisFrame { get; set; }
-    }
-}
+        private const double ShowTransitionsPerSecond = 6.0;
+        private const double ShowTransitionCapacity = 1.0;
+        private const int MaxShowStartsPerFrame = 1;
 
-file static class ShowTransitionBudget
-{
-    private const double ShowTransitionsPerSecond = 6.0;
-    private const double ShowTransitionCapacity = 1.0;
-    private const int MaxShowStartsPerFrame = 1;
+        private double tokens = ShowTransitionCapacity;
+        private long lastRefill = Environment.TickCount64;
+        private int showStartsThisFrame;
 
-    public static void BeginFrame(PlayerCuller.ShowTransitionBudgetState state)
-    {
-        var now = Environment.TickCount64;
-        var elapsedMs = Math.Max(0, now - state.LastRefill);
-        state.Tokens = Math.Min(ShowTransitionCapacity, state.Tokens + (elapsedMs / 1000.0 * ShowTransitionsPerSecond));
-        state.LastRefill = now;
-        state.ShowStartsThisFrame = 0;
-    }
+        public void BeginFrame()
+        {
+            var now = Environment.TickCount64;
+            var elapsedMs = Math.Max(0, now - lastRefill);
+            tokens = Math.Min(ShowTransitionCapacity, tokens + (elapsedMs / 1000.0 * ShowTransitionsPerSecond));
+            lastRefill = now;
+            showStartsThisFrame = 0;
+        }
 
-    public static bool CanStartShow(PlayerCuller.ShowTransitionBudgetState state)
-    {
-        return state.ShowStartsThisFrame < MaxShowStartsPerFrame && state.Tokens >= 1.0;
-    }
+        public bool CanStartShow()
+        {
+            return showStartsThisFrame < MaxShowStartsPerFrame && tokens >= 1.0;
+        }
 
-    public static void ConsumeShow(PlayerCuller.ShowTransitionBudgetState state)
-    {
-        state.Tokens = Math.Max(0.0, state.Tokens - 1.0);
-        state.ShowStartsThisFrame++;
-    }
+        public void ConsumeShow()
+        {
+            tokens = Math.Max(0.0, tokens - 1.0);
+            showStartsThisFrame++;
+        }
 
-    public static void Reset(PlayerCuller.ShowTransitionBudgetState state)
-    {
-        state.Tokens = ShowTransitionCapacity;
-        state.LastRefill = Environment.TickCount64;
-        state.ShowStartsThisFrame = 0;
+        public void Reset()
+        {
+            tokens = ShowTransitionCapacity;
+            lastRefill = Environment.TickCount64;
+            showStartsThisFrame = 0;
+        }
     }
 }
