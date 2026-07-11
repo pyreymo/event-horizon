@@ -13,7 +13,6 @@ internal sealed class PlayerAdmissionGate
     private readonly PlayerSlotIdentityTracker slotTracker = new();
     private readonly List<PlayerAdmissionChange> changes = [];
     private readonly HashSet<PlayerObjectIdentity> admissionHolds = [];
-    private readonly HashSet<PlayerObjectIdentity> newHolds = [];
     private readonly Dictionary<PlayerObjectIdentity, List<int>> currentSlotsByIdentity = [];
     private int requestedResetGeneration;
     private int consumedResetGeneration;
@@ -21,7 +20,7 @@ internal sealed class PlayerAdmissionGate
     public PlayerAdmissionUpdateResult Apply(
         IReadOnlyList<PlayerObjectIdentity?> currentSlots,
         PlayerVisibilityAppliedState appliedState,
-        Action<PlayerAdmissionChange> hardHide
+        Action<int, PlayerObjectIdentity> hardHide
     )
     {
         ArgumentNullException.ThrowIfNull(currentSlots);
@@ -29,7 +28,6 @@ internal sealed class PlayerAdmissionGate
         ArgumentNullException.ThrowIfNull(hardHide);
         ConsumeRequestedReset();
         var changeCounts = slotTracker.Evaluate(currentSlots, changes);
-        newHolds.Clear();
         BuildCurrentSlotMap(currentSlots);
 
         foreach (var change in changes)
@@ -54,19 +52,16 @@ internal sealed class PlayerAdmissionGate
                 continue;
             }
 
-            if (admissionHolds.Add(currentIdentity))
-            {
-                newHolds.Add(currentIdentity);
-            }
+            admissionHolds.Add(currentIdentity);
         }
 
         if (changeCounts.BaselineEstablished && appliedState.ActiveTarget != null)
         {
             foreach (var identity in currentSlotsByIdentity.Keys)
             {
-                if (!IsVisibleAtEveryCurrentSlot(appliedState, identity) && admissionHolds.Add(identity))
+                if (!IsVisibleAtEveryCurrentSlot(appliedState, identity))
                 {
-                    newHolds.Add(identity);
+                    admissionHolds.Add(identity);
                 }
             }
         }
@@ -84,19 +79,14 @@ internal sealed class PlayerAdmissionGate
         {
             foreach (var slot in currentSlotsByIdentity[identity])
             {
-                var change = new PlayerAdmissionChange(
-                    slot,
-                    newHolds.Contains(identity) ? PlayerAdmissionChangeKind.Appeared : PlayerAdmissionChangeKind.Unchanged,
-                    identity,
-                    identity
-                );
                 try
                 {
-                    hardHide(change);
-                    if (newHolds.Contains(identity)) { }
-                    else { }
+                    hardHide(slot, identity);
                 }
-                catch { }
+                catch
+                {
+                    // The object may be replaced between the slot snapshot and the hide operation.
+                }
             }
         }
 
@@ -112,7 +102,6 @@ internal sealed class PlayerAdmissionGate
     {
         slotTracker.Reset();
         admissionHolds.Clear();
-        newHolds.Clear();
         currentSlotsByIdentity.Clear();
     }
 

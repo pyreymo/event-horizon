@@ -5,6 +5,8 @@ namespace EventHorizon.Culling;
 
 internal sealed unsafe class HiddenObjectTracker
 {
+    internal const VisibilityFlags PluginHiddenFlags = (VisibilityFlags)0x1000 | VisibilityFlags.Nameplate | VisibilityFlags.Model;
+
     internal delegate PlayerObjectIdentity IdentityReader(GameObject* gameObject);
 
     private readonly Dictionary<nint, HiddenObjectRecord> hiddenObjects = [];

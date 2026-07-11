@@ -12,7 +12,6 @@ namespace EventHorizon.Culling;
 internal sealed unsafe class CullingController : IDisposable
 {
     private const int RefreshIntervalMs = 200;
-    internal const VisibilityFlags HiddenFlags = (VisibilityFlags)0x1000 | VisibilityFlags.Nameplate | VisibilityFlags.Model;
     private readonly Configuration configuration;
     private readonly IPlayerState playerState;
     private readonly ICondition condition;
@@ -40,11 +39,11 @@ internal sealed unsafe class CullingController : IDisposable
         this.configuration = configuration;
         this.playerState = playerState;
         this.condition = condition;
-        players = new PlayerCuller(configuration, playerState, condition, objectTable, targetManager, gameGui, log);
+        players = new PlayerCuller(configuration, playerState, objectTable, targetManager, gameGui, log);
         nonPlayers = new NonPlayerCuller(configuration);
         hiddenPlayerMarker = new HiddenPlayerMarker(configuration, gameGui, staticVfxController);
         playerPreview = new PlayerPreview(configuration);
-        hook = new UpdateObjectArraysHook(gameInteropProvider, manager => players.ApplyPlayerAdmissionGate(manager, hiddenObjects));
+        hook = new UpdateObjectArraysHook(gameInteropProvider, OnObjectArraysUpdated);
     }
 
     public int HiddenPlayerCount => hiddenObjects.HiddenPlayerCount;
@@ -72,12 +71,12 @@ internal sealed unsafe class CullingController : IDisposable
         if (schedule.Refresh)
         {
             nonPlayers.Refresh(manager);
-            players.Update(manager, hiddenObjects, playerPreview, refreshPlayerPreview: false);
+            players.Update(manager, hiddenObjects, playerPreview);
             nextRefresh = Environment.TickCount64 + RefreshIntervalMs;
         }
 
         players.Tick(manager, hiddenObjects);
-        nonPlayers.Tick(manager, hiddenObjects, HiddenFlags);
+        nonPlayers.Tick(manager, hiddenObjects, HiddenObjectTracker.PluginHiddenFlags);
         hiddenObjects.PruneMissing(manager);
         hiddenPlayerMarker.Update(manager, hiddenObjects);
     }
@@ -94,7 +93,7 @@ internal sealed unsafe class CullingController : IDisposable
         if (runtime.Mode == CullingRuntimeMode.Active)
         {
             nonPlayers.Refresh(manager);
-            players.Update(manager, hiddenObjects, playerPreview, refreshPlayerPreview: false);
+            players.Update(manager, hiddenObjects, playerPreview);
             nextRefresh = Environment.TickCount64 + RefreshIntervalMs;
             return;
         }
@@ -175,7 +174,17 @@ internal sealed unsafe class CullingController : IDisposable
             hiddenObjects.Clear();
         }
 
-        hiddenObjects.Clear();
         players.ClearState(clearLongTermRuleState);
+    }
+
+    private void OnObjectArraysUpdated(GameObjectManager* manager)
+    {
+        if (DetermineRuntimeMode(manager) != CullingRuntimeMode.Active)
+        {
+            players.ResetAdmissionGate();
+            return;
+        }
+
+        players.ApplyAdmissionGate(manager, hiddenObjects);
     }
 }

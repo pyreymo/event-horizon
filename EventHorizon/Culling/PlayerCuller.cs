@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Game.Chat;
-using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin.Services;
 using EventHorizon.Preview;
 using EventHorizon.Settings;
@@ -13,18 +12,16 @@ namespace EventHorizon.Culling;
 internal sealed unsafe class PlayerCuller(
     Configuration configuration,
     IPlayerState playerState,
-    ICondition condition,
     IObjectTable objectTable,
     ITargetManager targetManager,
     IGameGui gameGui,
     IPluginLog log
 )
 {
-    private const VisibilityFlags InvisibleFlag = CullingController.HiddenFlags;
+    private const VisibilityFlags InvisibleFlag = HiddenObjectTracker.PluginHiddenFlags;
 
     private readonly Configuration configuration = configuration;
     private readonly IPlayerState playerState = playerState;
-    private readonly ICondition condition = condition;
     private readonly IObjectTable objectTable = objectTable;
     private readonly IGameGui gameGui = gameGui;
     private readonly PlayerKeepRules playerKeepRules = new(configuration, objectTable, targetManager);
@@ -46,7 +43,7 @@ internal sealed unsafe class PlayerCuller(
 
     #region Lifecycle
 
-    public void Update(GameObjectManager* manager, HiddenObjectTracker hiddenObjects, PlayerPreview preview, bool refreshPlayerPreview)
+    public void Update(GameObjectManager* manager, HiddenObjectTracker hiddenObjects, PlayerPreview preview)
     {
         if (manager == null)
         {
@@ -76,10 +73,6 @@ internal sealed unsafe class PlayerCuller(
         appliedVisibilityState.Publish(frameState);
         latestPlayerVisibilityReconciliation = frameState.Reconciliation;
         playerVisibilityPlanner.Commit(frameState);
-        if (refreshPlayerPreview)
-        {
-            preview.Refresh(manager, frameState.ActiveTarget);
-        }
     }
 
     public void Tick(GameObjectManager* manager, HiddenObjectTracker hiddenObjects)
@@ -98,21 +91,8 @@ internal sealed unsafe class PlayerCuller(
         TickVisibility(manager, hiddenObjects);
     }
 
-    public void ApplyPlayerAdmissionGate(GameObjectManager* manager, HiddenObjectTracker hiddenObjects)
+    public void ApplyAdmissionGate(GameObjectManager* manager, HiddenObjectTracker hiddenObjects)
     {
-        if (
-            manager == null
-            || !IsCullingEnabled()
-            || !playerState.IsLoaded
-            || ShouldSuspendCullingInDuty()
-            || ShouldSuspendCulling(manager)
-        )
-        {
-            playerAdmissionGate.ResetTracking();
-            playerTopologyDirtySignal.Clear();
-            return;
-        }
-
         for (
             var slot = PlayerAdmissionGate.FirstPlayerSlot;
             slot <= PlayerAdmissionGate.LastPlayerSlot;
@@ -127,18 +107,24 @@ internal sealed unsafe class PlayerCuller(
         var result = playerAdmissionGate.Apply(
             playerAdmissionSlotIdentities,
             appliedVisibilityState,
-            change =>
+            (slot, identity) =>
             {
-                var gameObject = manager->Objects.IndexSorted[change.Slot].Value;
-                if (!change.CurrentIdentity.HasValue || !change.CurrentIdentity.Value.Matches(gameObject))
+                var gameObject = manager->Objects.IndexSorted[slot].Value;
+                if (!identity.Matches(gameObject))
                 {
                     throw new InvalidOperationException("Admission slot identity changed before the hard hide could be applied.");
                 }
 
-                Hide(gameObject, change.Slot, hiddenObjects);
+                Hide(gameObject, slot, hiddenObjects);
             }
         );
         playerTopologyDirtySignal.MarkFrom(result);
+    }
+
+    public void ResetAdmissionGate()
+    {
+        playerAdmissionGate.ResetTracking();
+        playerTopologyDirtySignal.Clear();
     }
 
     public void ClearRuleState()
@@ -303,17 +289,6 @@ internal sealed unsafe class PlayerCuller(
     private bool IsCullingEnabled()
     {
         return configuration.HideAllOtherPlayers;
-    }
-
-    private bool ShouldSuspendCulling(GameObjectManager* manager)
-    {
-        return configuration.DisableCullingBelowPlayerCount
-            && ObjectTableStats.CountOtherPlayerObjects(manager) < configuration.DisableCullingPlayerCountThreshold;
-    }
-
-    private bool ShouldSuspendCullingInDuty()
-    {
-        return configuration.DisableInDuty && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]);
     }
 
     private List<PlayerKeepCandidate> GetPlayerKeepCandidates(GameObjectManager* manager)
