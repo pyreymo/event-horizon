@@ -10,18 +10,22 @@ namespace EventHorizon.Preview;
 
 internal sealed class PlayerPreviewWindow : Window
 {
+    private const float MinimumPreviewSide = 180f;
+    private const float FloatingWindowDefaultSide = 300f;
+    private const float GearIconOffsetX = 1.5f;
+
     private readonly PlayerPreviewPanel previewPanel;
     private readonly Action openMainWindow;
-    private float lastWindowSide = PlayerPreviewConstants.FloatingWindowDefaultSide;
+    private float lastWindowSide = FloatingWindowDefaultSide;
 
     public PlayerPreviewWindow(PlayerPreviewPanel previewPanel, Action openMainWindow)
         : base($"{Loc.Text("Config.Preview.FloatingTitle")}###EventHorizonPlayerPreview")
     {
-        Size = new Vector2(PlayerPreviewConstants.FloatingWindowDefaultSide);
+        Size = new Vector2(FloatingWindowDefaultSide);
         SizeCondition = ImGuiCond.FirstUseEver;
         SizeConstraints = new WindowSizeConstraints
         {
-            MinimumSize = new Vector2(PlayerPreviewConstants.MinimumPreviewSide),
+            MinimumSize = new Vector2(MinimumPreviewSide),
             MaximumSize = new Vector2(float.MaxValue),
         };
 
@@ -32,7 +36,7 @@ internal sealed class PlayerPreviewWindow : Window
             new TitleBarButton
             {
                 Icon = FontAwesomeIcon.Cog,
-                IconOffset = new Vector2(PlayerPreviewConstants.FloatingWindowGearIconOffsetX, 0f),
+                IconOffset = new Vector2(GearIconOffsetX, 0f),
                 Click = _ => this.openMainWindow(),
             }
         );
@@ -65,7 +69,7 @@ internal sealed class PlayerPreviewWindow : Window
         }
 
         var side = Math.Abs(size.X - lastWindowSide) >= Math.Abs(size.Y - lastWindowSide) ? size.X : size.Y;
-        side = Math.Max(PlayerPreviewConstants.MinimumPreviewSide, side);
+        side = Math.Max(MinimumPreviewSide, side);
         lastWindowSide = side;
         Size = new Vector2(side);
         SizeCondition = ImGuiCond.Always;

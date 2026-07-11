@@ -10,6 +10,8 @@ namespace EventHorizon.Preview;
 
 internal sealed unsafe class PlayerPreview(Configuration configuration)
 {
+    private const int SelectionVisibilityLeaseMs = 500;
+
     private readonly Dictionary<ulong, string> names = [];
     private PlayerPreviewSnapshot snapshot = PlayerPreviewSnapshot.Empty;
     private uint? selectedPlayerEntityId;
@@ -43,7 +45,7 @@ internal sealed unsafe class PlayerPreview(Configuration configuration)
         if (entityId.HasValue)
         {
             selectedPlayerEntityId = entityId.Value;
-            selectionExpiresAt = Environment.TickCount64 + PlayerPreviewConstants.SelectionVisibilityLeaseMs;
+            selectionExpiresAt = Environment.TickCount64 + SelectionVisibilityLeaseMs;
         }
         else
         {
@@ -135,49 +137,6 @@ internal sealed unsafe class PlayerPreview(Configuration configuration)
     }
 }
 
-internal static class PlayerPreviewConstants
-{
-    public const float DefaultViewRange = 50f;
-    public const float MinimumViewRange = 10f;
-    public const float MaximumViewRange = 120f;
-    public const float MouseWheelZoomStep = 1.15f;
-    public const float MinimumRange = 1f;
-    public const float DisabledNearbyRange = 0f;
-    public const float NearbyRangeMin = 1f;
-    public const float NearbyRangeMax = DefaultViewRange;
-    public const int FastRefreshIntervalMs = 33;
-    public const int SelectionVisibilityLeaseMs = 500;
-
-    // FFXIVClientStructs GameObject._name: FieldOffset(0x30), FixedSizeArray64<byte>.
-    public const int GameObjectNameOffset = 0x30;
-    public const int GameObjectNameLength = 64;
-
-    public const float CardContentRightPadding = 18f;
-    public const float MinimumPreviewSide = 180f;
-    public const float FloatingWindowDefaultSide = 300f;
-    public const float FloatingWindowGearIconOffsetX = 1.5f;
-    public const float PreviewOuterPadding = 14f;
-    public const int RangeCircleSegments = 64;
-    public const int DotCircleSegments = 16;
-    public const float RangeCircleThickness = 1.2f;
-    public const float BudgetCutRingThickness = 1.4f;
-    public const float SelectedPlayerRingThickness = 2f;
-
-    public const float LocalPlayerDotRadius = 4f;
-    public const float PlayerDotRadius = 4f;
-    public const float HoveredPlayerDotRadius = 6f;
-    public const float HoverRadius = 7f;
-    public const float BudgetCutRingPadding = 2f;
-    public const float SelectedPlayerRingPadding = 4f;
-
-    public static readonly Vector4 WorldArrowColor = new(1f, 0.5f, 0f, 1f); // Orange
-    public const float WorldArrowLineThickness = 2f;
-    public const float WorldArrowHeadLength = 12f;
-    public const float WorldArrowHeadHalfWidth = 5f;
-    public const float WorldArrowTargetRadius = 3f;
-    public const float WorldArrowScreenEdgePadding = 24f;
-}
-
 internal sealed record PlayerPreviewSnapshot(
     int Version,
     long UpdatedAtTicks,
@@ -187,14 +146,7 @@ internal sealed record PlayerPreviewSnapshot(
     PlayerPreviewStats Stats
 )
 {
-    public static readonly PlayerPreviewSnapshot Empty = new(
-        0,
-        0,
-        PlayerPreviewConstants.DefaultViewRange,
-        PlayerPreviewConstants.DisabledNearbyRange,
-        [],
-        PlayerPreviewStats.Empty
-    );
+    public static readonly PlayerPreviewSnapshot Empty = new(0, 0, 50f, 0f, [], PlayerPreviewStats.Empty);
 }
 
 internal readonly record struct PlayerPreviewEntry(
@@ -219,6 +171,9 @@ internal readonly record struct PlayerPreviewStats(int TotalPlayers, int Visible
 
 internal sealed unsafe class PlayerPreviewBuilder
 {
+    private const float DefaultViewRange = 50f;
+    private const float DisabledNearbyRange = 0f;
+
     private readonly List<PlayerPreviewEntry> players = [];
     private readonly Vector3 localPlayerPosition;
     private readonly float viewRange;
@@ -239,14 +194,14 @@ internal sealed unsafe class PlayerPreviewBuilder
     {
         return new PlayerPreviewBuilder(
             GetLocalPlayerPosition(manager),
-            PlayerPreviewConstants.DefaultViewRange,
+            DefaultViewRange,
             configuration.KeepNearbyPlayers
                 ? Math.Clamp(
                     configuration.KeepNearbyPlayersRange,
-                    PlayerPreviewConstants.NearbyRangeMin,
-                    PlayerPreviewConstants.NearbyRangeMax
+                    PlayerKeepRuleSettings.NearbyRangeMin,
+                    PlayerKeepRuleSettings.NearbyRangeMax
                 )
-                : PlayerPreviewConstants.DisabledNearbyRange,
+                : DisabledNearbyRange,
             Math.Clamp(configuration.VisiblePlayerCountLimit, 1, 100)
         );
     }
@@ -354,12 +309,13 @@ internal sealed unsafe class PlayerPreviewBuilder
         return (relativeXz, relativeXz.Length());
     }
 
+    // FFXIVClientStructs GameObject._name: FieldOffset(0x30), FixedSizeArray64<byte>.
+    private const int GameObjectNameOffset = 0x30;
+    private const int GameObjectNameLength = 64;
+
     public static string GetObjectName(GameObject* gameObject)
     {
-        var bytes = new ReadOnlySpan<byte>(
-            (byte*)gameObject + PlayerPreviewConstants.GameObjectNameOffset,
-            PlayerPreviewConstants.GameObjectNameLength
-        );
+        var bytes = new ReadOnlySpan<byte>((byte*)gameObject + GameObjectNameOffset, GameObjectNameLength);
         var length = bytes.IndexOf((byte)0);
         if (length < 0)
         {

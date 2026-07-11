@@ -3,7 +3,6 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
-using EventHorizon.Culling;
 using EventHorizon.Localization;
 using EventHorizon.Preview;
 using EventHorizon.Settings;

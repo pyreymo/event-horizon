@@ -1,5 +1,5 @@
-using EventHorizon.Culling;
 using EventHorizon.Localization;
+using EventHorizon.Settings;
 
 namespace EventHorizon.UI;
 

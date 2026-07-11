@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using Dalamud.Configuration;
-using EventHorizon.Culling;
 using Newtonsoft.Json;
 
 namespace EventHorizon.Settings;
@@ -9,15 +8,6 @@ namespace EventHorizon.Settings;
 [Serializable]
 internal class Configuration : IPluginConfiguration
 {
-    public const float DefaultTargetingMeMarkerOffsetX = 0;
-    public const float DefaultTargetingMeMarkerOffsetY = 0;
-    public const float DefaultTargetingMeMarkerScale = 1f;
-    public const byte DefaultTargetingMeMarkerOpacity = 255;
-    public const byte DefaultTargetingMeMarkerGlowOpacity = 255;
-    public const byte DefaultTargetingMeMarkerColorRed = 255;
-    public const byte DefaultTargetingMeMarkerColorGreen = 120;
-    public const byte DefaultTargetingMeMarkerColorBlue = 40;
-
     public int Version { get; set; } = 0;
 
     public bool HideAllOtherPlayers { get; set; } = true;
@@ -41,15 +31,15 @@ internal class Configuration : IPluginConfiguration
     public bool EnableTargetingMeVfxMarker { get; set; } = false;
     public bool EnableTargetingMeMarkerCurrentTargetTest { get; set; } = false;
     public bool DisableTargetingMeMarkerVfxInDuty { get; set; } = true;
-    public float TargetingMeMarkerOffsetX { get; set; } = DefaultTargetingMeMarkerOffsetX;
-    public float TargetingMeMarkerOffsetY { get; set; } = DefaultTargetingMeMarkerOffsetY;
-    public float TargetingMeMarkerScale { get; set; } = DefaultTargetingMeMarkerScale;
-    public byte TargetingMeMarkerOpacity { get; set; } = DefaultTargetingMeMarkerOpacity;
-    public byte TargetingMeMarkerGlowOpacity { get; set; } = DefaultTargetingMeMarkerGlowOpacity;
+    public float TargetingMeMarkerOffsetX { get; set; } = 0;
+    public float TargetingMeMarkerOffsetY { get; set; } = 0;
+    public float TargetingMeMarkerScale { get; set; } = 1f;
+    public byte TargetingMeMarkerOpacity { get; set; } = 255;
+    public byte TargetingMeMarkerGlowOpacity { get; set; } = 255;
     public bool UseCustomTargetingMeMarkerColor { get; set; } = false;
-    public byte TargetingMeMarkerColorRed { get; set; } = DefaultTargetingMeMarkerColorRed;
-    public byte TargetingMeMarkerColorGreen { get; set; } = DefaultTargetingMeMarkerColorGreen;
-    public byte TargetingMeMarkerColorBlue { get; set; } = DefaultTargetingMeMarkerColorBlue;
+    public byte TargetingMeMarkerColorRed { get; set; } = 255;
+    public byte TargetingMeMarkerColorGreen { get; set; } = 120;
+    public byte TargetingMeMarkerColorBlue { get; set; } = 40;
     public float DtrBackgroundHorizontalPadding { get; set; } = 24f;
     public float DtrBackgroundPaddingTop { get; set; } = 10f;
     public float DtrBackgroundPaddingBottom { get; set; } = 1f;
@@ -68,8 +58,7 @@ internal class Configuration : IPluginConfiguration
     public List<PlayerKeepRuleId> KeepRuleOrder { get; set; } = PlayerKeepRuleOrder.CreateDefaultOrder();
 
     [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
-    public Dictionary<PlayerKeepRuleId, PlayerKeepBudgetPolicy> KeepRuleBudgetPolicies { get; set; } =
-        PlayerKeepRuleBudgetDefaults.Create();
+    public Dictionary<PlayerKeepRuleId, PlayerKeepBudgetPolicy> KeepRuleBudgetPolicies { get; set; } = PlayerKeepRulePolicies.Create();
 
     public HashSet<byte> KeptRaceSex { get; set; } = [];
 

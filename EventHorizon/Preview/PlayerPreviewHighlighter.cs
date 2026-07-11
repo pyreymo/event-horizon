@@ -5,6 +5,8 @@ namespace EventHorizon.Preview;
 
 internal sealed unsafe class PlayerPreviewHighlighter : IDisposable
 {
+    private const int SelectionVisibilityLeaseMs = 500;
+
     private const ObjectHighlightColor HighlightColor = ObjectHighlightColor.Orange;
 
     private uint? selectedEntityId;
@@ -22,7 +24,7 @@ internal sealed unsafe class PlayerPreviewHighlighter : IDisposable
         }
 
         selectedEntityId = entityId.Value;
-        selectedLeaseExpiresAt = Environment.TickCount64 + PlayerPreviewConstants.SelectionVisibilityLeaseMs;
+        selectedLeaseExpiresAt = Environment.TickCount64 + SelectionVisibilityLeaseMs;
     }
 
     public void Update()

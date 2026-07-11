@@ -7,7 +7,6 @@ using Dalamud.Game.Text;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Plugin.Services;
-using EventHorizon.Preview;
 using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
@@ -55,7 +54,7 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
     {
         updateNow = Environment.TickCount64;
         PlayerKeepRuleOrder.FillRanks(configuration, ruleRanks);
-        PlayerKeepRuleBudgetDefaults.FillPolicies(configuration, ruleBudgetPolicies);
+        PlayerKeepRulePolicies.FillPolicies(configuration, ruleBudgetPolicies);
         RefreshObjectState();
         PruneExpiredKeepState();
     }
@@ -356,8 +355,8 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
 
         var nearbyRange = Math.Clamp(
             configuration.KeepNearbyPlayersRange,
-            PlayerPreviewConstants.NearbyRangeMin,
-            PlayerPreviewConstants.NearbyRangeMax
+            PlayerKeepRuleSettings.NearbyRangeMin,
+            PlayerKeepRuleSettings.NearbyRangeMax
         );
         nearbyRangeSq = nearbyRange * nearbyRange;
 

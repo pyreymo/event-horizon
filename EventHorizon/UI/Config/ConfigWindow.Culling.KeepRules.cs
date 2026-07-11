@@ -4,9 +4,8 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Components;
-using EventHorizon.Culling;
 using EventHorizon.Localization;
-using EventHorizon.Preview;
+using EventHorizon.Settings;
 
 namespace EventHorizon.UI.Config;
 
@@ -259,16 +258,16 @@ public partial class ConfigWindow
             ImGui.SliderFloat(
                 "###KeepNearbyPlayersRange",
                 ref range,
-                PlayerPreviewConstants.NearbyRangeMin,
-                PlayerPreviewConstants.NearbyRangeMax,
+                PlayerKeepRuleSettings.NearbyRangeMin,
+                PlayerKeepRuleSettings.NearbyRangeMax,
                 Loc.Text("Config.DistanceSliderFormat")
             )
         )
         {
             configuration.KeepNearbyPlayersRange = Math.Clamp(
                 range,
-                PlayerPreviewConstants.NearbyRangeMin,
-                PlayerPreviewConstants.NearbyRangeMax
+                PlayerKeepRuleSettings.NearbyRangeMin,
+                PlayerKeepRuleSettings.NearbyRangeMax
             );
         }
 
@@ -325,7 +324,7 @@ public partial class ConfigWindow
 
     private void DrawBudgetChip(PlayerKeepRuleId ruleId)
     {
-        var usesBudget = PlayerKeepRuleBudgetDefaults.GetPolicy(configuration, ruleId) == PlayerKeepBudgetPolicy.Counted;
+        var usesBudget = PlayerKeepRulePolicies.GetPolicy(configuration, ruleId) == PlayerKeepBudgetPolicy.Counted;
 
         var checkboxSize = ImGui.GetFrameHeight();
         var availableWidth = ImGui.GetContentRegionAvail().X;
@@ -336,7 +335,7 @@ public partial class ConfigWindow
 
         if (ImGui.Checkbox($"###KeepRuleBudgetPolicy{ruleId}", ref usesBudget))
         {
-            PlayerKeepRuleBudgetDefaults.SetPolicy(
+            PlayerKeepRulePolicies.SetPolicy(
                 configuration,
                 ruleId,
                 usesBudget ? PlayerKeepBudgetPolicy.Counted : PlayerKeepBudgetPolicy.Exempt

@@ -2,17 +2,36 @@ using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Plugin.Services;
-using EventHorizon.Culling;
 using EventHorizon.Localization;
+using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.Preview;
 
 internal sealed class PlayerPreviewRenderer
 {
+    private const float DefaultViewRange = 50f;
+    private const float MinimumViewRange = 10f;
+    private const float MaximumViewRange = 120f;
+    private const float MouseWheelZoomStep = 1.15f;
+    private const float MinimumRange = 1f;
+    private const float DisabledNearbyRange = 0f;
+    private const float PreviewOuterPadding = 14f;
+    private const int RangeCircleSegments = 64;
+    private const int DotCircleSegments = 16;
+    private const float RangeCircleThickness = 1.2f;
+    private const float BudgetCutRingThickness = 1.4f;
+    private const float SelectedPlayerRingThickness = 2f;
+    private const float LocalPlayerDotRadius = 4f;
+    private const float PlayerDotRadius = 4f;
+    private const float HoveredPlayerDotRadius = 6f;
+    private const float HoverRadius = 7f;
+    private const float BudgetCutRingPadding = 2f;
+    private const float SelectedPlayerRingPadding = 4f;
+
     private uint? selectedPlayerEntityId;
     private int tooltipFrame = -1;
-    private float viewRange = PlayerPreviewConstants.DefaultViewRange;
+    private float viewRange = DefaultViewRange;
 
     public PlayerPreviewRenderResult Draw(PlayerPreviewSnapshot snapshot, float side, Func<PlayerKeepRuleId, string> getRuleLabel)
     {
@@ -21,25 +40,14 @@ internal sealed class PlayerPreviewRenderer
         var size = new Vector2(side, side);
         var end = start + size;
         var center = start + (size * 0.5f);
-        var rangeRadius = Math.Max(PlayerPreviewConstants.MinimumRange, (side * 0.5f) - PlayerPreviewConstants.PreviewOuterPadding);
+        var rangeRadius = Math.Max(MinimumRange, (side * 0.5f) - PreviewOuterPadding);
         var effectiveViewRange = GetEffectiveViewRange(snapshot);
 
         UpdateZoom(start, end, ref effectiveViewRange);
 
-        drawList.AddCircle(
-            center,
-            rangeRadius,
-            ImGui.GetColorU32(ImGuiCol.TextDisabled),
-            PlayerPreviewConstants.RangeCircleSegments,
-            PlayerPreviewConstants.RangeCircleThickness
-        );
+        drawList.AddCircle(center, rangeRadius, ImGui.GetColorU32(ImGuiCol.TextDisabled), RangeCircleSegments, RangeCircleThickness);
         DrawNearbyRangeCircle(drawList, snapshot, effectiveViewRange, center, rangeRadius);
-        drawList.AddCircleFilled(
-            center,
-            PlayerPreviewConstants.LocalPlayerDotRadius,
-            ImGui.GetColorU32(ImGuiCol.Text),
-            PlayerPreviewConstants.DotCircleSegments
-        );
+        drawList.AddCircleFilled(center, LocalPlayerDotRadius, ImGui.GetColorU32(ImGuiCol.Text), DotCircleSegments);
 
         var hoveredPlayer = FindHoveredPlayer(snapshot, center, rangeRadius);
         UpdateSelectedPlayer(snapshot, start, end, hoveredPlayer);
@@ -51,19 +59,17 @@ internal sealed class PlayerPreviewRenderer
             var color = GetPlayerColor(player);
             var isSelected = IsSelected(player);
             var radius =
-                (hoveredPlayer.HasValue && player.Equals(hoveredPlayer.Value)) || isSelected
-                    ? PlayerPreviewConstants.HoveredPlayerDotRadius
-                    : PlayerPreviewConstants.PlayerDotRadius;
-            drawList.AddCircleFilled(position, radius, color, PlayerPreviewConstants.DotCircleSegments);
+                (hoveredPlayer.HasValue && player.Equals(hoveredPlayer.Value)) || isSelected ? HoveredPlayerDotRadius : PlayerDotRadius;
+            drawList.AddCircleFilled(position, radius, color, DotCircleSegments);
 
             if (isSelected)
             {
                 drawList.AddCircle(
                     position,
-                    radius + PlayerPreviewConstants.SelectedPlayerRingPadding,
+                    radius + SelectedPlayerRingPadding,
                     ImGui.GetColorU32(ImGuiCol.NavHighlight),
-                    PlayerPreviewConstants.DotCircleSegments,
-                    PlayerPreviewConstants.SelectedPlayerRingThickness
+                    DotCircleSegments,
+                    SelectedPlayerRingThickness
                 );
             }
 
@@ -71,10 +77,10 @@ internal sealed class PlayerPreviewRenderer
             {
                 drawList.AddCircle(
                     position,
-                    radius + PlayerPreviewConstants.BudgetCutRingPadding,
+                    radius + BudgetCutRingPadding,
                     ImGui.GetColorU32(ImGuiCol.PlotHistogramHovered),
-                    PlayerPreviewConstants.DotCircleSegments,
-                    PlayerPreviewConstants.BudgetCutRingThickness
+                    DotCircleSegments,
+                    BudgetCutRingThickness
                 );
             }
         }
@@ -165,7 +171,7 @@ internal sealed class PlayerPreviewRenderer
     {
         var mouse = ImGui.GetMousePos();
         PlayerPreviewEntry? hoveredPlayer = null;
-        var bestDistanceSq = PlayerPreviewConstants.HoverRadius * PlayerPreviewConstants.HoverRadius;
+        var bestDistanceSq = HoverRadius * HoverRadius;
         var effectiveViewRange = GetEffectiveViewRange(snapshot);
 
         foreach (var player in snapshot.Players)
@@ -191,7 +197,7 @@ internal sealed class PlayerPreviewRenderer
             viewRange = snapshot.ViewRange;
         }
 
-        viewRange = Math.Clamp(viewRange, PlayerPreviewConstants.MinimumViewRange, PlayerPreviewConstants.MaximumViewRange);
+        viewRange = Math.Clamp(viewRange, MinimumViewRange, MaximumViewRange);
         return viewRange;
     }
 
@@ -208,11 +214,7 @@ internal sealed class PlayerPreviewRenderer
             return;
         }
 
-        viewRange = Math.Clamp(
-            viewRange / MathF.Pow(PlayerPreviewConstants.MouseWheelZoomStep, wheel),
-            PlayerPreviewConstants.MinimumViewRange,
-            PlayerPreviewConstants.MaximumViewRange
-        );
+        viewRange = Math.Clamp(viewRange / MathF.Pow(MouseWheelZoomStep, wheel), MinimumViewRange, MaximumViewRange);
         effectiveViewRange = viewRange;
     }
 
@@ -224,7 +226,7 @@ internal sealed class PlayerPreviewRenderer
             relativeXz *= viewRange / distance;
         }
 
-        var scale = rangeRadius / Math.Max(PlayerPreviewConstants.MinimumRange, viewRange);
+        var scale = rangeRadius / Math.Max(MinimumRange, viewRange);
         return center + (new Vector2(relativeXz.X, relativeXz.Y) * scale);
     }
 
@@ -236,25 +238,13 @@ internal sealed class PlayerPreviewRenderer
         float rangeRadius
     )
     {
-        if (snapshot.NearbyRange <= PlayerPreviewConstants.DisabledNearbyRange)
+        if (snapshot.NearbyRange <= DisabledNearbyRange)
         {
             return;
         }
 
-        var radius =
-            rangeRadius
-            * Math.Clamp(
-                snapshot.NearbyRange / Math.Max(PlayerPreviewConstants.MinimumRange, viewRange),
-                PlayerPreviewConstants.DisabledNearbyRange,
-                PlayerPreviewConstants.MinimumRange
-            );
-        drawList.AddCircle(
-            center,
-            radius,
-            ImGui.GetColorU32(ImGuiCol.PlotHistogram),
-            PlayerPreviewConstants.RangeCircleSegments,
-            PlayerPreviewConstants.RangeCircleThickness
-        );
+        var radius = rangeRadius * Math.Clamp(snapshot.NearbyRange / Math.Max(MinimumRange, viewRange), DisabledNearbyRange, MinimumRange);
+        drawList.AddCircle(center, radius, ImGui.GetColorU32(ImGuiCol.PlotHistogram), RangeCircleSegments, RangeCircleThickness);
     }
 
     private static uint GetPlayerColor(PlayerPreviewEntry player)
@@ -318,6 +308,13 @@ internal readonly record struct PlayerPreviewRenderResult(PlayerPreviewEntry? Po
 
 internal static unsafe class PlayerPreviewWorldArrowRenderer
 {
+    private static readonly Vector4 WorldArrowColor = new(1f, 0.5f, 0f, 1f);
+    private const float WorldArrowLineThickness = 2f;
+    private const float WorldArrowHeadLength = 12f;
+    private const float WorldArrowHeadHalfWidth = 5f;
+    private const float WorldArrowTargetRadius = 3f;
+    private const float WorldArrowScreenEdgePadding = 24f;
+
     public static void Draw(PlayerPreviewEntry player, IGameGui gameGui)
     {
         var manager = GameObjectManager.Instance();
@@ -391,12 +388,12 @@ internal static unsafe class PlayerPreviewWorldArrowRenderer
             return;
         }
 
-        var color = ImGui.GetColorU32(PlayerPreviewConstants.WorldArrowColor);
+        var color = ImGui.GetColorU32(WorldArrowColor);
         var drawList = ImGui.GetBackgroundDrawList();
 
-        drawList.AddLine(sourceScreenPos, arrowEnd, color, PlayerPreviewConstants.WorldArrowLineThickness);
+        drawList.AddLine(sourceScreenPos, arrowEnd, color, WorldArrowLineThickness);
         DrawArrowHead(drawList, sourceScreenPos, arrowEnd, color);
-        drawList.AddCircleFilled(arrowEnd, PlayerPreviewConstants.WorldArrowTargetRadius, color);
+        drawList.AddCircleFilled(arrowEnd, WorldArrowTargetRadius, color);
     }
 
     private static bool TryGetScreenPosition(GameObject* gameObject, IGameGui gameGui, out Vector2 screenPos, out bool inView)
@@ -461,7 +458,7 @@ internal static unsafe class PlayerPreviewWorldArrowRenderer
 
     private static bool TryGetViewportRect(out Vector2 min, out Vector2 max)
     {
-        var padding = PlayerPreviewConstants.WorldArrowScreenEdgePadding;
+        var padding = WorldArrowScreenEdgePadding;
         var displaySize = ImGui.GetIO().DisplaySize;
 
         min = new Vector2(padding, padding);
@@ -490,12 +487,12 @@ internal static unsafe class PlayerPreviewWorldArrowRenderer
         }
 
         direction /= length;
-        var headLength = Math.Min(PlayerPreviewConstants.WorldArrowHeadLength, length * 0.45f);
-        var headHalfWidth = Math.Min(PlayerPreviewConstants.WorldArrowHeadHalfWidth, headLength * 0.5f);
+        var headLength = Math.Min(WorldArrowHeadLength, length * 0.45f);
+        var headHalfWidth = Math.Min(WorldArrowHeadHalfWidth, headLength * 0.5f);
         var normal = new Vector2(-direction.Y, direction.X);
         var headBase = to - (direction * headLength);
 
-        drawList.AddLine(to, headBase + (normal * headHalfWidth), color, PlayerPreviewConstants.WorldArrowLineThickness);
-        drawList.AddLine(to, headBase - (normal * headHalfWidth), color, PlayerPreviewConstants.WorldArrowLineThickness);
+        drawList.AddLine(to, headBase + (normal * headHalfWidth), color, WorldArrowLineThickness);
+        drawList.AddLine(to, headBase - (normal * headHalfWidth), color, WorldArrowLineThickness);
     }
 }

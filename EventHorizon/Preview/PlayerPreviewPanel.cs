@@ -1,8 +1,8 @@
 using System;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Plugin.Services;
-using EventHorizon.Culling;
 using EventHorizon.Localization;
+using EventHorizon.Settings;
 
 namespace EventHorizon.Preview;
 
@@ -13,6 +13,10 @@ internal sealed class PlayerPreviewPanel(
     IGameGui gameGui
 )
 {
+    private const int FastRefreshIntervalMs = 33;
+    private const float CardContentRightPadding = 18f;
+    private const float MinimumPreviewSide = 180f;
+
     private readonly PlayerPreviewRenderer renderer = new();
 
     private long nextRefresh;
@@ -23,10 +27,7 @@ internal sealed class PlayerPreviewPanel(
     public void DrawInlineContent(Func<PlayerKeepRuleId, string> getRuleLabel)
     {
         RefreshIfNeeded();
-        var side = Math.Max(
-            PlayerPreviewConstants.MinimumPreviewSide,
-            ImGui.GetContentRegionAvail().X - PlayerPreviewConstants.CardContentRightPadding
-        );
+        var side = Math.Max(MinimumPreviewSide, ImGui.GetContentRegionAvail().X - CardContentRightPadding);
         DrawPreview(side, getRuleLabel);
         AddVerticalSpace(4f);
         DrawHelpText(Loc.Text("Config.Preview.PerformanceNote"));
@@ -36,7 +37,7 @@ internal sealed class PlayerPreviewPanel(
     {
         RefreshIfNeeded();
         var available = ImGui.GetContentRegionAvail();
-        var side = Math.Max(PlayerPreviewConstants.MinimumPreviewSide, Math.Min(available.X, available.Y));
+        var side = Math.Max(MinimumPreviewSide, Math.Min(available.X, available.Y));
         var offsetX = Math.Max(0f, (available.X - side) * 0.5f);
         if (offsetX > 0f)
         {
@@ -91,7 +92,7 @@ internal sealed class PlayerPreviewPanel(
         }
 
         refreshPreview();
-        nextRefresh = now + PlayerPreviewConstants.FastRefreshIntervalMs;
+        nextRefresh = now + FastRefreshIntervalMs;
     }
 
     private static void AddVerticalSpace(float height)
