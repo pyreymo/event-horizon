@@ -38,7 +38,6 @@ internal sealed unsafe class PlayerCuller(
         PlayerAdmissionGate.LastPlayerSlot + 1
     ];
     private PlayerKeepBudgetStats keepBudgetStats;
-    private int nextPlayerVisibilityGeneration;
     private PlayerVisibilityReconciliation? latestPlayerVisibilityReconciliation;
 
     #region Lifecycle
@@ -47,19 +46,14 @@ internal sealed unsafe class PlayerCuller(
     {
         if (manager == null)
         {
-            ClearState(clearLongTermRuleState: true);
+            ClearRuntimeState();
             return;
         }
 
         playerKeepRules.BeforeUpdate();
 
         playerKeepPlan.Update(configuration, GetPlayerKeepCandidates(manager));
-        var playerVisibilityPlan = playerVisibilityPlanner.BuildPlan(
-            ++nextPlayerVisibilityGeneration,
-            manager,
-            playerKeepPlan,
-            preview.ActiveSelectedPlayerEntityId
-        );
+        var playerVisibilityPlan = playerVisibilityPlanner.BuildPlan(manager, playerKeepPlan, preview.ActiveSelectedPlayerEntityId);
         var legacyTargetSet = playerVisibilityPlanner.BuildLegacyTarget(playerVisibilityPlan);
         var frameState = playerVisibilityPlanner.BuildFrame(
             playerVisibilityPlan,
@@ -79,7 +73,7 @@ internal sealed unsafe class PlayerCuller(
     {
         if (manager == null)
         {
-            ClearState(clearLongTermRuleState: true);
+            ClearRuntimeState();
             return;
         }
 
@@ -265,13 +259,9 @@ internal sealed unsafe class PlayerCuller(
         }
     }
 
-    public void ClearState(bool clearLongTermRuleState)
+    public void ClearRuntimeState()
     {
         showTransitionBudget.Reset();
-        if (clearLongTermRuleState)
-        {
-            playerKeepRules.Clear();
-        }
         keepBudgetStats = default;
         playerAdmissionGate.RequestReset();
         playerTopologyDirtySignal.Clear();
@@ -280,7 +270,11 @@ internal sealed unsafe class PlayerCuller(
         latestPlayerVisibilityReconciliation = null;
     }
 
-    public void ClearPublishedState() => ClearPublishedPlayerVisibilityState();
+    public void ClearAllState()
+    {
+        playerKeepRules.Clear();
+        ClearRuntimeState();
+    }
 
     #endregion
 
@@ -377,17 +371,6 @@ internal sealed unsafe class PlayerCuller(
     public PlayerKeepBudgetStats GetKeepBudgetStats() => keepBudgetStats;
 
     public bool ConsumePlayerTopologyDirty() => playerTopologyDirtySignal.Consume();
-
-    private void ClearPublishedPlayerVisibilityState()
-    {
-        latestPlayerVisibilityReconciliation = null;
-        appliedVisibilityState.Clear();
-        playerAdmissionGate.RequestReset();
-        playerTopologyDirtySignal.Clear();
-        playerVisibilityPlanner.Reset();
-        showTransitionBudget.Reset();
-        keepBudgetStats = default;
-    }
 
     #endregion
 }

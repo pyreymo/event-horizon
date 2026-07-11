@@ -129,11 +129,11 @@ internal sealed unsafe class CullingController : IDisposable
 
         if (transition.EnterInactive)
         {
-            RestoreAndClear(manager, transition.ClearLongTermRules);
+            RestoreAndClear(manager, nextMode == CullingRuntimeMode.Disabled);
         }
         else if (transition.RebuildActive)
         {
-            players.ClearPublishedState();
+            players.ClearRuntimeState();
         }
 
         return new(nextMode, RequiresRefresh: transition.RebuildActive);
@@ -174,7 +174,14 @@ internal sealed unsafe class CullingController : IDisposable
             hiddenObjects.Clear();
         }
 
-        players.ClearState(clearLongTermRuleState);
+        if (clearLongTermRuleState)
+        {
+            players.ClearAllState();
+        }
+        else
+        {
+            players.ClearRuntimeState();
+        }
     }
 
     private void OnObjectArraysUpdated(GameObjectManager* manager)

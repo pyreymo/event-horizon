@@ -186,9 +186,6 @@ internal sealed unsafe class HiddenObjectTracker
         return hiddenObjects.TryGetValue((nint)gameObject, out record) && record.IsSameObject(readIdentity(gameObject));
     }
 
-    internal int? GetRecordedObjectIndex(PlayerObjectIdentity identity) =>
-        hiddenObjects.TryGetValue(identity.Address, out var record) && record.IsSameObject(identity) ? record.ObjectIndex : null;
-
     private static int FindLiveObjectIndexByAddress(
         GameObjectManager* manager,
         nint address,

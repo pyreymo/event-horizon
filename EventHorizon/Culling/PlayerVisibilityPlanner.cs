@@ -5,21 +5,58 @@ using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.Culling;
 
+internal sealed class PlayerVisibilityPlanner(Action<Exception> reportSelectionFailure)
+{
+    private readonly PlayerVisibilitySelectionController selectionController = new(reportFailure: reportSelectionFailure);
+    private readonly PlayerVisibilityReconciler reconciler = new();
+    private readonly Action<Exception> reportFailure = reportSelectionFailure;
+    private readonly List<PlayerVisibilityPlanEntry> planEntryBuffer = [];
+    private readonly List<PlayerVisibilityTarget> legacyTargetBuffer = [];
+    private readonly List<PlayerVisibilityTarget> stableTargetBuffer = [];
+
+    public PlayerVisibilityFrameState BuildFrame(
+        PlayerVisibilityPlan plan,
+        PlayerVisibilityTargetSet legacyTarget,
+        bool limitVisiblePlayerCount,
+        int visiblePlayerCountLimit,
+        Vector3? localPosition,
+        HiddenObjectTracker hiddenObjectTracker
+    )
+    {
+        var evaluation = selectionController.Evaluate(plan, legacyTarget, limitVisiblePlayerCount, visiblePlayerCountLimit, localPosition);
+        var resolution = PlayerVisibilityActiveTargetResolver.Resolve(plan, legacyTarget, evaluation, stableTargetBuffer);
+        if (resolution.FailureException != null)
+        {
+            reportFailure(resolution.FailureException);
+        }
+        var budgetStats = PlayerVisibilityActiveBudgetStats.Calculate(resolution.ActiveTarget, visiblePlayerCountLimit);
+        var reconciliation = reconciler.Reconcile(resolution.ActiveTarget, hiddenObjectTracker);
+        return new PlayerVisibilityFrameState(resolution.ActiveTarget, reconciliation, budgetStats);
+    }
+
+    public void Commit(PlayerVisibilityFrameState frame) => selectionController.CommitAppliedTarget(frame.ActiveTarget);
+
+    public void Reset() => selectionController.Reset();
+
+    public unsafe PlayerVisibilityPlan BuildPlan(GameObjectManager* manager, PlayerKeepPlan keepPlan, uint? previewVisibleEntityId) =>
+        PlayerVisibilityPlan.Build(manager, keepPlan, previewVisibleEntityId, planEntryBuffer);
+
+    public PlayerVisibilityTargetSet BuildLegacyTarget(PlayerVisibilityPlan plan) =>
+        PlayerVisibilityLegacyTargetBuilder.Build(plan, legacyTargetBuffer);
+}
+
 internal sealed unsafe class PlayerVisibilityPlan
 {
-    internal PlayerVisibilityPlan(int generation, long createdAtTickCount64, IReadOnlyList<PlayerVisibilityPlanEntry> entries)
+    internal PlayerVisibilityPlan(TimeSpan sampleTime, IReadOnlyList<PlayerVisibilityPlanEntry> entries)
     {
-        Generation = generation;
-        CreatedAtTickCount64 = createdAtTickCount64;
+        SampleTime = sampleTime;
         Entries = entries;
     }
 
-    public int Generation { get; }
-    public long CreatedAtTickCount64 { get; }
+    public TimeSpan SampleTime { get; }
     public IReadOnlyList<PlayerVisibilityPlanEntry> Entries { get; }
 
     public static PlayerVisibilityPlan Build(
-        int generation,
         GameObjectManager* manager,
         PlayerKeepPlan keepPlan,
         uint? previewVisibleEntityId,
@@ -53,7 +90,7 @@ internal sealed unsafe class PlayerVisibilityPlan
             entries.Add(entry);
         }
 
-        return new PlayerVisibilityPlan(generation, Environment.TickCount64, [.. entries]);
+        return new PlayerVisibilityPlan(TimeSpan.FromMilliseconds(Environment.TickCount64), [.. entries]);
     }
 
     private static PlayerVisibilityClassification Classify(int index, PlayerKeepDecision keepDecision, bool previewVisible)
@@ -110,10 +147,8 @@ internal readonly record struct PlayerVisibilityPlanEntry(
     public bool IsManaged => Classification != PlayerVisibilityClassification.Unmanaged;
 }
 
-internal sealed class PlayerVisibilityTargetSet(int generation, long createdAtTickCount64, IReadOnlyList<PlayerVisibilityTarget> targets)
+internal sealed class PlayerVisibilityTargetSet(IReadOnlyList<PlayerVisibilityTarget> targets)
 {
-    public int Generation { get; } = generation;
-    public long CreatedAtTickCount64 { get; } = createdAtTickCount64;
     public IReadOnlyList<PlayerVisibilityTarget> Targets { get; } = targets;
 }
 
@@ -141,7 +176,7 @@ file static class PlayerVisibilityLegacyTargetBuilder
             );
         }
 
-        return new PlayerVisibilityTargetSet(plan.Generation, plan.CreatedAtTickCount64, [.. targets]);
+        return new PlayerVisibilityTargetSet([.. targets]);
     }
 
     private static bool GetDesiredVisible(PlayerVisibilityPlanEntry entry) =>
@@ -264,7 +299,7 @@ internal sealed class PlayerVisibilitySelectionController
         Vector3 localPosition
     )
     {
-        var timestamp = TimeSpan.FromMilliseconds(plan.CreatedAtTickCount64);
+        var timestamp = plan.SampleTime;
         localSpeedSmoother.AddSample(timestamp, localPosition);
 
         var competitiveIdentities = new HashSet<PlayerObjectIdentity>();
@@ -442,7 +477,7 @@ file static class PlayerVisibilityStableTargetBuilder
             );
         }
 
-        return new PlayerVisibilityTargetSet(plan.Generation, plan.CreatedAtTickCount64, [.. targets]);
+        return new PlayerVisibilityTargetSet([.. targets]);
     }
 }
 
@@ -469,11 +504,7 @@ file static class PlayerVisibilityActiveBudgetStats
     }
 }
 
-file sealed record PlayerVisibilityActiveTargetResolution(
-    PlayerVisibilityTargetSet ActiveTarget,
-    PlayerVisibilitySelectionEvaluation Evaluation,
-    Exception? FailureException = null
-);
+file sealed record PlayerVisibilityActiveTargetResolution(PlayerVisibilityTargetSet ActiveTarget, Exception? FailureException = null);
 
 file static class PlayerVisibilityActiveTargetResolver
 {
@@ -500,54 +531,9 @@ file static class PlayerVisibilityActiveTargetResolver
             catch (Exception exception)
             {
                 failureException = exception;
-                evaluation = evaluation with { Status = PlayerVisibilitySelectionStatus.Failed };
                 activeTarget = legacyTarget;
             }
         }
-        return new PlayerVisibilityActiveTargetResolution(activeTarget, evaluation, failureException);
+        return new PlayerVisibilityActiveTargetResolution(activeTarget, failureException);
     }
-}
-
-internal sealed class PlayerVisibilityPlanner(Action<Exception> reportSelectionFailure)
-{
-    private readonly PlayerVisibilitySelectionController selectionController = new(reportFailure: reportSelectionFailure);
-    private readonly PlayerVisibilityReconciler reconciler = new();
-    private readonly Action<Exception> reportFailure = reportSelectionFailure;
-    private readonly List<PlayerVisibilityPlanEntry> planEntryBuffer = [];
-    private readonly List<PlayerVisibilityTarget> legacyTargetBuffer = [];
-    private readonly List<PlayerVisibilityTarget> stableTargetBuffer = [];
-
-    public PlayerVisibilityFrameState BuildFrame(
-        PlayerVisibilityPlan plan,
-        PlayerVisibilityTargetSet legacyTarget,
-        bool limitVisiblePlayerCount,
-        int visiblePlayerCountLimit,
-        Vector3? localPosition,
-        HiddenObjectTracker hiddenObjectTracker
-    )
-    {
-        var evaluation = selectionController.Evaluate(plan, legacyTarget, limitVisiblePlayerCount, visiblePlayerCountLimit, localPosition);
-        var resolution = PlayerVisibilityActiveTargetResolver.Resolve(plan, legacyTarget, evaluation, stableTargetBuffer);
-        if (resolution.FailureException != null)
-        {
-            reportFailure(resolution.FailureException);
-        }
-        var budgetStats = PlayerVisibilityActiveBudgetStats.Calculate(resolution.ActiveTarget, visiblePlayerCountLimit);
-        var reconciliation = reconciler.Reconcile(resolution.ActiveTarget, hiddenObjectTracker);
-        return new PlayerVisibilityFrameState(resolution.ActiveTarget, reconciliation, budgetStats);
-    }
-
-    public void Commit(PlayerVisibilityFrameState frame) => selectionController.CommitAppliedTarget(frame.ActiveTarget);
-
-    public void Reset() => selectionController.Reset();
-
-    public unsafe PlayerVisibilityPlan BuildPlan(
-        int generation,
-        GameObjectManager* manager,
-        PlayerKeepPlan keepPlan,
-        uint? previewVisibleEntityId
-    ) => PlayerVisibilityPlan.Build(generation, manager, keepPlan, previewVisibleEntityId, planEntryBuffer);
-
-    public PlayerVisibilityTargetSet BuildLegacyTarget(PlayerVisibilityPlan plan) =>
-        PlayerVisibilityLegacyTargetBuilder.Build(plan, legacyTargetBuffer);
 }
