@@ -17,7 +17,7 @@
 
 **Event Horizon** is a Dalamud plugin for reducing visual clutter in crowded areas.
 
-It hides distant or less relevant player characters while keeping important players visible, such as party members, friends, targets, recent chat participants, and nearby players.
+It hides distant or less relevant player characters while keeping important players visible, such as party members, friends, targets, recent chat participants, and nearby players. Optional cleanup rules can also hide attached objects, selected Event NPC clutter, and parts of the world scene.
 
 The goal is simple: keep the world readable without turning every crowded city into a wall of character models.
 
@@ -37,9 +37,9 @@ Event Horizon applies hiding rules to other players around you.
 
 Players are kept visible when they match enabled keep rules. Those rules can be reordered, and each rule can either count toward or bypass your visible-player budget.
 
-Within the configured budget, a deterministic Stable Top-B selector favors relevant nearby players while retaining the current visible set when possible. Newly admitted player models are kept hidden until the active visibility target explicitly permits them, preventing slot churn from briefly bypassing the selection cycle.
+For budgeted candidates, a deterministic Stable Top-B selector combines keep-rule priority, distance, short-term relative motion, and the currently visible set. This keeps the selected crowd steadier while you move instead of constantly swapping models at the visibility limit.
 
-Everyone else may be hidden or limited by your configured visibility settings. Visibility changes still pass through the shared reconciliation and transition path.
+New player slots are held hidden until the active selection permits them, preventing newly loaded models from briefly flashing on screen before the next selection pass. Models switch visibility directly instead of using fade animations, while newly visible models are still admitted at a controlled rate.
 
 Your own character is never hidden.
 
@@ -72,7 +72,7 @@ This is useful in cities, venues, hunt trains, and other crowded scenes. Budget-
 
 Event Horizon can mark players who are targeting you.
 
-The marker can use a native nameplate icon, an optional world VFX marker, or both. You can tune its placement, scale, opacity, glow strength, and color from the behavior settings.
+The marker can use a native nameplate icon, a lightweight screen-space dot, an optional world VFX marker, or any combination. The nameplate marker supports placement, scale, opacity, glow, and color controls; the dot has separate color and size controls, and the VFX can be disabled automatically in duties.
 
 This is useful when you want to keep the "players targeting me" rule visible and easy to verify in crowded scenes.
 
@@ -86,14 +86,25 @@ The preview can also be popped out into a square floating window from the settin
 
 Hovering or selecting a preview dot draws an in-world direction arrow from your character to that player. Selected preview players are temporarily kept visible and receive an orange world highlight while you inspect their rule and budget state.
 
-### Attached object cleanup
+### Attached objects and NPC cleanup
 
-For players who remain visible, Event Horizon can also hide their:
+For other players, Event Horizon can also hide their:
 
 - Minions
 - Fashion accessories
+- Battle pets
 
-This reduces extra visual noise without hiding the player themselves.
+An experimental cleanup rule can also hide certain non-targetable Event NPCs and dialogue-only Event NPCs without active quest markers.
+
+### Hidden-player markers
+
+Hidden players can optionally receive a marker at their world position. You can use an in-world ground VFX or a less resource-intensive screen-space dot with configurable color, opacity, and size.
+
+The dot does not follow in-game world occlusion, so it may remain visible through scene geometry.
+
+### World graphics controls
+
+Optional scene controls can hide the current area's BG Part graphics, terrain rendering, or both. These settings are disabled by default and operate independently from player hiding.
 
 ### Server info bar controls
 
@@ -109,8 +120,6 @@ Event Horizon can automatically suspend hiding:
 - When the number of other players is below your configured threshold
 
 You can also preview the nearby-player keep range in the world.
-
-Experimental visual aids can show hidden-player ground markers, but these are optional and disabled unless you enable them.
 
 ## Commands
 
@@ -131,8 +140,8 @@ Experimental visual aids can show hidden-player ground markers, but these are op
 
 The plugin code is grouped by responsibility:
 
-- `EventHorizon/Culling` contains player selection, admission gating, visibility reconciliation, and keep-rule decisions.
-- `EventHorizon/Dtr`, `TargetingMarker`, and `WorldGraphics` contain user-facing features; shared native Atk and VFX code lives under `EventHorizon/Interop`.
+- `EventHorizon/Culling` contains player selection, admission gating, tracked visibility state, non-player cleanup, and keep-rule decisions.
+- `EventHorizon/Dtr`, `EventHorizon/TargetingMarker`, and `EventHorizon/WorldGraphics` contain the Server Info Bar, marker rendering, world dots, and scene-graphics controls; shared native Atk and VFX code lives under `EventHorizon/Interop`.
 - `EventHorizon/Preview` contains preview snapshots, preview rendering, the floating preview window, world arrows, and selected-player highlights.
 - `EventHorizon/UI/Config` contains settings tabs and shared config-window layout helpers.
 - `EventHorizon/Settings` contains persisted plugin configuration.
@@ -141,7 +150,7 @@ The plugin code is grouped by responsibility:
 
 Install XIVLauncher, Dalamud, and the .NET SDK expected by the Dalamud SDK.
 
-Clone this repository with submodules, then build:
+Clone this repository, then build:
 
 ```text
 dotnet build .\EventHorizon\EventHorizon.csproj --configuration Release -p:Platform=x64
