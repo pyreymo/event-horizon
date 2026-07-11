@@ -5,7 +5,7 @@ using Lumina.Excel.Sheets;
 
 namespace EventHorizon.UI.Config;
 
-public partial class ConfigWindow
+internal partial class ConfigWindow
 {
     #region Race/Sex Filter
 

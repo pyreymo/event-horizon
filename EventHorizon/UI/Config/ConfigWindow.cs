@@ -9,7 +9,7 @@ using EventHorizon.Settings;
 
 namespace EventHorizon.UI.Config;
 
-public partial class ConfigWindow : Window
+internal partial class ConfigWindow : Window
 {
     public enum Tab
     {
@@ -129,10 +129,7 @@ public partial class ConfigWindow : Window
     }
 
     #endregion
-}
 
-public partial class ConfigWindow
-{
     #region Layout Helpers
 
     private static void AddVerticalSpace(float height)

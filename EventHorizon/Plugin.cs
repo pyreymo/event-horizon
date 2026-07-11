@@ -84,7 +84,7 @@ public sealed class Plugin : IDalamudPlugin
 
     internal Configuration Configuration { get; init; }
 
-    public readonly WindowSystem WindowSystem = new("EventHorizon");
+    private readonly WindowSystem windowSystem = new("EventHorizon");
     private ConfigWindow ConfigWindow { get; init; }
     private PlayerPreviewWindow PlayerPreviewWindow { get; init; }
     private CullingController Culling { get; init; }
@@ -149,8 +149,8 @@ public sealed class Plugin : IDalamudPlugin
             Log
         );
 
-        WindowSystem.AddWindow(ConfigWindow);
-        WindowSystem.AddWindow(PlayerPreviewWindow);
+        windowSystem.AddWindow(ConfigWindow);
+        windowSystem.AddWindow(PlayerPreviewWindow);
 
         CommandManager.AddHandler(PrimaryCommandName, new CommandInfo(OnCommand) { HelpMessage = Loc.Text("Command.Help.OpenSettings") });
         CommandManager.AddHandler(ShortCommandName, new CommandInfo(OnCommand) { HelpMessage = BuildCommandHelp(ShortCommandName) });
@@ -175,7 +175,7 @@ public sealed class Plugin : IDalamudPlugin
         CommandManager.RemoveHandler(PrimaryCommandName);
         CommandManager.RemoveHandler(ShortCommandName);
 
-        WindowSystem.RemoveAllWindows();
+        windowSystem.RemoveAllWindows();
         TargetingMarkerController.Dispose();
         LayoutGraphics.Dispose();
         DtrBackground.Dispose();
@@ -255,7 +255,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         try
         {
-            WindowSystem.Draw();
+            windowSystem.Draw();
         }
         catch (Exception ex)
         {

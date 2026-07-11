@@ -61,8 +61,6 @@ internal sealed unsafe class StaticVfxController : IDisposable
 
     private delegate nint StaticVfxRemoveDelegate(VfxObject* vfx);
 
-    public int ActiveCount => activeVfx.Count;
-
     public bool IsActive(ulong gameObjectId, string path)
     {
         return activeVfx.TryGetValue(gameObjectId, out var active) && active.Path == path && active.VfxAddress != nint.Zero;

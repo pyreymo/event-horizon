@@ -13,8 +13,6 @@ internal sealed unsafe class DtrBackgroundNode(uint nodeId)
 
     public AtkResNode* ResourceNode => (AtkResNode*)node;
 
-    public bool IsAttachedTo(AtkResNode* root) => node != nint.Zero && ResourceNode->ParentNode == root;
-
     public bool EnsureAttached(AtkUnitBase* unit, AtkResNode* root)
     {
         if (node != nint.Zero)

@@ -5,7 +5,7 @@ using EventHorizon.Localization;
 
 namespace EventHorizon.UI.Config;
 
-public partial class ConfigWindow
+internal partial class ConfigWindow
 {
     private void DrawBehaviorTab()
     {

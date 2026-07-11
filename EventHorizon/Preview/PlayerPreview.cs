@@ -206,8 +206,6 @@ internal sealed unsafe class PlayerPreviewBuilder
         );
     }
 
-    public int Count => players.Count;
-
     public void Add(
         GameObject* gameObject,
         int objectIndex,

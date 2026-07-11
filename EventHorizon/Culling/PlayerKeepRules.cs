@@ -41,13 +41,6 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
     private float nearbyRangeSq;
     private bool hasRecentChatPlayers;
 
-    public bool NeedsDynamicRefresh =>
-        configuration.KeepRecruitingPlayers
-        || configuration.KeepRecentChatPlayers
-        || configuration.KeepNearbyPlayers
-        || configuration.KeepTargetAndFocusPlayers
-        || configuration.KeepPlayersTargetingMe;
-
     #region Lifecycle
 
     public void BeforeUpdate()

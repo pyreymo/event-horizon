@@ -175,7 +175,6 @@ internal sealed unsafe class CullingController : IDisposable
         var otherPlayerCount = CountOtherPlayers(manager);
         return new(
             enabled,
-            playerAvailable,
             enabled
                 && playerAvailable
                 && configuration.DisableInDuty
@@ -252,10 +251,4 @@ internal enum CullingRuntimeMode
     Active,
 }
 
-internal readonly record struct CullingStatus(
-    bool Enabled,
-    bool PlayerAvailable,
-    bool SuspendedInDuty,
-    bool SuspendedByLowPlayerCount,
-    int OtherPlayerCount
-);
+internal readonly record struct CullingStatus(bool Enabled, bool SuspendedInDuty, bool SuspendedByLowPlayerCount, int OtherPlayerCount);

@@ -3,13 +3,13 @@ using System.Collections.Generic;
 
 namespace EventHorizon.Settings;
 
-public enum PlayerKeepBudgetPolicy
+internal enum PlayerKeepBudgetPolicy
 {
     Exempt,
     Counted,
 }
 
-public enum PlayerKeepRuleId
+internal enum PlayerKeepRuleId
 {
     TargetFocus,
     PartyAlliance,
@@ -144,20 +144,6 @@ internal static class PlayerKeepRuleOrder
         }
 
         return effectiveOrder;
-    }
-
-    public static int GetRank(Configuration configuration, PlayerKeepRuleId ruleId)
-    {
-        var effectiveOrder = GetEffectiveOrder(configuration);
-        for (var index = 0; index < effectiveOrder.Count; index++)
-        {
-            if (effectiveOrder[index] == ruleId)
-            {
-                return index;
-            }
-        }
-
-        return effectiveOrder.Count;
     }
 
     public static void FillRanks(Configuration configuration, int[] ranks)

@@ -9,7 +9,7 @@ using EventHorizon.Settings;
 
 namespace EventHorizon.UI.Config;
 
-public partial class ConfigWindow
+internal partial class ConfigWindow
 {
     #region Keep Rules
     private void DrawKeepRules()
