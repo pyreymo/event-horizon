@@ -5,7 +5,7 @@ using Dalamud.Interface;
 using Dalamud.Interface.Windowing;
 using EventHorizon.Culling;
 using EventHorizon.Localization;
-using EventHorizon.UI.Config;
+using EventHorizon.UI;
 
 namespace EventHorizon.Preview;
 

@@ -9,7 +9,6 @@ namespace EventHorizon.Culling;
 
 internal sealed unsafe class NonPlayerCuller(Configuration configuration)
 {
-    private const int MaxPlayerRelatedObjectIndex = 199;
     private readonly HashSet<uint> hiddenPlayerOwnerEntityIds = [];
     private readonly HashSet<uint> oddSlotPlayerOwnerIds = [];
     private readonly EventNpcRule eventNpcs = new();
@@ -44,11 +43,16 @@ internal sealed unsafe class NonPlayerCuller(Configuration configuration)
         oddSlotPlayerOwnerIds.Clear();
     }
 
-    public void Clear() => eventNpcs.Clear();
+    public void Clear()
+    {
+        eventNpcs.Clear();
+        hiddenPlayerOwnerEntityIds.Clear();
+        oddSlotPlayerOwnerIds.Clear();
+    }
 
     private bool ShouldHide(GameObject* gameObject, int index)
     {
-        if (IsLocalPlayerReservedSlot(index))
+        if (PlayerObjectSlots.IsLocalReserved(index))
         {
             return false;
         }
@@ -58,14 +62,14 @@ internal sealed unsafe class NonPlayerCuller(Configuration configuration)
             return eventNpcs.ShouldHide(gameObject, index);
         }
 
-        if (IsPlayerRelatedEvenSlot(index))
+        if (PlayerObjectSlots.IsPlayer(index))
         {
             return gameObject->ObjectKind == ObjectKind.BattleNpc
                 && gameObject->OwnerId != 0
                 && hiddenPlayerOwnerEntityIds.Contains(gameObject->OwnerId);
         }
 
-        if (!IsPlayerRelatedOddSlot(index))
+        if (!PlayerObjectSlots.IsAttached(index))
         {
             return false;
         }
@@ -91,10 +95,10 @@ internal sealed unsafe class NonPlayerCuller(Configuration configuration)
     private void CollectHiddenPlayerOwnerEntityIds(GameObjectManager* manager, HiddenObjectTracker hiddenObjects)
     {
         hiddenPlayerOwnerEntityIds.Clear();
-        var maxIndex = Math.Min(MaxPlayerRelatedObjectIndex, manager->Objects.IndexSorted.Length - 1);
+        var maxIndex = Math.Min(PlayerObjectSlots.LastPlayerRelated, manager->Objects.IndexSorted.Length - 1);
         for (var index = 0; index <= maxIndex; index++)
         {
-            if (!IsPlayerRelatedEvenSlot(index))
+            if (!PlayerObjectSlots.IsPlayer(index))
             {
                 continue;
             }
@@ -115,10 +119,10 @@ internal sealed unsafe class NonPlayerCuller(Configuration configuration)
             return;
         }
 
-        var maxIndex = Math.Min(MaxPlayerRelatedObjectIndex, manager->Objects.IndexSorted.Length - 1);
+        var maxIndex = Math.Min(PlayerObjectSlots.LastPlayerRelated, manager->Objects.IndexSorted.Length - 1);
         for (var index = 0; index <= maxIndex; index++)
         {
-            if (!IsPlayerRelatedOddSlot(index) || IsLocalPlayerReservedSlot(index))
+            if (!PlayerObjectSlots.IsAttached(index) || PlayerObjectSlots.IsLocalReserved(index))
             {
                 continue;
             }
@@ -137,14 +141,6 @@ internal sealed unsafe class NonPlayerCuller(Configuration configuration)
             }
         }
     }
-
-    private static bool IsPlayerRelatedSlot(int index) => index is >= 0 and <= MaxPlayerRelatedObjectIndex;
-
-    private static bool IsPlayerRelatedEvenSlot(int index) => IsPlayerRelatedSlot(index) && index % 2 == 0;
-
-    private static bool IsPlayerRelatedOddSlot(int index) => IsPlayerRelatedSlot(index) && index % 2 == 1;
-
-    private static bool IsLocalPlayerReservedSlot(int index) => index is 0 or 1;
 
     private sealed class EventNpcRule
     {

@@ -59,7 +59,7 @@ internal sealed unsafe class PlayerPreview(Configuration configuration)
         var builder = PlayerPreviewBuilder.Begin(manager, configuration);
         foreach (var target in targetSet.Targets)
         {
-            if (target.ObjectIndex is 0 or 1 || target.ObjectIndex < 0 || target.ObjectIndex > 199 || target.ObjectIndex % 2 != 0)
+            if (!PlayerObjectSlots.IsPlayer(target.ObjectIndex))
             {
                 continue;
             }

@@ -20,9 +20,7 @@ internal sealed unsafe class PlayerCuller(
     IPluginLog log
 )
 {
-    private const int MaxPlayerRelatedObjectIndex = 199;
-    private const VisibilityFlags PluginCustomProbe = (VisibilityFlags)0x1000;
-    private const VisibilityFlags InvisibleFlag = PluginCustomProbe | VisibilityFlags.Nameplate | VisibilityFlags.Model;
+    private const VisibilityFlags InvisibleFlag = CullingController.HiddenFlags;
 
     private readonly Configuration configuration = configuration;
     private readonly IPlayerState playerState = playerState;
@@ -45,66 +43,18 @@ internal sealed unsafe class PlayerCuller(
     private PlayerKeepBudgetStats keepBudgetStats;
     private int nextPlayerVisibilityGeneration;
     private PlayerVisibilityReconciliation? latestPlayerVisibilityReconciliation;
-    private readonly CullingRuntimeModeTransition runtimeModeTransition = new();
 
     #region Lifecycle
-
-    public CullingRuntimeSynchronization SynchronizeRuntimeMode(GameObjectManager* manager, HiddenObjectTracker hiddenObjects)
-    {
-        var nextMode = DetermineRuntimeMode(manager);
-        var transition = runtimeModeTransition.Synchronize(nextMode);
-        if (!transition.Changed)
-        {
-            return new(nextMode, RequiresRefresh: false);
-        }
-
-        if (transition.EnterInactive)
-        {
-            EnterInactiveMode(manager, hiddenObjects, transition.ClearLongTermRules);
-        }
-        else if (transition.RebuildActive)
-        {
-            ClearPublishedPlayerVisibilityState();
-        }
-
-        return new(nextMode, RequiresRefresh: transition.RebuildActive);
-    }
 
     public void Update(GameObjectManager* manager, HiddenObjectTracker hiddenObjects, PlayerPreview preview, bool refreshPlayerPreview)
     {
         if (manager == null)
         {
-            Clear(hiddenObjects);
-            return;
-        }
-
-        if (!IsCullingEnabled())
-        {
-            Reset(manager, hiddenObjects);
-            return;
-        }
-
-        if (ShouldSuspendCullingInDuty())
-        {
-            playerVisibilityPlanner.Reset();
-            RestoreHiddenObjects(manager, hiddenObjects);
-            return;
-        }
-
-        if (ShouldSuspendCulling(manager))
-        {
-            playerVisibilityPlanner.Reset();
-            RestoreHiddenObjects(manager, hiddenObjects);
+            ClearState(clearLongTermRuleState: true);
             return;
         }
 
         playerKeepRules.BeforeUpdate();
-        if (!playerState.IsLoaded)
-        {
-            playerVisibilityPlanner.Reset();
-            RestoreHiddenObjects(manager, hiddenObjects);
-            return;
-        }
 
         playerKeepPlan.Update(configuration, GetPlayerKeepCandidates(manager));
         var playerVisibilityPlan = playerVisibilityPlanner.BuildPlan(
@@ -136,13 +86,7 @@ internal sealed unsafe class PlayerCuller(
     {
         if (manager == null)
         {
-            Clear(hiddenObjects);
-            return;
-        }
-
-        if (runtimeModeTransition.Current != CullingRuntimeMode.Active)
-        {
-            Reset(manager, hiddenObjects);
+            ClearState(clearLongTermRuleState: true);
             return;
         }
 
@@ -195,23 +139,6 @@ internal sealed unsafe class PlayerCuller(
             }
         );
         playerTopologyDirtySignal.MarkFrom(result);
-    }
-
-    public void Reset(GameObjectManager* manager, HiddenObjectTracker hiddenObjects)
-    {
-        if (manager == null)
-        {
-            Clear(hiddenObjects);
-            return;
-        }
-
-        RestoreHiddenObjects(manager, hiddenObjects);
-        Clear(hiddenObjects);
-    }
-
-    private void RestoreHiddenObjects(GameObjectManager* manager, HiddenObjectTracker hiddenObjects)
-    {
-        hiddenObjects.RestoreAll(manager);
     }
 
     public void ClearRuleState()
@@ -352,11 +279,13 @@ internal sealed unsafe class PlayerCuller(
         }
     }
 
-    private void Clear(HiddenObjectTracker hiddenObjects)
+    public void ClearState(bool clearLongTermRuleState)
     {
-        hiddenObjects.Clear();
         showTransitionBudget.Reset();
-        playerKeepRules.Clear();
+        if (clearLongTermRuleState)
+        {
+            playerKeepRules.Clear();
+        }
         keepBudgetStats = default;
         playerAdmissionGate.RequestReset();
         playerTopologyDirtySignal.Clear();
@@ -364,6 +293,8 @@ internal sealed unsafe class PlayerCuller(
         playerVisibilityPlanner.Reset();
         latestPlayerVisibilityReconciliation = null;
     }
+
+    public void ClearPublishedState() => ClearPublishedPlayerVisibilityState();
 
     #endregion
 
@@ -391,7 +322,7 @@ internal sealed unsafe class PlayerCuller(
 
         for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
         {
-            if (!IsPlayerRelatedEvenSlot(index) || IsLocalPlayerReservedSlot(index))
+            if (!PlayerObjectSlots.IsPlayer(index))
             {
                 continue;
             }
@@ -416,14 +347,6 @@ internal sealed unsafe class PlayerCuller(
     #endregion
 
     #region Object Helpers
-
-    private static bool IsPlayerRelatedSlot(int index) => index is >= 0 && index <= MaxPlayerRelatedObjectIndex;
-
-    private static bool IsPlayerRelatedEvenSlot(int index) => IsPlayerRelatedSlot(index) && index % 2 == 0;
-
-    private static bool IsPlayerRelatedOddSlot(int index) => IsPlayerRelatedSlot(index) && index % 2 == 1;
-
-    private static bool IsLocalPlayerReservedSlot(int index) => index is 0 or 1;
 
     private static GameObject* FindPlayerObject(GameObjectManager* manager, PlayerObjectIdentity identity, int expectedIndex)
     {
@@ -480,44 +403,6 @@ internal sealed unsafe class PlayerCuller(
 
     public bool ConsumePlayerTopologyDirty() => playerTopologyDirtySignal.Consume();
 
-    private CullingRuntimeMode DetermineRuntimeMode(GameObjectManager* manager)
-    {
-        if (!IsCullingEnabled())
-        {
-            return CullingRuntimeMode.Disabled;
-        }
-
-        if (!playerState.IsLoaded || manager == null)
-        {
-            return CullingRuntimeMode.PlayerUnavailable;
-        }
-
-        if (ShouldSuspendCullingInDuty())
-        {
-            return CullingRuntimeMode.SuspendedDuty;
-        }
-
-        return ShouldSuspendCulling(manager) ? CullingRuntimeMode.SuspendedLowPlayerCount : CullingRuntimeMode.Active;
-    }
-
-    private void EnterInactiveMode(GameObjectManager* manager, HiddenObjectTracker hiddenObjects, bool clearLongTermRuleState)
-    {
-        if (manager != null)
-        {
-            RestoreHiddenObjects(manager, hiddenObjects);
-        }
-        else
-        {
-            hiddenObjects.Clear();
-        }
-
-        ClearPublishedPlayerVisibilityState();
-        if (clearLongTermRuleState)
-        {
-            playerKeepRules.Clear();
-        }
-    }
-
     private void ClearPublishedPlayerVisibilityState()
     {
         latestPlayerVisibilityReconciliation = null;
@@ -541,8 +426,6 @@ internal sealed class ShowTransitionBudget
     private double tokens = ShowTransitionCapacity;
     private long lastRefill = Environment.TickCount64;
     private int showStartsThisFrame;
-
-    public double CurrentTokens => tokens;
 
     public void BeginFrame()
     {

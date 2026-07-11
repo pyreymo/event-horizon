@@ -6,6 +6,19 @@ using System.Threading;
 
 namespace EventHorizon.Culling;
 
+internal static class PlayerObjectSlots
+{
+    public const int FirstPlayer = 2;
+    public const int LastPlayer = 198;
+    public const int LastPlayerRelated = 199;
+
+    public static bool IsPlayer(int index) => index is >= FirstPlayer and <= LastPlayer && index % 2 == 0;
+
+    public static bool IsAttached(int index) => index is >= 0 and <= LastPlayerRelated && index % 2 == 1;
+
+    public static bool IsLocalReserved(int index) => index is 0 or 1;
+}
+
 internal sealed class PlayerVisibilityAppliedState
 {
     private PlayerVisibilityFrameState? activeFrame;
@@ -80,7 +93,7 @@ internal sealed class PlayerVisibilityReconciler
 
         AddTransitions(actions, toShow, toHide);
 
-        return new PlayerVisibilityReconciliation(targetSet.Generation, [.. actions], toShow.Count, toHide.Count);
+        return new PlayerVisibilityReconciliation(targetSet.Generation, [.. actions]);
     }
 
     private static void AddTransitions(
@@ -127,12 +140,7 @@ internal sealed class PlayerVisibilityReconciler
     private static int CompareHidePriority(PlayerVisibilityTarget left, PlayerVisibilityTarget right) => CompareShowPriority(right, left);
 }
 
-internal sealed record PlayerVisibilityReconciliation(
-    int Generation,
-    IReadOnlyList<PlayerVisibilityAction> Actions,
-    int PendingShowCount,
-    int PendingHideCount
-);
+internal sealed record PlayerVisibilityReconciliation(int Generation, IReadOnlyList<PlayerVisibilityAction> Actions);
 
 internal readonly record struct PlayerVisibilityAction(
     PlayerVisibilityActionKind Kind,

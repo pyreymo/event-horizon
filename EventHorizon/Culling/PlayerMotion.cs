@@ -96,8 +96,6 @@ internal sealed class PlayerVelocityTracker<TKey>(PlayerVisibilitySelectionParam
     private readonly PlayerVisibilitySelectionParameters parameters = parameters ?? throw new ArgumentNullException(nameof(parameters));
     private readonly Dictionary<TKey, MotionState> states = [];
 
-    public int Count => states.Count;
-
     public PlayerVelocityEstimate AddSample(TimeSpan timestamp, TKey identity, Vector3 position)
     {
         if (!IsFinite(position))

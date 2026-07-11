@@ -6,8 +6,8 @@ namespace EventHorizon.Culling;
 
 internal sealed class PlayerAdmissionGate
 {
-    internal const int FirstPlayerSlot = 2;
-    internal const int LastPlayerSlot = 198;
+    internal const int FirstPlayerSlot = PlayerObjectSlots.FirstPlayer;
+    internal const int LastPlayerSlot = PlayerObjectSlots.LastPlayer;
     internal const int PlayerSlotStep = 2;
 
     private readonly PlayerSlotIdentityTracker slotTracker = new();
@@ -29,10 +29,6 @@ internal sealed class PlayerAdmissionGate
         ArgumentNullException.ThrowIfNull(hardHide);
         ConsumeRequestedReset();
         var changeCounts = slotTracker.Evaluate(currentSlots, changes);
-        var approvedCount = 0;
-        var hiddenCount = 0;
-        var failedCount = 0;
-        var reassertedCount = 0;
         newHolds.Clear();
         BuildCurrentSlotMap(currentSlots);
 
@@ -55,7 +51,6 @@ internal sealed class PlayerAdmissionGate
             if (appliedState.IsExplicitlyVisible(currentIdentity, change.Slot))
             {
                 admissionHolds.Remove(currentIdentity);
-                approvedCount++;
                 continue;
             }
 
@@ -98,33 +93,14 @@ internal sealed class PlayerAdmissionGate
                 try
                 {
                     hardHide(change);
-                    if (newHolds.Contains(identity))
-                    {
-                        hiddenCount++;
-                    }
-                    else
-                    {
-                        reassertedCount++;
-                    }
+                    if (newHolds.Contains(identity)) { }
+                    else { }
                 }
-                catch
-                {
-                    failedCount++;
-                }
+                catch { }
             }
         }
 
-        return new PlayerAdmissionUpdateResult(
-            changeCounts.BaselineEstablished,
-            changeCounts.AppearedCount,
-            changeCounts.ReplacedCount,
-            changeCounts.DisappearedCount,
-            approvedCount,
-            hiddenCount,
-            failedCount,
-            reassertedCount,
-            admissionHolds.Count
-        );
+        return new PlayerAdmissionUpdateResult(changeCounts.AppearedCount, changeCounts.ReplacedCount, changeCounts.DisappearedCount);
     }
 
     public void RequestReset()
@@ -316,14 +292,4 @@ internal readonly record struct PlayerAdmissionChangeCounts(
     int DisappearedCount
 );
 
-internal readonly record struct PlayerAdmissionUpdateResult(
-    bool BaselineEstablished,
-    int AppearedCount,
-    int ReplacedCount,
-    int DisappearedCount,
-    int ApprovedCount,
-    int HiddenCount,
-    int FailedCount,
-    int ReassertedCount,
-    int HoldCount
-);
+internal readonly record struct PlayerAdmissionUpdateResult(int AppearedCount, int ReplacedCount, int DisappearedCount);

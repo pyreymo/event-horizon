@@ -12,13 +12,17 @@ namespace EventHorizon.Culling;
 internal sealed unsafe class CullingController : IDisposable
 {
     private const int RefreshIntervalMs = 200;
-    private const VisibilityFlags HiddenFlags = (VisibilityFlags)0x1000 | VisibilityFlags.Nameplate | VisibilityFlags.Model;
+    internal const VisibilityFlags HiddenFlags = (VisibilityFlags)0x1000 | VisibilityFlags.Nameplate | VisibilityFlags.Model;
+    private readonly Configuration configuration;
+    private readonly IPlayerState playerState;
+    private readonly ICondition condition;
     private readonly PlayerCuller players;
     private readonly NonPlayerCuller nonPlayers;
     private readonly HiddenPlayerMarker hiddenPlayerMarker;
     private readonly PlayerPreview playerPreview;
     private readonly HiddenObjectTracker hiddenObjects = new();
     private readonly UpdateObjectArraysHook hook;
+    private readonly CullingRuntimeModeTransition runtimeModeTransition = new();
     private long nextRefresh;
 
     public CullingController(
@@ -33,6 +37,9 @@ internal sealed unsafe class CullingController : IDisposable
         IPluginLog log
     )
     {
+        this.configuration = configuration;
+        this.playerState = playerState;
+        this.condition = condition;
         players = new PlayerCuller(configuration, playerState, condition, objectTable, targetManager, gameGui, log);
         nonPlayers = new NonPlayerCuller(configuration);
         hiddenPlayerMarker = new HiddenPlayerMarker(configuration, gameGui, staticVfxController);
@@ -49,7 +56,7 @@ internal sealed unsafe class CullingController : IDisposable
     public void Update()
     {
         var manager = GameObjectManager.Instance();
-        var runtime = players.SynchronizeRuntimeMode(manager, hiddenObjects);
+        var runtime = SynchronizeRuntimeMode(manager);
         var topologyDirty = players.ConsumePlayerTopologyDirty();
         var now = Environment.TickCount64;
         var schedule = CullingFrameSchedule.Decide(runtime.Mode, runtime.RequiresRefresh || now >= nextRefresh, topologyDirty);
@@ -83,7 +90,7 @@ internal sealed unsafe class CullingController : IDisposable
         }
 
         var manager = GameObjectManager.Instance();
-        var runtime = players.SynchronizeRuntimeMode(manager, hiddenObjects);
+        var runtime = SynchronizeRuntimeMode(manager);
         if (runtime.Mode == CullingRuntimeMode.Active)
         {
             nonPlayers.Refresh(manager);
@@ -106,9 +113,69 @@ internal sealed unsafe class CullingController : IDisposable
     public void Dispose()
     {
         hook.Dispose();
-        players.Reset(GameObjectManager.Instance(), hiddenObjects);
+        RestoreAndClear(GameObjectManager.Instance());
         nonPlayers.Clear();
         hiddenPlayerMarker.Clear();
         playerPreview.Clear();
+    }
+
+    private CullingRuntimeSynchronization SynchronizeRuntimeMode(GameObjectManager* manager)
+    {
+        var nextMode = DetermineRuntimeMode(manager);
+        var transition = runtimeModeTransition.Synchronize(nextMode);
+        if (!transition.Changed)
+        {
+            return new(nextMode, RequiresRefresh: false);
+        }
+
+        if (transition.EnterInactive)
+        {
+            RestoreAndClear(manager, transition.ClearLongTermRules);
+        }
+        else if (transition.RebuildActive)
+        {
+            players.ClearPublishedState();
+        }
+
+        return new(nextMode, RequiresRefresh: transition.RebuildActive);
+    }
+
+    private CullingRuntimeMode DetermineRuntimeMode(GameObjectManager* manager)
+    {
+        if (!configuration.HideAllOtherPlayers)
+        {
+            return CullingRuntimeMode.Disabled;
+        }
+
+        if (!playerState.IsLoaded || manager == null)
+        {
+            return CullingRuntimeMode.PlayerUnavailable;
+        }
+
+        if (configuration.DisableInDuty && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]))
+        {
+            return CullingRuntimeMode.SuspendedDuty;
+        }
+
+        return
+            configuration.DisableCullingBelowPlayerCount
+            && ObjectTableStats.CountOtherPlayerObjects(manager) < configuration.DisableCullingPlayerCountThreshold
+            ? CullingRuntimeMode.SuspendedLowPlayerCount
+            : CullingRuntimeMode.Active;
+    }
+
+    private void RestoreAndClear(GameObjectManager* manager, bool clearLongTermRuleState = true)
+    {
+        if (manager != null)
+        {
+            hiddenObjects.RestoreAll(manager);
+        }
+        else
+        {
+            hiddenObjects.Clear();
+        }
+
+        hiddenObjects.Clear();
+        players.ClearState(clearLongTermRuleState);
     }
 }

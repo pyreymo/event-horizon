@@ -67,7 +67,13 @@ internal sealed unsafe class HiddenPlayerMarker(Configuration configuration, IGa
         liveIds.Clear();
     }
 
-    public void Clear() => staticVfxController.Clear();
+    public void Clear()
+    {
+        staticVfxController.Clear();
+        hiddenPlayerAddresses.Clear();
+        candidates.Clear();
+        liveIds.Clear();
+    }
 
     private static bool TryGetPosition(GameObject* gameObject, out Vector3 position)
     {

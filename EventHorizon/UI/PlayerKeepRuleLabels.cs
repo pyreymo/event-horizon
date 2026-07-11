@@ -1,7 +1,7 @@
 using EventHorizon.Culling;
 using EventHorizon.Localization;
 
-namespace EventHorizon.UI.Config;
+namespace EventHorizon.UI;
 
 internal static class PlayerKeepRuleLabels
 {

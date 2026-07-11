@@ -7,23 +7,16 @@ namespace EventHorizon.Culling;
 
 internal sealed unsafe class PlayerVisibilityPlan
 {
-    internal PlayerVisibilityPlan(
-        int generation,
-        long createdAtTickCount64,
-        IReadOnlyList<PlayerVisibilityPlanEntry> entries,
-        PlayerVisibilityClassificationCounts classificationCounts
-    )
+    internal PlayerVisibilityPlan(int generation, long createdAtTickCount64, IReadOnlyList<PlayerVisibilityPlanEntry> entries)
     {
         Generation = generation;
         CreatedAtTickCount64 = createdAtTickCount64;
         Entries = entries;
-        ClassificationCounts = classificationCounts;
     }
 
     public int Generation { get; }
     public long CreatedAtTickCount64 { get; }
     public IReadOnlyList<PlayerVisibilityPlanEntry> Entries { get; }
-    public PlayerVisibilityClassificationCounts ClassificationCounts { get; }
 
     public static PlayerVisibilityPlan Build(
         int generation,
@@ -34,11 +27,6 @@ internal sealed unsafe class PlayerVisibilityPlan
     )
     {
         entries.Clear();
-        var bypassVisibleCount = 0;
-        var competitiveCount = 0;
-        var forceHiddenCount = 0;
-        var unmanagedCount = 0;
-
         for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
         {
             var gameObject = manager->Objects.IndexSorted[index].Value;
@@ -63,35 +51,14 @@ internal sealed unsafe class PlayerVisibilityPlan
                 hasPosition
             );
             entries.Add(entry);
-
-            switch (classification)
-            {
-                case PlayerVisibilityClassification.BypassVisible:
-                    bypassVisibleCount++;
-                    break;
-                case PlayerVisibilityClassification.Competitive:
-                    competitiveCount++;
-                    break;
-                case PlayerVisibilityClassification.ForceHidden:
-                    forceHiddenCount++;
-                    break;
-                case PlayerVisibilityClassification.Unmanaged:
-                    unmanagedCount++;
-                    break;
-            }
         }
 
-        return new PlayerVisibilityPlan(
-            generation,
-            Environment.TickCount64,
-            [.. entries],
-            new PlayerVisibilityClassificationCounts(bypassVisibleCount, competitiveCount, forceHiddenCount, unmanagedCount)
-        );
+        return new PlayerVisibilityPlan(generation, Environment.TickCount64, [.. entries]);
     }
 
     private static PlayerVisibilityClassification Classify(int index, PlayerKeepDecision keepDecision, bool previewVisible)
     {
-        if (!IsPlayerRelatedEvenSlot(index) || IsLocalPlayerReservedSlot(index))
+        if (!PlayerObjectSlots.IsPlayer(index))
         {
             return PlayerVisibilityClassification.Unmanaged;
         }
@@ -110,12 +77,6 @@ internal sealed unsafe class PlayerVisibilityPlan
             _ => PlayerVisibilityClassification.ForceHidden,
         };
     }
-
-    private static bool IsPlayerRelatedSlot(int index) => index is >= 0 and <= 199;
-
-    private static bool IsPlayerRelatedEvenSlot(int index) => IsPlayerRelatedSlot(index) && index % 2 == 0;
-
-    private static bool IsLocalPlayerReservedSlot(int index) => index is 0 or 1;
 
     private static bool TryGetPosition(GameObject* gameObject, out Vector3 position)
     {
@@ -149,17 +110,11 @@ internal readonly record struct PlayerVisibilityPlanEntry(
     public bool IsManaged => Classification != PlayerVisibilityClassification.Unmanaged;
 }
 
-internal sealed class PlayerVisibilityTargetSet(
-    int generation,
-    long createdAtTickCount64,
-    IReadOnlyList<PlayerVisibilityTarget> targets,
-    PlayerVisibilityClassificationCounts classificationCounts
-)
+internal sealed class PlayerVisibilityTargetSet(int generation, long createdAtTickCount64, IReadOnlyList<PlayerVisibilityTarget> targets)
 {
     public int Generation { get; } = generation;
     public long CreatedAtTickCount64 { get; } = createdAtTickCount64;
     public IReadOnlyList<PlayerVisibilityTarget> Targets { get; } = targets;
-    public PlayerVisibilityClassificationCounts ClassificationCounts { get; } = classificationCounts;
 }
 
 file static class PlayerVisibilityLegacyTargetBuilder
@@ -186,7 +141,7 @@ file static class PlayerVisibilityLegacyTargetBuilder
             );
         }
 
-        return new PlayerVisibilityTargetSet(plan.Generation, plan.CreatedAtTickCount64, [.. targets], plan.ClassificationCounts);
+        return new PlayerVisibilityTargetSet(plan.Generation, plan.CreatedAtTickCount64, [.. targets]);
     }
 
     private static bool GetDesiredVisible(PlayerVisibilityPlanEntry entry) =>
@@ -208,8 +163,6 @@ internal readonly record struct PlayerVisibilityTarget(
     PlayerKeepDecision Decision,
     bool CutByBudget
 );
-
-internal readonly record struct PlayerVisibilityClassificationCounts(int BypassVisible, int Competitive, int ForceHidden, int Unmanaged);
 
 internal enum PlayerVisibilityClassification
 {
@@ -489,7 +442,7 @@ file static class PlayerVisibilityStableTargetBuilder
             );
         }
 
-        return new PlayerVisibilityTargetSet(plan.Generation, plan.CreatedAtTickCount64, [.. targets], plan.ClassificationCounts);
+        return new PlayerVisibilityTargetSet(plan.Generation, plan.CreatedAtTickCount64, [.. targets]);
     }
 }
 
