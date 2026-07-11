@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using Dalamud.Utility.Signatures;
@@ -14,22 +15,20 @@ internal enum ActorVfxScope
 
 internal sealed unsafe class ActorVfxController : IDisposable
 {
-    private const string ActorVfxCreateSig = "40 53 55 56 57 48 81 EC 08 02 00 00";
-    private const string ActorVfxRemoveSig =
-        "48 89 5C 24 ?? 57 48 83 EC 20 48 8D 05 ?? ?? ?? ?? 48 8B D9 ?? ?? ?? 8B FA 48 8D 05 ?? ?? ?? ?? 48 89 81 ?? ?? ?? ?? 48 8B 89 ?? ?? ?? ?? 48 85 C9 74 ?? ?? ?? ?? 48 8B D3";
+    private const string ActorVfxCreateSig =
+        "40 53 55 56 57 48 81 EC ?? ?? ?? ?? 0F 29 B4 24 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 ?? ?? ?? ?? 0F B6 AC 24 ?? ?? ?? ?? 0F 28 F3 49 8B F8";
+    private const string ActorVfxRemoveSig = "0F 11 48 10 48 8D 05";
 
     private readonly Dictionary<ActorVfxKey, ActiveVfx> activeVfx = [];
     private readonly IPluginLog log;
+    private readonly ActorVfxRemoveDelegate? actorVfxRemove;
     private readonly Hook<ActorVfxRemoveDelegate>? actorVfxRemoveHook;
     private bool disposed;
 
     [Signature(ActorVfxCreateSig)]
     private readonly ActorVfxCreateDelegate? actorVfxCreate = null;
 
-    [Signature(ActorVfxRemoveSig)]
-    private readonly nint actorVfxRemoveAddress = nint.Zero;
-
-    public ActorVfxController(IGameInteropProvider gameInteropProvider, IPluginLog log)
+    public ActorVfxController(IGameInteropProvider gameInteropProvider, ISigScanner sigScanner, IPluginLog log)
     {
         this.log = log;
 
@@ -37,14 +36,11 @@ internal sealed unsafe class ActorVfxController : IDisposable
         {
             gameInteropProvider.InitializeFromAttributes(this);
 
-            if (actorVfxRemoveAddress != nint.Zero)
-            {
-                actorVfxRemoveHook = gameInteropProvider.HookFromAddress<ActorVfxRemoveDelegate>(
-                    actorVfxRemoveAddress,
-                    ActorVfxRemoveDetour
-                );
-                actorVfxRemoveHook.Enable();
-            }
+            var actorVfxRemoveAddressTemp = sigScanner.ScanText(ActorVfxRemoveSig) + 7;
+            var actorVfxRemoveAddress = Marshal.ReadIntPtr(actorVfxRemoveAddressTemp + Marshal.ReadInt32(actorVfxRemoveAddressTemp) + 4);
+            actorVfxRemove = Marshal.GetDelegateForFunctionPointer<ActorVfxRemoveDelegate>(actorVfxRemoveAddress);
+            actorVfxRemoveHook = gameInteropProvider.HookFromAddress<ActorVfxRemoveDelegate>(actorVfxRemoveAddress, ActorVfxRemoveDetour);
+            actorVfxRemoveHook.Enable();
         }
         catch (Exception ex)
         {
@@ -145,7 +141,7 @@ internal sealed unsafe class ActorVfxController : IDisposable
 
     private void Create(ActorVfxKey key, nint casterAddress, nint targetAddress, string path)
     {
-        if (actorVfxCreate is null || actorVfxRemoveHook is null)
+        if (actorVfxCreate is null || actorVfxRemove is null || actorVfxRemoveHook is null)
         {
             return;
         }
@@ -159,14 +155,14 @@ internal sealed unsafe class ActorVfxController : IDisposable
 
     private void Remove(ActorVfxKey key)
     {
-        if (!activeVfx.Remove(key, out var active) || actorVfxRemoveHook is null)
+        if (!activeVfx.Remove(key, out var active) || actorVfxRemove is null)
         {
             return;
         }
 
         try
         {
-            actorVfxRemoveHook.Original((VfxObject*)active.VfxAddress, (char)1);
+            actorVfxRemove((VfxObject*)active.VfxAddress, (char)1);
         }
         catch (Exception ex)
         {
