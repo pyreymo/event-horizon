@@ -47,12 +47,9 @@ internal sealed unsafe class CullingController : IDisposable
     }
 
     public int HiddenPlayerCount => hiddenObjects.HiddenPlayerCount;
-    public PlayerKeepBudgetStats KeepBudgetStats => players.GetKeepBudgetStats();
     public PlayerPreviewSnapshot PlayerPreviewSnapshot => playerPreview.Snapshot;
-    public bool IsDutyCullingSuspended =>
-        configuration.HideAllOtherPlayers
-        && configuration.DisableInDuty
-        && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]);
+
+    public CullingStatus GetStatus() => BuildStatus(GameObjectManager.Instance());
 
     public void Enable() => hook.Enable();
 
@@ -162,16 +159,33 @@ internal sealed unsafe class CullingController : IDisposable
             return CullingRuntimeMode.PlayerUnavailable;
         }
 
-        if (configuration.DisableInDuty && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]))
+        var status = BuildStatus(manager);
+        if (status.SuspendedInDuty)
         {
             return CullingRuntimeMode.SuspendedDuty;
         }
 
-        return
-            configuration.DisableCullingBelowPlayerCount
-            && ObjectTableStats.CountOtherPlayerObjects(manager) < configuration.DisableCullingPlayerCountThreshold
-            ? CullingRuntimeMode.SuspendedLowPlayerCount
-            : CullingRuntimeMode.Active;
+        return status.SuspendedByLowPlayerCount ? CullingRuntimeMode.SuspendedLowPlayerCount : CullingRuntimeMode.Active;
+    }
+
+    private CullingStatus BuildStatus(GameObjectManager* manager)
+    {
+        var enabled = configuration.HideAllOtherPlayers;
+        var playerAvailable = playerState.IsLoaded && manager != null;
+        var otherPlayerCount = ObjectTableStats.CountOtherPlayerObjects(manager);
+        return new(
+            enabled,
+            playerAvailable,
+            enabled
+                && playerAvailable
+                && configuration.DisableInDuty
+                && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]),
+            enabled
+                && playerAvailable
+                && configuration.DisableCullingBelowPlayerCount
+                && otherPlayerCount < configuration.DisableCullingPlayerCountThreshold,
+            otherPlayerCount
+        );
     }
 
     private void RestoreAndClearAllState(GameObjectManager* manager)
@@ -208,3 +222,11 @@ internal sealed unsafe class CullingController : IDisposable
         players.ApplyAdmissionGate(manager, hiddenObjects);
     }
 }
+
+internal readonly record struct CullingStatus(
+    bool Enabled,
+    bool PlayerAvailable,
+    bool SuspendedInDuty,
+    bool SuspendedByLowPlayerCount,
+    int OtherPlayerCount
+);

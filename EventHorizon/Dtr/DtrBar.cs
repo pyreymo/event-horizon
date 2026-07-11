@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Gui.Dtr;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Plugin.Services;
@@ -14,7 +13,7 @@ internal sealed class DtrBar : IDisposable
 {
     private const int RefreshIntervalMs = 1_000;
     private readonly Configuration configuration;
-    private readonly ICondition condition;
+    private readonly Func<CullingStatus> getCullingStatus;
     private readonly Action<bool> setPlayerHidingEnabled;
     private readonly Action openSettings;
     private readonly IDtrBar dtrBar;
@@ -24,13 +23,13 @@ internal sealed class DtrBar : IDisposable
     public DtrBar(
         IDtrBar dtrBar,
         Configuration configuration,
-        ICondition condition,
+        Func<CullingStatus> getCullingStatus,
         Action<bool> setPlayerHidingEnabled,
         Action openSettings
     )
     {
         this.configuration = configuration;
-        this.condition = condition;
+        this.getCullingStatus = getCullingStatus;
         this.setPlayerHidingEnabled = setPlayerHidingEnabled;
         this.openSettings = openSettings;
         this.dtrBar = dtrBar;
@@ -123,21 +122,19 @@ internal sealed class DtrBar : IDisposable
 
     private DtrBarState GetState()
     {
-        if (!configuration.HideAllOtherPlayers)
+        var status = getCullingStatus();
+        if (!status.Enabled)
         {
             return new(false, []);
         }
 
         var pauseReasonKeys = new List<string>();
-        if (configuration.DisableInDuty && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]))
+        if (status.SuspendedInDuty)
         {
             pauseReasonKeys.Add("Dtr.PauseReason.InDuty");
         }
 
-        if (
-            configuration.DisableCullingBelowPlayerCount
-            && ObjectTableStats.CurrentOtherPlayerCount() < configuration.DisableCullingPlayerCountThreshold
-        )
+        if (status.SuspendedByLowPlayerCount)
         {
             pauseReasonKeys.Add("Dtr.PauseReason.LowPlayerCount");
         }

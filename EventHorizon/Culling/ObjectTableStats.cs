@@ -6,11 +6,6 @@ namespace EventHorizon.Culling;
 
 internal static unsafe class ObjectTableStats
 {
-    public static int CurrentOtherPlayerCount()
-    {
-        return CountOtherPlayerObjects(GameObjectManager.Instance());
-    }
-
     public static int CountPlayerObjects(GameObjectManager* manager)
     {
         if (manager == null)

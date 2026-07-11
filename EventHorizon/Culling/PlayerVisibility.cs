@@ -81,15 +81,10 @@ internal sealed class PlayerVisibilityAppliedState
 
 internal sealed record PlayerVisibilityFrameState
 {
-    public PlayerVisibilityFrameState(
-        PlayerVisibilityTargetSet activeTarget,
-        PlayerVisibilityReconciliation reconciliation,
-        PlayerKeepBudgetStats budgetStats
-    )
+    public PlayerVisibilityFrameState(PlayerVisibilityTargetSet activeTarget, PlayerVisibilityReconciliation reconciliation)
     {
         ActiveTarget = activeTarget;
         Reconciliation = reconciliation;
-        BudgetStats = budgetStats;
         VisibleSlots = activeTarget
             .Targets.Where(static target => target.DesiredVisible)
             .Select(static target => (target.Identity, target.ObjectIndex))
@@ -98,7 +93,6 @@ internal sealed record PlayerVisibilityFrameState
 
     public PlayerVisibilityTargetSet ActiveTarget { get; }
     public PlayerVisibilityReconciliation Reconciliation { get; }
-    public PlayerKeepBudgetStats BudgetStats { get; }
     public FrozenSet<(PlayerObjectIdentity Identity, int ObjectIndex)> VisibleSlots { get; }
 }
 

@@ -34,9 +34,8 @@ internal sealed class PlayerVisibilityPlanner(Action<Exception> reportSelectionF
         {
             reportFailure(resolution.FailureException);
         }
-        var budgetStats = CalculateBudgetStats(resolution.ActiveTarget, visiblePlayerCountLimit);
         var reconciliation = Reconcile(resolution.ActiveTarget, hiddenObjectTracker);
-        return new PlayerVisibilityFrameState(resolution.ActiveTarget, reconciliation, budgetStats);
+        return new PlayerVisibilityFrameState(resolution.ActiveTarget, reconciliation);
     }
 
     public void Commit(PlayerVisibilityFrameState frame) => selectionController.CommitAppliedTarget(frame.ActiveTarget);
@@ -178,25 +177,6 @@ internal sealed class PlayerVisibilityPlanner(Action<Exception> reportSelectionF
         }
 
         return new PlayerVisibilityTargetSet([.. stableTargetBuffer]);
-    }
-
-    private static PlayerKeepBudgetStats CalculateBudgetStats(PlayerVisibilityTargetSet activeTarget, int visiblePlayerCountLimit)
-    {
-        var bypassVisibleCount = 0;
-        var visibleCompetitiveCount = 0;
-        foreach (var target in activeTarget.Targets)
-        {
-            if (target.Classification == PlayerVisibilityClassification.BypassVisible && target.DesiredVisible)
-            {
-                bypassVisibleCount++;
-            }
-            else if (target.Classification == PlayerVisibilityClassification.Competitive && target.DesiredVisible)
-            {
-                visibleCompetitiveCount++;
-            }
-        }
-
-        return new(bypassVisibleCount, visibleCompetitiveCount, Math.Clamp(visiblePlayerCountLimit, 1, 100));
     }
 
     private PlayerVisibilityReconciliation Reconcile(PlayerVisibilityTargetSet targetSet, HiddenObjectTracker hiddenObjectTracker)

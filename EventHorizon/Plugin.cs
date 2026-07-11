@@ -98,7 +98,7 @@ public sealed class Plugin : IDalamudPlugin
     private TargetingMarkerController TargetingMarkerController { get; init; }
 
     public int HiddenPlayerCount => Culling.HiddenPlayerCount;
-    public bool IsDutyCullingSuspended => Culling.IsDutyCullingSuspended;
+    internal CullingStatus CullingStatus => Culling.GetStatus();
 
     #endregion
 
@@ -132,7 +132,7 @@ public sealed class Plugin : IDalamudPlugin
         );
         ConfigWindow = new ConfigWindow(this, DataManager, playerPreviewPanel, IsPlayerPreviewWindowOpen, TogglePlayerPreviewWindow);
         PlayerPreviewWindow = new PlayerPreviewWindow(playerPreviewPanel, OpenMainUi);
-        DtrStatusBar = new DtrBar(DtrBar, Configuration, Condition, SetPlayerHidingEnabled, ToggleConfigUi);
+        DtrStatusBar = new DtrBar(DtrBar, Configuration, Culling.GetStatus, SetPlayerHidingEnabled, ToggleConfigUi);
         DtrBackground = new DtrBackground(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
         LayoutGraphics = new LayoutGraphics(GameInteropProvider, ClientState, Log);
         TargetingMarkerController = new TargetingMarkerController(

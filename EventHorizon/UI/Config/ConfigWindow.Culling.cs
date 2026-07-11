@@ -168,10 +168,11 @@ public partial class ConfigWindow
 
     private void DrawStatusSummaryCard()
     {
-        var currentOtherPlayerCount = ObjectTableStats.CurrentOtherPlayerCount();
+        var cullingStatus = plugin.CullingStatus;
+        var currentOtherPlayerCount = cullingStatus.OtherPlayerCount;
         var hiddenPlayerCount = plugin.HiddenPlayerCount;
         var keptOtherPlayerCount = Math.Max(0, currentOtherPlayerCount - hiddenPlayerCount);
-        var suspensionReason = GetCullingSuspensionReason(currentOtherPlayerCount);
+        var suspensionReason = GetCullingSuspensionReason(cullingStatus);
 
         DrawCard(
             Loc.Text("Config.StatusSummary.Title"),
@@ -246,30 +247,23 @@ public partial class ConfigWindow
         return string.Format(Loc.Text("Config.StatusSummary.Fps.Value"), frameRate);
     }
 
-    private string GetCullingSuspensionReason(int currentOtherPlayerCount)
+    private string GetCullingSuspensionReason(CullingStatus status)
     {
-        if (plugin.IsDutyCullingSuspended)
+        if (status.SuspendedInDuty)
         {
             return Loc.Text("Config.DutyPauseReason");
         }
 
-        if (IsLowPlayerCountCullingSuspended(currentOtherPlayerCount))
+        if (status.SuspendedByLowPlayerCount)
         {
             return string.Format(
                 Loc.Text("Config.LowPlayerCountPauseReason"),
-                currentOtherPlayerCount,
+                status.OtherPlayerCount,
                 configuration.DisableCullingPlayerCountThreshold
             );
         }
 
         return string.Empty;
-    }
-
-    private bool IsLowPlayerCountCullingSuspended(int currentOtherPlayerCount)
-    {
-        return configuration.HideAllOtherPlayers
-            && configuration.DisableCullingBelowPlayerCount
-            && currentOtherPlayerCount < configuration.DisableCullingPlayerCountThreshold;
     }
 
     private void DrawLowPlayerCountRule()

@@ -303,12 +303,6 @@ internal sealed class PlayerKeepPlan
     }
 }
 
-internal readonly record struct PlayerKeepBudgetStats(
-    int BudgetExemptPlayerCount,
-    int VisibleBudgetedPlayerCount,
-    int VisibleBudgetedPlayerLimit
-);
-
 internal readonly record struct PlayerKeepCandidate(nint Address, PlayerKeepDecision KeepDecision, uint EntityId);
 
 internal enum PlayerKeepDecisionKind

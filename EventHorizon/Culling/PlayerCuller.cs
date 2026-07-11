@@ -37,7 +37,6 @@ internal sealed unsafe class PlayerCuller(
     private readonly PlayerObjectIdentity?[] playerAdmissionSlotIdentities = new PlayerObjectIdentity?[
         PlayerAdmissionGate.LastPlayerSlot + 1
     ];
-    private PlayerKeepBudgetStats keepBudgetStats;
     private PlayerVisibilityReconciliation? latestPlayerVisibilityReconciliation;
 
     #region Lifecycle
@@ -62,7 +61,6 @@ internal sealed unsafe class PlayerCuller(
             objectTable.LocalPlayer?.Position,
             hiddenObjects
         );
-        keepBudgetStats = frameState.BudgetStats;
         appliedVisibilityState.Publish(frameState);
         latestPlayerVisibilityReconciliation = frameState.Reconciliation;
         playerVisibilityPlanner.Commit(frameState);
@@ -261,7 +259,6 @@ internal sealed unsafe class PlayerCuller(
     public void ClearRuntimeState()
     {
         ShowTransitionBudget.Reset(showTransitionBudget);
-        keepBudgetStats = default;
         playerAdmissionGate.RequestReset();
         playerTopologyDirtySignal.Clear();
         appliedVisibilityState.Clear();
@@ -367,8 +364,6 @@ internal sealed unsafe class PlayerCuller(
         return TryGetObjectPosition(gameObject, out var position) && gameGui.WorldToScreen(position, out _, out var inView) && inView;
     }
 
-    public PlayerKeepBudgetStats GetKeepBudgetStats() => keepBudgetStats;
-
     public bool ConsumePlayerTopologyDirty() => playerTopologyDirtySignal.Consume();
 
     #endregion
@@ -381,7 +376,7 @@ internal sealed unsafe class PlayerCuller(
     }
 }
 
-static file class ShowTransitionBudget
+file static class ShowTransitionBudget
 {
     private const double ShowTransitionsPerSecond = 6.0;
     private const double ShowTransitionCapacity = 1.0;
