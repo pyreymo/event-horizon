@@ -95,7 +95,6 @@ public sealed class Plugin : IDalamudPlugin
     private WorldDotOverlay WorldDotOverlay { get; init; }
     private DtrBar DtrStatusBar { get; init; }
     private DtrBackground DtrBackground { get; init; }
-    private LayoutGraphics LayoutGraphics { get; init; }
     private TargetingMarkerController TargetingMarkerController { get; init; }
 
     public int HiddenPlayerCount => Culling.HiddenPlayerCount;
@@ -137,7 +136,6 @@ public sealed class Plugin : IDalamudPlugin
         PlayerPreviewWindow = new PlayerPreviewWindow(playerPreviewPanel, OpenMainUi);
         DtrStatusBar = new DtrBar(DtrBar, Configuration, Culling.GetStatus, SetPlayerHidingEnabled, ToggleConfigUi);
         DtrBackground = new DtrBackground(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
-        LayoutGraphics = new LayoutGraphics(ClientState);
         TargetingMarkerController = new TargetingMarkerController(
             AddonLifecycle,
             GameGui,
@@ -181,7 +179,6 @@ public sealed class Plugin : IDalamudPlugin
 
         windowSystem.RemoveAllWindows();
         TargetingMarkerController.Dispose();
-        LayoutGraphics.Dispose();
         DtrBackground.Dispose();
         DtrStatusBar.Dispose();
         Culling.Dispose();
@@ -275,7 +272,6 @@ public sealed class Plugin : IDalamudPlugin
     private void OnFrameworkUpdate(IFramework framework)
     {
         DtrStatusBar.Update();
-        LayoutGraphics.Update(Configuration.HideBgPartGraphicsObjects);
         PlayerPreviewHighlighter.Update();
 
         Culling.Update();

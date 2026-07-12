@@ -30,8 +30,6 @@ internal class Configuration : IPluginConfiguration
     public byte HiddenPlayerMarkerDotColorBlue { get; set; } = 158;
     public byte HiddenPlayerMarkerDotColorAlpha { get; set; } = 180;
     public float HiddenPlayerMarkerDotRadius { get; set; } = 5f;
-    public bool HideBgPartGraphicsObjects { get; set; } = false;
-    public bool HideTerrainGraphicsObjects { get; set; } = false;
     public bool EnableTargetingMeMarker { get; set; } = false;
     public bool EnableTargetingMeNamePlateMarker { get; set; } = true;
     public bool EnableTargetingMeDotMarker { get; set; } = false;
