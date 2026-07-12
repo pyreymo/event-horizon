@@ -24,9 +24,9 @@
     "DownloadLinkUpdate": "https://github.com/pyreymo/event-horizon/releases/download/v0.3.1/EventHorizon.zip",
     "LastUpdate": 1783765857,
     "Changelog": "- Added an option to show FPS in the server info bar alongside EH: ON/OFF, making it easier to compare frame rate changes when toggling Event Horizon.\n- Added an optional dark background for the server info bar. Protect your eyes, one UI element at a time.",
-    "TestingAssemblyVersion": "0.3.2.1",
+    "TestingAssemblyVersion": "0.3.2.2",
     "TestingChangelog": "- Rebuilt player visibility around a deterministic, motion-aware Stable Top-B selector and a stricter admission gate, keeping crowded scenes steadier and preventing newly populated player slots from briefly flashing before selection.\n- Reworked culling ownership and cleanup to handle slot reuse, suspension, configuration changes, and plugin unload more reliably.\n- Added hiding for other players' battle pets and an experimental cleanup rule for certain non-targetable or dialogue-only Event NPCs. Both options are enabled by default.\n- Added configurable lightweight dot markers for hidden players and players targeting you. Targeting-me markers now support nameplate, dot, and VFX modes independently.\n- Added optional controls for hiding the current area's BG Part graphics and terrain rendering.\n- Removed player fade animations to reduce runtime overhead; visibility changes now switch directly while player reveals remain rate-limited.",
     "TestingDalamudApiLevel": 15,
-    "DownloadLinkTesting": "https://github.com/pyreymo/event-horizon/releases/download/v0.3.2.1/EventHorizon.zip"
+    "DownloadLinkTesting": "https://github.com/pyreymo/event-horizon/releases/download/v0.3.2.2/EventHorizon.zip"
   }
 ]
