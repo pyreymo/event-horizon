@@ -1,128 +1,335 @@
 name: Release
 
 on:
-    push:
-        tags:
-            - "v*"
+  push:
+    tags:
+      - "v*"
 
 permissions:
-    contents: write
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-    build:
-        runs-on: windows-2022
+  publish-testing:
+    name: Build once and publish to Testing
+    runs-on: windows-2022
 
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v5
-              with:
-                  submodules: recursive
-                  fetch-depth: 0
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 0
 
-            - name: Install .NET
-              uses: actions/setup-dotnet@v5
-              with:
-                  dotnet-version: 10.0.x
+      - name: Resolve version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') {
+              throw "Tag must look like v0.3.2 or v0.3.2.0. Got: ${{ github.ref_name }}"
+          }
 
-            - name: Download Dalamud
-              shell: pwsh
-              run: |
-                  Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
-                  Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
+          "version=$version" >> $env:GITHUB_OUTPUT
 
-            - name: Build
-              run: dotnet build .\EventHorizon\EventHorizon.csproj --configuration Release -p:Platform=x64
+      - name: Verify tagged commit is on master
+        shell: pwsh
+        run: |
+          git fetch origin master
+          git merge-base --is-ancestor "$env:GITHUB_SHA" "origin/master"
+          if ($LASTEXITCODE -ne 0) {
+              throw "Tagged commit $env:GITHUB_SHA is not contained in origin/master."
+          }
 
-            - name: Prepare release files
-              shell: pwsh
-              run: |
-                  $zip = Get-ChildItem ".\EventHorizon\bin" -Recurse -Filter "latest.zip" | Select-Object -First 1
+      - name: Install .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
 
-                  if (-not $zip) {
-                      Write-Host "Could not find latest.zip. Dumping bin tree:"
-                      Get-ChildItem ".\EventHorizon\bin" -Recurse | Select-Object FullName
-                      exit 1
+      - name: Download Dalamud
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
+          Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
+
+      - name: Build
+        run: >-
+          dotnet build .\EventHorizon\EventHorizon.csproj
+          --configuration Release
+          -p:Platform=x64
+          -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Prepare and verify release files
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem ".\EventHorizon\bin" -Recurse -Filter "latest.zip" |
+              Sort-Object LastWriteTimeUtc -Descending |
+              Select-Object -First 1
+          if (-not $zip) {
+              Get-ChildItem ".\EventHorizon\bin" -Recurse | Select-Object FullName
+              throw "Could not find latest.zip."
+          }
+
+          $manifestPath = Join-Path $zip.Directory.FullName "EventHorizon.json"
+          if (-not (Test-Path $manifestPath)) {
+              Get-ChildItem $zip.Directory.FullName | Select-Object FullName
+              throw "Could not find EventHorizon.json next to latest.zip."
+          }
+
+          Copy-Item $zip.FullName ".\EventHorizon.zip"
+          Copy-Item $manifestPath ".\EventHorizon.generated.json"
+
+          $manifest = Get-Content ".\EventHorizon.generated.json" -Raw | ConvertFrom-Json
+          $tagText = "${{ steps.version.outputs.version }}"
+          $tagVersion = [version]$(if ($tagText.Split('.').Count -eq 3) { "$tagText.0" } else { $tagText })
+          $assemblyVersion = [version]$manifest.AssemblyVersion
+          if ($assemblyVersion -ne $tagVersion) {
+              throw "Built AssemblyVersion $assemblyVersion does not match tag version $tagVersion."
+          }
+
+      - name: Create GitHub prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          generate_release_notes: true
+          overwrite_files: false
+          fail_on_unmatched_files: true
+          files: |
+            EventHorizon.zip
+            EventHorizon.generated.json
+
+      - name: Verify published assets match this build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $downloadDirectory = ".\published-assets"
+          New-Item -ItemType Directory -Force $downloadDirectory | Out-Null
+
+          gh release download "${{ github.ref_name }}" `
+              --dir $downloadDirectory `
+              --pattern "EventHorizon.zip"
+          if ($LASTEXITCODE -ne 0) {
+              throw "Failed to download the published EventHorizon.zip."
+          }
+
+          gh release download "${{ github.ref_name }}" `
+              --dir $downloadDirectory `
+              --pattern "EventHorizon.generated.json"
+          if ($LASTEXITCODE -ne 0) {
+              throw "Failed to download the published EventHorizon.generated.json."
+          }
+
+          foreach ($name in @("EventHorizon.zip", "EventHorizon.generated.json")) {
+              $localPath = Join-Path "." $name
+              $publishedPath = Join-Path $downloadDirectory $name
+              if (-not (Test-Path $publishedPath)) {
+                  throw "Published release asset is missing: $name"
+              }
+
+              $localHash = (Get-FileHash $localPath -Algorithm SHA256).Hash
+              $publishedHash = (Get-FileHash $publishedPath -Algorithm SHA256).Hash
+              if ($localHash -ne $publishedHash) {
+                  throw "Published asset $name does not match this workflow build."
+              }
+
+              Write-Host "$name verified: $localHash"
+          }
+
+      - name: Publish Testing channel metadata
+        shell: pwsh
+        run: |
+          git fetch origin master
+          git checkout -B master origin/master
+
+          function Set-JsonProp($obj, $name, $value) {
+              if ($obj.PSObject.Properties[$name]) {
+                  $obj.$name = $value
+              } else {
+                  $obj | Add-Member -NotePropertyName $name -NotePropertyValue $value
+              }
+          }
+
+          $generated = Get-Content ".\EventHorizon.generated.json" -Raw | ConvertFrom-Json
+          $repo = @(Get-Content ".\repo.json" -Raw | ConvertFrom-Json)
+          $entry = $repo | Where-Object { $_.InternalName -eq $generated.InternalName } | Select-Object -First 1
+          if (-not $entry) {
+              throw "Could not find $($generated.InternalName) in repo.json."
+          }
+
+          $testingVersion = [version]$generated.AssemblyVersion
+          $stableVersion = [version]$entry.AssemblyVersion
+          if ($testingVersion -le $stableVersion) {
+              throw "Testing version $testingVersion must be greater than stable version $stableVersion."
+          }
+
+          $currentTestingProperty = $entry.PSObject.Properties["TestingAssemblyVersion"]
+          if ($currentTestingProperty -and $currentTestingProperty.Value) {
+              $currentTestingVersion = [version]$currentTestingProperty.Value
+              if ($testingVersion -lt $currentTestingVersion) {
+                  throw "Testing version $testingVersion must not be lower than the currently published testing version $currentTestingVersion."
+              }
+          }
+
+          $releaseBase = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+          Set-JsonProp $entry "TestingAssemblyVersion" $generated.AssemblyVersion
+          Set-JsonProp $entry "TestingChangelog" $generated.Changelog
+          Set-JsonProp $entry "TestingDalamudApiLevel" $generated.DalamudApiLevel
+          Set-JsonProp $entry "DownloadLinkTesting" "$releaseBase/EventHorizon.zip"
+
+          ConvertTo-Json -InputObject ([object[]]$repo) -Depth 20 | Set-Content ".\repo.json" -Encoding UTF8
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add repo.json
+
+          git diff --cached --quiet
+          switch ($LASTEXITCODE) {
+              0 {
+                  Write-Host "repo.json unchanged."
+              }
+              1 {
+                  git commit -m "Publish ${{ github.ref_name }} to Testing channel"
+                  if ($LASTEXITCODE -ne 0) {
+                      throw "Failed to commit repo.json."
                   }
 
-                  $packageDir = $zip.Directory.FullName
-                  Write-Host "Package directory: $packageDir"
+                  git push origin master
+                  if ($LASTEXITCODE -ne 0) {
+                      throw "Failed to push repo.json."
+                  }
+              }
+              default {
+                  throw "git diff --cached --quiet failed with exit code $LASTEXITCODE."
+              }
+          }
 
-                  Copy-Item $zip.FullName ".\EventHorizon.zip"
+  promote:
+    name: Promote the tested ZIP to stable
+    needs: publish-testing
+    runs-on: windows-2022
+    environment: release-approval
 
-                  $manifest = Join-Path $packageDir "EventHorizon.json"
-                  if (-not (Test-Path $manifest)) {
-                      Write-Host "Could not find EventHorizon.json next to latest.zip. Dumping package dir:"
-                      Get-ChildItem $packageDir | Select-Object FullName
-                      exit 1
+    steps:
+      - name: Checkout current repository metadata
+        uses: actions/checkout@v5
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Download the exact prerelease metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: gh release download "${{ github.ref_name }}" --pattern "EventHorizon.generated.json"
+
+      - name: Promote Testing metadata to stable
+        shell: pwsh
+        run: |
+          git pull --rebase origin master
+
+          function Set-JsonProp($obj, $name, $value) {
+              if ($obj.PSObject.Properties[$name]) {
+                  $obj.$name = $value
+              } else {
+                  $obj | Add-Member -NotePropertyName $name -NotePropertyValue $value
+              }
+          }
+
+          $generated = Get-Content ".\EventHorizon.generated.json" -Raw | ConvertFrom-Json
+          $repo = @(Get-Content ".\repo.json" -Raw | ConvertFrom-Json)
+          $entry = $repo | Where-Object { $_.InternalName -eq $generated.InternalName } | Select-Object -First 1
+          if (-not $entry) {
+              throw "Could not find $($generated.InternalName) in repo.json."
+          }
+
+          $candidateVersion = [version]$generated.AssemblyVersion
+          $stableVersion = [version]$entry.AssemblyVersion
+          $releaseBase = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+          $expectedZipUrl = "$releaseBase/EventHorizon.zip"
+
+          if ($stableVersion -gt $candidateVersion) {
+              throw "Cannot promote stale candidate $candidateVersion because stable is already $stableVersion."
+          }
+
+          $alreadyPromoted =
+              $stableVersion -eq $candidateVersion -and
+              $entry.DownloadLinkInstall -eq $expectedZipUrl -and
+              $entry.DownloadLinkUpdate -eq $expectedZipUrl
+
+          if ($alreadyPromoted) {
+              Write-Host "$candidateVersion is already stable. Preserving LastUpdate."
+          } else {
+              $testingVersionProperty = $entry.PSObject.Properties["TestingAssemblyVersion"]
+              $testingApiProperty = $entry.PSObject.Properties["TestingDalamudApiLevel"]
+              $testingLinkProperty = $entry.PSObject.Properties["DownloadLinkTesting"]
+
+              if (-not $testingVersionProperty -or -not $testingVersionProperty.Value) {
+                  throw "repo.json has no TestingAssemblyVersion to promote."
+              }
+
+              if ([version]$testingVersionProperty.Value -ne $candidateVersion) {
+                  throw "Testing channel contains $($testingVersionProperty.Value), not candidate $candidateVersion."
+              }
+
+              if (-not $testingApiProperty -or [int]$testingApiProperty.Value -ne [int]$generated.DalamudApiLevel) {
+                  throw "TestingDalamudApiLevel does not match the candidate manifest."
+              }
+
+              if (-not $testingLinkProperty -or $testingLinkProperty.Value -ne $expectedZipUrl) {
+                  throw "DownloadLinkTesting does not point to this candidate release."
+              }
+
+              foreach ($prop in $generated.PSObject.Properties) {
+                  Set-JsonProp $entry $prop.Name $prop.Value
+              }
+
+              Set-JsonProp $entry "DownloadLinkInstall" $expectedZipUrl
+              Set-JsonProp $entry "DownloadLinkUpdate" $expectedZipUrl
+              Set-JsonProp $entry "LastUpdate" ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())
+
+              foreach ($name in @(
+                  "TestingAssemblyVersion",
+                  "TestingChangelog",
+                  "TestingDalamudApiLevel",
+                  "DownloadLinkTesting"
+              )) {
+                  $entry.PSObject.Properties.Remove($name)
+              }
+          }
+
+          ConvertTo-Json -InputObject ([object[]]$repo) -Depth 20 | Set-Content ".\repo.json" -Encoding UTF8
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add repo.json
+
+          git diff --cached --quiet
+          switch ($LASTEXITCODE) {
+              0 {
+                  Write-Host "repo.json unchanged."
+              }
+              1 {
+                  git commit -m "Promote ${{ github.ref_name }} to stable"
+                  if ($LASTEXITCODE -ne 0) {
+                      throw "Failed to commit repo.json."
                   }
 
-                  Copy-Item $manifest ".\EventHorizon.generated.json"
-                  Copy-Item $manifest "$env:RUNNER_TEMP\EventHorizon.generated.json"
-
-            - name: Create GitHub Release
-              uses: softprops/action-gh-release@v2
-              with:
-                  files: |
-                      EventHorizon.zip
-                      EventHorizon.generated.json
-
-            - name: Update repo.json
-              shell: pwsh
-              run: |
-                  git checkout master
-
-                  function Set-JsonProp($obj, $name, $value) {
-                      if ($obj.PSObject.Properties[$name]) {
-                          $obj.$name = $value
-                      } else {
-                          $obj | Add-Member -NotePropertyName $name -NotePropertyValue $value
-                      }
+                  git push origin master
+                  if ($LASTEXITCODE -ne 0) {
+                      throw "Failed to push repo.json."
                   }
+              }
+              default {
+                  throw "git diff --cached --quiet failed with exit code $LASTEXITCODE."
+              }
+          }
 
-                  function Copy-JsonProps($source, $target) {
-                      foreach ($prop in $source.PSObject.Properties) {
-                          Set-JsonProp $target $prop.Name $prop.Value
-                      }
-                  }
-
-                  $generated = Get-Content "$env:RUNNER_TEMP\EventHorizon.generated.json" -Raw | ConvertFrom-Json
-
-                  if (Test-Path ".\repo.json") {
-                      $repo = @(Get-Content ".\repo.json" -Raw | ConvertFrom-Json)
-                      $entry = $repo | Where-Object { $_.InternalName -eq $generated.InternalName } | Select-Object -First 1
-
-                      if (-not $entry) {
-                          $entry = [pscustomobject]@{}
-                          $repo += $entry
-                      }
-                  } else {
-                      $entry = [pscustomobject]@{}
-                      $repo = @($entry)
-                  }
-
-                  # Preserve handwritten fields already present in repo.json, then overwrite with generated manifest fields.
-                  Copy-JsonProps $generated $entry
-
-                  $releaseBase = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
-
-                  Set-JsonProp $entry "DownloadLinkInstall" "$releaseBase/EventHorizon.zip"
-                  Set-JsonProp $entry "DownloadLinkUpdate" "$releaseBase/EventHorizon.zip"
-                  Set-JsonProp $entry "LastUpdate" ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())
-
-                  ConvertTo-Json -InputObject ([object[]]$repo) -Depth 20 | Set-Content ".\repo.json" -Encoding UTF8
-
-            - name: Commit repo.json
-              shell: pwsh
-              run: |
-                  git config user.name "github-actions[bot]"
-                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-                  git add repo.json
-
-                  if (git diff --cached --quiet) {
-                      Write-Host "repo.json unchanged."
-                  } else {
-                      git commit -m "Update repo.json for ${{ github.ref_name }}"
-                      git push origin master
-                  }
-
+      - name: Promote GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: gh release edit "${{ github.ref_name }}" --prerelease=false --latest
