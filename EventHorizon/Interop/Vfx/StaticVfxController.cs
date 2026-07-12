@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using Dalamud.Utility.Signatures;
@@ -20,20 +21,27 @@ internal enum StaticVfxScope
 
 internal sealed unsafe class StaticVfxController : IDisposable
 {
+    private static readonly TimeSpan CallbackDrainTimeout = TimeSpan.FromSeconds(2);
     private const float PositionEpsilonSq = 0.0001f;
     private const float RotationEpsilon = 0.001f;
     private const string StaticVfxPoolName = "Client.System.Scheduler.Instance.VfxObject";
     private const string StaticVfxRunSig = "E8 ?? ?? ?? ?? B0 02 EB 02";
     private const string StaticVfxRemoveSig =
         "40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 74 28 33 D2 E8 ?? ?? ?? ?? 48 8B 8B ?? ?? ?? ?? 48 85 C9";
+
+    private readonly Lock activeVfxSync = new();
+    private readonly Lock pathBytesSync = new();
     private readonly Dictionary<StaticVfxKey, ActiveStaticVfx> activeVfx = [];
     private readonly Dictionary<string, byte[]> vfxPathBytes = [];
     private readonly byte[] staticVfxPoolNameBytes = GetNullTerminatedUtf8Bytes(StaticVfxPoolName);
     private readonly IPluginLog log;
+    private readonly HookCallbackTracker callbackTracker;
     private readonly VfxObject.Delegates.Create? staticVfxCreate;
+    private StaticVfxRemoveDelegate? staticVfxRemoveOriginal;
     private readonly Hook<StaticVfxRemoveDelegate>? staticVfxRemoveHook;
-    private bool loggedInteropUnavailable;
-    private bool disposed;
+    private int hookReady;
+    private int loggedInteropUnavailable;
+    private int disposed;
 
     [Signature(StaticVfxRunSig)]
     private readonly StaticVfxRunDelegate? staticVfxRun = null;
@@ -41,7 +49,9 @@ internal sealed unsafe class StaticVfxController : IDisposable
     public StaticVfxController(IGameInteropProvider gameInteropProvider, ISigScanner sigScanner, IPluginLog log)
     {
         this.log = log;
+        callbackTracker = new HookCallbackTracker(nameof(StaticVfxController), log);
 
+        Hook<StaticVfxRemoveDelegate>? createdHook = null;
         try
         {
             gameInteropProvider.InitializeFromAttributes(this);
@@ -50,15 +60,28 @@ internal sealed unsafe class StaticVfxController : IDisposable
             staticVfxCreate = Marshal.GetDelegateForFunctionPointer<VfxObject.Delegates.Create>(staticVfxCreateAddress);
 
             var staticVfxRemoveAddress = sigScanner.ScanText(StaticVfxRemoveSig);
-            staticVfxRemoveHook = gameInteropProvider.HookFromAddress<StaticVfxRemoveDelegate>(
-                staticVfxRemoveAddress,
-                StaticVfxRemoveDetour
-            );
-            staticVfxRemoveHook.Enable();
+            createdHook = gameInteropProvider.HookFromAddress<StaticVfxRemoveDelegate>(staticVfxRemoveAddress, StaticVfxRemoveDetour);
+            Volatile.Write(ref staticVfxRemoveOriginal, createdHook.Original);
+            staticVfxRemoveHook = createdHook;
+            callbackTracker.MarkReady();
+            createdHook.Enable();
+            Volatile.Write(ref hookReady, 1);
         }
         catch (Exception ex)
         {
-            log.Warning(ex, "Failed to initialize static VFX interop.");
+            callbackTracker.ReportException(ex, "initialize static VFX interop");
+            Volatile.Write(ref hookReady, 0);
+            callbackTracker.BeginStop();
+            try
+            {
+                createdHook?.Dispose();
+            }
+            catch (Exception disposeException)
+            {
+                callbackTracker.ReportException(disposeException, "dispose partially initialized static VFX hook");
+            }
+
+            callbackTracker.MarkStopped();
         }
     }
 
@@ -68,26 +91,52 @@ internal sealed unsafe class StaticVfxController : IDisposable
 
     public bool IsActive(StaticVfxScope scope, ulong gameObjectId, string path)
     {
-        return activeVfx.TryGetValue(new(scope, gameObjectId), out var active) && active.Path == path && active.VfxAddress != nint.Zero;
+        lock (activeVfxSync)
+        {
+            return activeVfx.TryGetValue(new(scope, gameObjectId), out var active) && active.Path == path && active.VfxAddress != nint.Zero;
+        }
     }
 
     public void ShowOrUpdate(StaticVfxScope scope, ulong gameObjectId, string path, SystemVector3 position, float rotation = 0f)
     {
-        if (disposed || gameObjectId == 0 || string.IsNullOrEmpty(path))
+        if (Volatile.Read(ref disposed) != 0 || gameObjectId == 0 || string.IsNullOrEmpty(path))
         {
             return;
         }
 
         var key = new StaticVfxKey(scope, gameObjectId);
-        if (activeVfx.TryGetValue(key, out var active) && active.Path == path && active.VfxAddress != nint.Zero)
+        ActiveStaticVfx? existing = null;
+        lock (activeVfxSync)
         {
-            if (active.IsSameTransform(position, rotation))
+            if (activeVfx.TryGetValue(key, out var active) && active.Path == path && active.VfxAddress != nint.Zero)
+            {
+                existing = active;
+            }
+        }
+
+        if (existing is { } current)
+        {
+            if (current.IsSameTransform(position, rotation))
             {
                 return;
             }
 
-            UpdateTransform((VfxObject*)active.VfxAddress, position, rotation);
-            activeVfx[key] = active with { Position = position, Rotation = rotation };
+            try
+            {
+                UpdateTransform((VfxObject*)current.VfxAddress, position, rotation);
+                lock (activeVfxSync)
+                {
+                    if (activeVfx.TryGetValue(key, out var latest) && latest.VfxAddress == current.VfxAddress)
+                    {
+                        activeVfx[key] = latest with { Position = position, Rotation = rotation };
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                SafeWarning(ex, "[HiddenVfx] Failed to update static VFX transform.");
+            }
+
             return;
         }
 
@@ -97,17 +146,16 @@ internal sealed unsafe class StaticVfxController : IDisposable
 
     public void PruneScopeExcept(StaticVfxScope scope, HashSet<ulong> gameObjectIds)
     {
-        if (activeVfx.Count == 0)
+        List<StaticVfxKey> keysToRemove;
+        lock (activeVfxSync)
         {
-            return;
-        }
-
-        var keysToRemove = new List<StaticVfxKey>();
-        foreach (var key in activeVfx.Keys)
-        {
-            if (key.Scope == scope && !gameObjectIds.Contains(key.GameObjectId))
+            keysToRemove = [];
+            foreach (var key in activeVfx.Keys)
             {
-                keysToRemove.Add(key);
+                if (key.Scope == scope && !gameObjectIds.Contains(key.GameObjectId))
+                {
+                    keysToRemove.Add(key);
+                }
             }
         }
 
@@ -119,17 +167,16 @@ internal sealed unsafe class StaticVfxController : IDisposable
 
     public void ClearScope(StaticVfxScope scope)
     {
-        if (activeVfx.Count == 0)
+        List<StaticVfxKey> keysToRemove;
+        lock (activeVfxSync)
         {
-            return;
-        }
-
-        var keysToRemove = new List<StaticVfxKey>();
-        foreach (var key in activeVfx.Keys)
-        {
-            if (key.Scope == scope)
+            keysToRemove = [];
+            foreach (var key in activeVfx.Keys)
             {
-                keysToRemove.Add(key);
+                if (key.Scope == scope)
+                {
+                    keysToRemove.Add(key);
+                }
             }
         }
 
@@ -141,12 +188,17 @@ internal sealed unsafe class StaticVfxController : IDisposable
 
     public void Clear()
     {
-        if (activeVfx.Count == 0)
+        List<StaticVfxKey> keys;
+        lock (activeVfxSync)
         {
-            return;
+            if (activeVfx.Count == 0)
+            {
+                return;
+            }
+
+            keys = [.. activeVfx.Keys];
         }
 
-        var keys = new List<StaticVfxKey>(activeVfx.Keys);
         foreach (var key in keys)
         {
             Remove(key);
@@ -155,40 +207,69 @@ internal sealed unsafe class StaticVfxController : IDisposable
 
     public void Dispose()
     {
-        if (disposed)
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
         {
             return;
         }
 
+        Volatile.Write(ref hookReady, 0);
+        callbackTracker.BeginStop();
+        try
+        {
+            staticVfxRemoveHook?.Disable();
+        }
+        catch (Exception ex)
+        {
+            callbackTracker.ReportException(ex, "disable static VFX remove hook");
+        }
+
+        callbackTracker.WaitForDrain(CallbackDrainTimeout);
         Clear();
-        staticVfxRemoveHook?.Dispose();
-        disposed = true;
+
+        try
+        {
+            staticVfxRemoveHook?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            callbackTracker.ReportException(ex, "dispose static VFX remove hook");
+        }
+        finally
+        {
+            callbackTracker.MarkStopped();
+        }
     }
 
     private void Create(StaticVfxKey key, string path, SystemVector3 position, float rotation)
     {
         var create = staticVfxCreate;
         var run = staticVfxRun;
-        if (create is null || run is null || staticVfxRemoveHook is null)
+        var removeOriginal = Volatile.Read(ref staticVfxRemoveOriginal);
+        if (
+            Volatile.Read(ref disposed) != 0
+            || Volatile.Read(ref hookReady) == 0
+            || create is null
+            || run is null
+            || removeOriginal is null
+        )
         {
-            if (!loggedInteropUnavailable)
+            if (Interlocked.Exchange(ref loggedInteropUnavailable, 1) == 0)
             {
-                log.Warning(
-                    "[HiddenVfx] Static VFX interop unavailable. createReady={CreateReady} runReady={RunReady} removeHookReady={RemoveHookReady}",
+                SafeWarning(
+                    "[HiddenVfx] Static VFX interop unavailable. createReady={CreateReady} runReady={RunReady} removeReady={RemoveReady}",
                     create is not null,
                     run is not null,
-                    staticVfxRemoveHook is not null
+                    removeOriginal is not null
                 );
-                loggedInteropUnavailable = true;
             }
 
             return;
         }
 
+        VfxObject* vfx = null;
         try
         {
             var pathBytes = GetPathBytes(path);
-            VfxObject* vfx;
             fixed (byte* pathPtr = pathBytes)
             fixed (byte* poolPtr = staticVfxPoolNameBytes)
             {
@@ -197,33 +278,67 @@ internal sealed unsafe class StaticVfxController : IDisposable
 
             if (vfx == null)
             {
-                log.Warning("[HiddenVfx] VfxObject.Create returned null. gameObjectId={GameObjectId} path={Path}", key.GameObjectId, path);
+                SafeWarning("[HiddenVfx] VfxObject.Create returned null. gameObjectId={GameObjectId} path={Path}", key.GameObjectId, path);
                 return;
             }
 
-            activeVfx[key] = new ActiveStaticVfx((nint)vfx, path, position, rotation);
+            var shouldRemove = false;
+            lock (activeVfxSync)
+            {
+                if (Volatile.Read(ref disposed) != 0)
+                {
+                    shouldRemove = true;
+                }
+                else
+                {
+                    activeVfx[key] = new ActiveStaticVfx((nint)vfx, path, position, rotation);
+                }
+            }
+
+            if (shouldRemove)
+            {
+                removeOriginal(vfx);
+                return;
+            }
+
             run(vfx, 0f, 0xFFFFFFFF);
             UpdateTransform(vfx, position, rotation);
-            return;
         }
         catch (Exception ex)
         {
-            log.Warning(ex, "[HiddenVfx] Failed to create static VFX. gameObjectId={GameObjectId} path={Path}", key.GameObjectId, path);
-            activeVfx.Remove(key);
-            return;
+            SafeWarning(ex, "[HiddenVfx] Failed to create static VFX. gameObjectId={GameObjectId} path={Path}", key.GameObjectId, path);
+            lock (activeVfxSync)
+            {
+                activeVfx.Remove(key);
+            }
+
+            if (vfx != null)
+            {
+                try
+                {
+                    removeOriginal(vfx);
+                }
+                catch (Exception removeException)
+                {
+                    SafeWarning(removeException, "[HiddenVfx] Failed to clean up a partially created static VFX.");
+                }
+            }
         }
     }
 
     private byte[] GetPathBytes(string path)
     {
-        if (vfxPathBytes.TryGetValue(path, out var bytes))
+        lock (pathBytesSync)
         {
+            if (vfxPathBytes.TryGetValue(path, out var bytes))
+            {
+                return bytes;
+            }
+
+            bytes = GetNullTerminatedUtf8Bytes(path);
+            vfxPathBytes[path] = bytes;
             return bytes;
         }
-
-        bytes = GetNullTerminatedUtf8Bytes(path);
-        vfxPathBytes[path] = bytes;
-        return bytes;
     }
 
     private static byte[] GetNullTerminatedUtf8Bytes(string value)
@@ -236,19 +351,29 @@ internal sealed unsafe class StaticVfxController : IDisposable
 
     private bool Remove(StaticVfxKey key)
     {
-        if (!activeVfx.Remove(key, out var active) || staticVfxRemoveHook is null)
+        ActiveStaticVfx active;
+        lock (activeVfxSync)
+        {
+            if (!activeVfx.Remove(key, out active))
+            {
+                return false;
+            }
+        }
+
+        var removeOriginal = Volatile.Read(ref staticVfxRemoveOriginal);
+        if (removeOriginal is null)
         {
             return false;
         }
 
         try
         {
-            staticVfxRemoveHook.Original((VfxObject*)active.VfxAddress);
+            removeOriginal((VfxObject*)active.VfxAddress);
             return true;
         }
         catch (Exception ex)
         {
-            log.Warning(ex, "Failed to remove static VFX.");
+            SafeWarning(ex, "Failed to remove static VFX.");
             return false;
         }
     }
@@ -272,30 +397,78 @@ internal sealed unsafe class StaticVfxController : IDisposable
 
     private nint StaticVfxRemoveDetour(VfxObject* vfx)
     {
-        DropTrackedVfx((nint)vfx);
-        return staticVfxRemoveHook!.Original(vfx);
+        using var callback = callbackTracker.Enter();
+
+        var callOriginal = Volatile.Read(ref staticVfxRemoveOriginal);
+        if (callOriginal is null)
+        {
+            // Preserve the destructor-like return value during Reloaded's construction probe.
+            callbackTracker.ReportMissingOriginal();
+            return (nint)vfx;
+        }
+
+        if (callbackTracker.ShouldRunPluginLogic && Volatile.Read(ref disposed) == 0)
+        {
+            try
+            {
+                DropTrackedVfx((nint)vfx);
+            }
+            catch (Exception ex)
+            {
+                callbackTracker.ReportException(ex, "drop tracked static VFX");
+            }
+        }
+
+        return callOriginal(vfx);
     }
 
     private void DropTrackedVfx(nint vfxAddress)
     {
-        if (vfxAddress == nint.Zero || activeVfx.Count == 0)
+        if (vfxAddress == nint.Zero)
         {
             return;
         }
 
-        StaticVfxKey? removedKey = null;
-        foreach (var (key, active) in activeVfx)
+        lock (activeVfxSync)
         {
-            if (active.VfxAddress == vfxAddress)
+            StaticVfxKey? removedKey = null;
+            foreach (var (key, active) in activeVfx)
             {
-                removedKey = key;
-                break;
+                if (active.VfxAddress == vfxAddress)
+                {
+                    removedKey = key;
+                    break;
+                }
+            }
+
+            if (removedKey.HasValue)
+            {
+                activeVfx.Remove(removedKey.Value);
             }
         }
+    }
 
-        if (removedKey.HasValue)
+    private void SafeWarning(Exception exception, string messageTemplate, params object[] values)
+    {
+        try
         {
-            activeVfx.Remove(removedKey.Value);
+            log.Warning(exception, messageTemplate, values);
+        }
+        catch
+        {
+            // Do not let diagnostics interfere with cleanup.
+        }
+    }
+
+    private void SafeWarning(string messageTemplate, params object[] values)
+    {
+        try
+        {
+            log.Warning(messageTemplate, values);
+        }
+        catch
+        {
+            // Do not let diagnostics interfere with cleanup.
         }
     }
 
