@@ -71,7 +71,6 @@ internal sealed unsafe class CullingController : IDisposable
         var now = Environment.TickCount64;
         if (requiresRefresh || topologyDirty || now >= nextRefresh)
         {
-            nonPlayers.Refresh(manager);
             players.Update(manager, hiddenObjects, playerPreview);
             nextRefresh = Environment.TickCount64 + RefreshIntervalMs;
         }
@@ -93,7 +92,6 @@ internal sealed unsafe class CullingController : IDisposable
         var mode = UpdateRuntimeMode(manager, out _);
         if (mode == CullingRuntimeMode.Active)
         {
-            nonPlayers.Refresh(manager);
             players.Update(manager, hiddenObjects, playerPreview);
             nextRefresh = Environment.TickCount64 + RefreshIntervalMs;
             return;

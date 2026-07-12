@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
 using FFXIVClientStructs.FFXIV.Client.LayoutEngine;
@@ -11,18 +10,11 @@ namespace EventHorizon.WorldGraphics;
 internal sealed unsafe class LayoutGraphics : IDisposable
 {
     private const int LayoutReadyState = 7;
-    private const string TerrainPatchQueueRenderCommandsSignature = "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC 40 0F B7 79";
-
-    private readonly IGameInteropProvider gameInteropProvider;
     private readonly IClientState clientState;
-    private readonly IPluginLog log;
     private readonly Dictionary<nint, bool> hiddenBgPartGraphicsObjects = [];
     private readonly HashSet<nint> liveBgPartGraphicsObjects = [];
     private readonly List<nint> staleBgPartGraphicsObjects = [];
 
-    private Hook<TerrainPatchQueueRenderCommandsDelegate>? terrainPatchQueueRenderCommandsHook;
-    private bool hideTerrain;
-    private bool currentAreaReady;
     private bool wasBgPartHidingEnabled;
     private nint lastActiveLayout;
     private uint lastTerritoryType;
@@ -30,21 +22,14 @@ internal sealed unsafe class LayoutGraphics : IDisposable
 
     private delegate void BgObjectVisitor(BgObject* graphicsObject);
 
-    private delegate void TerrainPatchQueueRenderCommandsDelegate(void* patch, int contextId);
-
-    public LayoutGraphics(IGameInteropProvider gameInteropProvider, IClientState clientState, IPluginLog log)
+    public LayoutGraphics(IClientState clientState)
     {
-        this.gameInteropProvider = gameInteropProvider;
         this.clientState = clientState;
-        this.log = log;
-        InitializeTerrainPatchQueueRenderCommandsHook();
     }
 
-    public void Update(bool hideBgParts, bool hideTerrain)
+    public void Update(bool hideBgParts)
     {
-        this.hideTerrain = hideTerrain;
         var state = GetCurrentAreaState(clientState.TerritoryType);
-        currentAreaReady = hideTerrain && state.IsReady;
 
         if (!hideBgParts)
         {
@@ -79,9 +64,7 @@ internal sealed unsafe class LayoutGraphics : IDisposable
 
     public void Dispose()
     {
-        hideTerrain = false;
         RestoreCurrentArea();
-        terrainPatchQueueRenderCommandsHook?.Dispose();
     }
 
     private void HideCurrentArea()
@@ -185,32 +168,6 @@ internal sealed unsafe class LayoutGraphics : IDisposable
                 visitor(bgPart->GraphicsObject);
             }
         }
-    }
-
-    private void InitializeTerrainPatchQueueRenderCommandsHook()
-    {
-        try
-        {
-            terrainPatchQueueRenderCommandsHook = gameInteropProvider.HookFromSignature<TerrainPatchQueueRenderCommandsDelegate>(
-                TerrainPatchQueueRenderCommandsSignature,
-                TerrainPatchQueueRenderCommandsDetour
-            );
-            terrainPatchQueueRenderCommandsHook.Enable();
-        }
-        catch (Exception ex)
-        {
-            log.Warning(ex, "[LayoutGraphics] Failed to hook TerrainPatch::QueueRenderCommands.");
-        }
-    }
-
-    private void TerrainPatchQueueRenderCommandsDetour(void* patch, int contextId)
-    {
-        if (hideTerrain && currentAreaReady)
-        {
-            return;
-        }
-
-        terrainPatchQueueRenderCommandsHook!.Original(patch, contextId);
     }
 
     private readonly record struct LayoutAreaState(nint ActiveLayout, uint TerritoryType, bool IsReady);
