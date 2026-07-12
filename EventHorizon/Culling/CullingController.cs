@@ -45,7 +45,7 @@ internal sealed unsafe class CullingController : IDisposable
         nonPlayers = new NonPlayerCuller(configuration);
         hiddenPlayerMarker = new HiddenPlayerMarker(configuration, gameGui, staticVfxController, worldDotOverlay);
         playerPreview = new PlayerPreview(configuration);
-        hook = new UpdateObjectArraysHook(gameInteropProvider, OnObjectArraysUpdated, log);
+        hook = new UpdateObjectArraysHook(gameInteropProvider, OnObjectArraysUpdated);
     }
 
     public int HiddenPlayerCount => hiddenObjects.HiddenPlayerCount;
