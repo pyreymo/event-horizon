@@ -93,6 +93,7 @@ public sealed class Plugin : IDalamudPlugin
     private StaticVfxResourceRedirector StaticVfxResourceRedirector { get; init; }
     private StaticVfxController StaticVfxController { get; init; }
     private WorldDotOverlay WorldDotOverlay { get; init; }
+    private SceneVisibilityController SceneVisibilityController { get; init; }
     private DtrBar DtrStatusBar { get; init; }
     private DtrBackground DtrBackground { get; init; }
     private TargetingMarkerController TargetingMarkerController { get; init; }
@@ -114,6 +115,7 @@ public sealed class Plugin : IDalamudPlugin
         StaticVfxResourceRedirector = new StaticVfxResourceRedirector(PluginInterface, GameInteropProvider, Log);
         StaticVfxController = new StaticVfxController(GameInteropProvider, SigScanner, Log);
         WorldDotOverlay = new WorldDotOverlay(GameGui, PluginInterface);
+        SceneVisibilityController = new SceneVisibilityController(GameInteropProvider, Configuration);
         Culling = new CullingController(
             GameInteropProvider,
             Configuration,
@@ -163,6 +165,7 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.LanguageChanged += OnLanguageChanged;
         ChatGui.ChatMessage += OnChatMessage;
         Framework.Update += OnFrameworkUpdate;
+        SceneVisibilityController.Enable();
         Culling.Enable();
     }
 
@@ -178,6 +181,7 @@ public sealed class Plugin : IDalamudPlugin
         CommandManager.RemoveHandler(ShortCommandName);
 
         windowSystem.RemoveAllWindows();
+        SceneVisibilityController.Dispose();
         TargetingMarkerController.Dispose();
         DtrBackground.Dispose();
         DtrStatusBar.Dispose();
@@ -271,6 +275,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnFrameworkUpdate(IFramework framework)
     {
+        SceneVisibilityController.Update();
         DtrStatusBar.Update();
         PlayerPreviewHighlighter.Update();
 

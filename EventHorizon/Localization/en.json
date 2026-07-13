@@ -106,6 +106,15 @@
     "Config.HideUnattachedEventNpcs": "Hide useless NPCs (experimental)",
 
     "Config.Section.PlayerDisplay": "Player display",
+    "Config.Section.LayoutGraphics": "Scene rendering",
+    "Config.SceneRendering.Individual": "Individual renderers",
+    "Config.SceneRendering.All": "Global control",
+    "Config.HideBgParts": "Hide background",
+    "Config.HideTerrain": "Hide terrain",
+    "Config.HideWater": "Hide water",
+    "Config.HideGrass": "Hide grass",
+    "Config.HideAll3DScene": "Hide all 3D rendering",
+    "Config.HideAll3DScene.Help": "Uses the game's global 3D rendering switch. This also hides characters and overrides the individual renderer options.",
 
     "Config.Section.TargetingMeMarker": "Targeting-me marker",
     "Config.EnableTargetingMeMarker": "Mark players targeting me",
@@ -131,7 +140,7 @@
     "Config.Section.DtrBar": "Server Info Bar",
     "Config.ShowDtrBar": "Enable Server Info Bar button",
     "Config.ShowFrameRateInDtrBar": "Show FPS in the Server Info Bar",
-    "Config.EnableDtrBackground": "Add a dark background to the entire Server Info Bar (experimental)",
+    "Config.EnableDtrBackground": "Add a dark background to the entire Server Info Bar",
 
     "Config.Section.DtrBackgroundStyle": "Background style",
     "Config.DtrBackgroundAlpha": "Background opacity",

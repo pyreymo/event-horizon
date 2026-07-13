@@ -12,6 +12,7 @@ internal partial class ConfigWindow
         DrawCard(Loc.Text("Config.Section.DtrBar"), DrawDtrBarControls);
         DrawCard(Loc.Text("Config.Section.PlayerDisplay"), DrawPlayerDisplayControls);
         DrawCard(Loc.Text("Config.Section.TargetingMeMarker"), DrawTargetingMeMarkerControls);
+        DrawCard(Loc.Text("Config.Section.LayoutGraphics"), DrawLayoutGraphicsControls);
     }
 
     private void DrawDtrBarControls()
@@ -127,6 +128,57 @@ internal partial class ConfigWindow
             SaveConfigurationIfEditFinished();
         }
         ImGui.Unindent();
+    }
+
+    private void DrawLayoutGraphicsControls()
+    {
+        ImGui.TextDisabled(Loc.Text("Config.SceneRendering.Individual"));
+        DrawSceneVisibilityCheckbox(
+            "HideBgParts",
+            Loc.Text("Config.HideBgParts"),
+            () => configuration.HideBgParts,
+            value => configuration.HideBgParts = value
+        );
+        DrawSceneVisibilityCheckbox(
+            "HideTerrain",
+            Loc.Text("Config.HideTerrain"),
+            () => configuration.HideTerrain,
+            value => configuration.HideTerrain = value
+        );
+        DrawSceneVisibilityCheckbox(
+            "HideWater",
+            Loc.Text("Config.HideWater"),
+            () => configuration.HideWater,
+            value => configuration.HideWater = value
+        );
+        DrawSceneVisibilityCheckbox(
+            "HideGrass",
+            Loc.Text("Config.HideGrass"),
+            () => configuration.HideGrass,
+            value => configuration.HideGrass = value
+        );
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.TextDisabled(Loc.Text("Config.SceneRendering.All"));
+        DrawSceneVisibilityCheckbox(
+            "HideAll3DScene",
+            Loc.Text("Config.HideAll3DScene"),
+            () => configuration.HideAll3DScene,
+            value => configuration.HideAll3DScene = value
+        );
+        DrawHelpMarker(Loc.Text("Config.HideAll3DScene.Help"));
+    }
+
+    private void DrawSceneVisibilityCheckbox(string id, string label, Func<bool> getValue, Action<bool> setValue)
+    {
+        var value = getValue();
+        if (DrawAutoFitCheckbox(id, label, ref value))
+        {
+            setValue(value);
+            configuration.Save();
+        }
     }
 
     private void DrawTargetingMeMarkerControls()

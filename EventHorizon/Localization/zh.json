@@ -106,6 +106,15 @@
     "Config.HideUnattachedEventNpcs": "隐藏无用 NPC（实验性）",
 
     "Config.Section.PlayerDisplay": "玩家显示",
+    "Config.Section.LayoutGraphics": "场景渲染",
+    "Config.SceneRendering.Individual": "单独屏蔽",
+    "Config.SceneRendering.All": "全局控制",
+    "Config.HideBgParts": "隐藏背景",
+    "Config.HideTerrain": "隐藏地形",
+    "Config.HideWater": "隐藏水体",
+    "Config.HideGrass": "隐藏草地",
+    "Config.HideAll3DScene": "隐藏全部 3D 渲染",
+    "Config.HideAll3DScene.Help": "使用游戏原生的 3D 渲染总开关。该选项也会隐藏人物，并覆盖上方的单独屏蔽选项。",
 
     "Config.Section.TargetingMeMarker": "注视标记",
     "Config.EnableTargetingMeMarker": "标记正在看我的玩家",
@@ -131,7 +140,7 @@
     "Config.Section.DtrBar": "服务器信息栏",
     "Config.ShowDtrBar": "启用服务器信息栏按钮",
     "Config.ShowFrameRateInDtrBar": "在服务器信息栏显示帧率",
-    "Config.EnableDtrBackground": "给服务器信息栏整体添加深色背景（实验性）",
+    "Config.EnableDtrBackground": "给服务器信息栏整体添加深色背景",
 
     "Config.Section.DtrBackgroundStyle": "背景样式",
     "Config.DtrBackgroundAlpha": "背景不透明度",
