@@ -102,8 +102,11 @@ internal sealed class PlayerPreviewPanel(
 
     private static void DrawHelpText(string text)
     {
-        ImGui.PushTextWrapPos();
         ImGui.TextDisabled(text);
-        ImGui.PopTextWrapPos();
+
+        if (ImGui.IsItemHovered() && ImGui.CalcTextSize(text).X > ImGui.GetItemRectSize().X)
+        {
+            ImGui.SetTooltip(text);
+        }
     }
 }

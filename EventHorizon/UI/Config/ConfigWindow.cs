@@ -215,7 +215,7 @@ internal partial class ConfigWindow : Window
             ImGui.TableNextRow();
             ImGui.TableSetColumnIndex(0);
 
-            var contentRight = ImGui.GetCursorScreenPos().X + ImGui.GetContentRegionAvail().X;
+            var contentRight = ImGui.GetCursorPosX() + contentWidth;
             ImGui.PushTextWrapPos(contentRight);
             content();
             ImGui.PopTextWrapPos();
@@ -263,7 +263,7 @@ internal partial class ConfigWindow : Window
     private static bool DrawAutoFitText(string text)
     {
         var availableWidth = Math.Max(1f, ImGui.GetContentRegionAvail().X);
-        ImGui.PushTextWrapPos(ImGui.GetCursorScreenPos().X + availableWidth);
+        ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + availableWidth);
         ImGui.TextUnformatted(text);
         ImGui.PopTextWrapPos();
 

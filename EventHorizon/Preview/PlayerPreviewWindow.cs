@@ -16,7 +16,6 @@ internal sealed class PlayerPreviewWindow : Window
 
     private readonly PlayerPreviewPanel previewPanel;
     private readonly Action openMainWindow;
-    private float lastWindowSide = FloatingWindowDefaultSide;
 
     public PlayerPreviewWindow(PlayerPreviewPanel previewPanel, Action openMainWindow)
         : base($"{Loc.Text("Config.Preview.FloatingTitle")}###EventHorizonPlayerPreview")
@@ -45,33 +44,10 @@ internal sealed class PlayerPreviewWindow : Window
     public override void PreDraw()
     {
         WindowName = $"{Loc.Text("Config.Preview.FloatingTitle")}###EventHorizonPlayerPreview";
-        SnapWindowSizeToSquare();
     }
 
     public override void Draw()
     {
         previewPanel.DrawFloatingContent(PlayerKeepRuleLabels.GetLabel);
-    }
-
-    private void SnapWindowSizeToSquare()
-    {
-        if (!Size.HasValue)
-        {
-            return;
-        }
-
-        var size = Size.Value;
-        if (Math.Abs(size.X - size.Y) <= 0.5f)
-        {
-            lastWindowSide = size.X;
-            SizeCondition = ImGuiCond.FirstUseEver;
-            return;
-        }
-
-        var side = Math.Abs(size.X - lastWindowSide) >= Math.Abs(size.Y - lastWindowSide) ? size.X : size.Y;
-        side = Math.Max(MinimumPreviewSide, side);
-        lastWindowSide = side;
-        Size = new Vector2(side);
-        SizeCondition = ImGuiCond.Always;
     }
 }
