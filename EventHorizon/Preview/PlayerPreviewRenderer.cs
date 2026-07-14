@@ -96,9 +96,27 @@ internal sealed class PlayerPreviewRenderer
 
         if (snapshot.Players.Count == 0)
         {
-            var text = Loc.Text("Config.Preview.Empty");
-            var textSize = ImGui.CalcTextSize(text);
-            drawList.AddText(center - (textSize * 0.5f), ImGui.GetColorU32(ImGuiCol.TextDisabled), text);
+            var pausedFormat = Loc.Text("Status.Paused");
+            var status = snapshot.EmptyReason switch
+            {
+                PlayerPreviewEmptyReason.PlayerHidingDisabled => Loc.Text("Status.Disabled"),
+                PlayerPreviewEmptyReason.TemporaryReveal => string.Format(pausedFormat, Loc.Text("PauseReason.TemporaryReveal")),
+                PlayerPreviewEmptyReason.PlayerUnavailable => Loc.Text("Config.Preview.Status.PlayerUnavailable"),
+                PlayerPreviewEmptyReason.SuspendedInDuty => string.Format(pausedFormat, Loc.Text("PauseReason.InDuty")),
+                PlayerPreviewEmptyReason.SuspendedByLowPlayerCount => string.Format(pausedFormat, Loc.Text("PauseReason.LowPlayerCount")),
+                _ => Loc.Text("Config.Preview.Status.NoOtherPlayers"),
+            };
+            var text = string.Format(Loc.Text("Config.Preview.Status"), status);
+            var textWidth = Math.Max(1f, side - (PreviewOuterPadding * 2f));
+            var textSize = ImGui.CalcTextSize(text, false, textWidth);
+            drawList.AddText(
+                ImGui.GetFont(),
+                ImGui.GetFontSize(),
+                center - (textSize * 0.5f),
+                ImGui.GetColorU32(ImGuiCol.TextDisabled),
+                text,
+                textWidth
+            );
         }
 
         ImGui.Dummy(size);
@@ -277,7 +295,9 @@ internal sealed class PlayerPreviewRenderer
         ImGui.TextUnformatted(player.Name);
         ImGui.Separator();
         ImGui.TextUnformatted(string.Format(Loc.Text("Config.Preview.Tooltip.Distance"), player.Distance));
-        ImGui.TextUnformatted(Loc.Text(player.IsVisible ? "Config.Preview.Tooltip.Visible" : "Config.Preview.Tooltip.Hidden"));
+        ImGui.TextUnformatted(
+            string.Format(Loc.Text("Config.Preview.Status"), Loc.Text(player.IsVisible ? "Status.Visible" : "Status.Hidden"))
+        );
 
         if (player.BestRule.HasValue)
         {

@@ -13,7 +13,7 @@ internal sealed unsafe class PlayerPreview(Configuration configuration)
     private const int SelectionVisibilityLeaseMs = 500;
 
     private readonly Dictionary<ulong, string> names = [];
-    private PlayerPreviewSnapshot snapshot = PlayerPreviewSnapshot.Empty;
+    private PlayerPreviewSnapshot snapshot = PlayerPreviewSnapshot.Empty(PlayerPreviewEmptyReason.PlayerUnavailable);
     private uint? selectedPlayerEntityId;
     private long selectionExpiresAt;
 
@@ -83,10 +83,10 @@ internal sealed unsafe class PlayerPreview(Configuration configuration)
         snapshot = builder.Build();
     }
 
-    public void Clear()
+    public void Clear(PlayerPreviewEmptyReason reason)
     {
         names.Clear();
-        snapshot = PlayerPreviewSnapshot.Empty;
+        snapshot = PlayerPreviewSnapshot.Empty(reason);
         selectedPlayerEntityId = null;
         selectionExpiresAt = 0;
     }
@@ -143,10 +143,22 @@ internal sealed record PlayerPreviewSnapshot(
     float ViewRange,
     float NearbyRange,
     IReadOnlyList<PlayerPreviewEntry> Players,
-    PlayerPreviewStats Stats
+    PlayerPreviewStats Stats,
+    PlayerPreviewEmptyReason EmptyReason
 )
 {
-    public static readonly PlayerPreviewSnapshot Empty = new(0, 0, 50f, 0f, [], PlayerPreviewStats.Empty);
+    public static PlayerPreviewSnapshot Empty(PlayerPreviewEmptyReason reason) => new(0, 0, 50f, 0f, [], PlayerPreviewStats.Empty, reason);
+}
+
+internal enum PlayerPreviewEmptyReason
+{
+    None,
+    PlayerHidingDisabled,
+    TemporaryReveal,
+    PlayerUnavailable,
+    SuspendedInDuty,
+    SuspendedByLowPlayerCount,
+    NoOtherPlayers,
 }
 
 internal readonly record struct PlayerPreviewEntry(
@@ -286,7 +298,8 @@ internal sealed unsafe class PlayerPreviewBuilder
             viewRange,
             nearbyRange,
             [.. players],
-            new PlayerPreviewStats(players.Count, visiblePlayers, hiddenPlayers, budgetLimit)
+            new PlayerPreviewStats(players.Count, visiblePlayers, hiddenPlayers, budgetLimit),
+            players.Count == 0 ? PlayerPreviewEmptyReason.NoOtherPlayers : PlayerPreviewEmptyReason.None
         );
     }
 

@@ -15,6 +15,9 @@ internal sealed class PlayerPreviewPanel(
 {
     private const int FastRefreshIntervalMs = 33;
     private const float CardContentRightPadding = 18f;
+    private const float CardContentBottomPadding = 10f;
+    private const float InlineHelpSpacing = 4f;
+    private const float InlineHeightSafetyMargin = 16f;
     private const float MinimumPreviewSide = 180f;
 
     private readonly PlayerPreviewRenderer renderer = new();
@@ -27,9 +30,13 @@ internal sealed class PlayerPreviewPanel(
     public void DrawInlineContent(Func<PlayerKeepRuleId, string> getRuleLabel)
     {
         RefreshIfNeeded();
-        var side = Math.Max(MinimumPreviewSide, ImGui.GetContentRegionAvail().X - CardContentRightPadding);
+        var available = ImGui.GetContentRegionAvail();
+        var availableWidth = available.X - CardContentRightPadding;
+        var availableHeight =
+            available.Y - ImGui.GetTextLineHeightWithSpacing() - InlineHelpSpacing - CardContentBottomPadding - InlineHeightSafetyMargin;
+        var side = Math.Max(MinimumPreviewSide, Math.Min(availableWidth, availableHeight));
         DrawPreview(side, getRuleLabel);
-        AddVerticalSpace(4f);
+        AddVerticalSpace(InlineHelpSpacing);
         DrawHelpText(Loc.Text("Config.Preview.PerformanceNote"));
     }
 

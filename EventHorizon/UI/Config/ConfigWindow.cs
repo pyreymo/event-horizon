@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
@@ -29,6 +30,8 @@ internal partial class ConfigWindow : Window
     private float cullingLeftColumnWidth = 690f;
     private bool keepRuleOrderChanged;
     private bool showRaceSexEditor;
+    private bool capturingTemporaryShowAllPlayersShortcut;
+    private readonly HashSet<int> capturedTemporaryShowAllPlayersKeys = [];
 
     private readonly record struct ImGuiItemState(bool Hovered, bool Active = false);
 

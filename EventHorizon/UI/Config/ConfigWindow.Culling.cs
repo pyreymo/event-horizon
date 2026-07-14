@@ -183,14 +183,11 @@ internal partial class ConfigWindow
 
                 if (!string.IsNullOrEmpty(suspensionReason))
                 {
-                    DrawSummaryRow(
-                        Loc.Text("Config.StatusSummary.State"),
-                        string.Format(Loc.Text("Config.StatusPaused.Compact"), suspensionReason)
-                    );
+                    DrawSummaryRow(Loc.Text("Config.StatusSummary.State"), string.Format(Loc.Text("Status.Paused"), suspensionReason));
                 }
                 else
                 {
-                    DrawSummaryRow(Loc.Text("Config.StatusSummary.State"), Loc.Text("Config.StatusSummary.Running"));
+                    DrawSummaryRow(Loc.Text("Config.StatusSummary.State"), Loc.Text("Status.Running"));
                 }
 
                 DrawSummaryRow(Loc.Text("Config.StatusSummary.Fps"), GetFrameRateSummary());
@@ -205,9 +202,7 @@ internal partial class ConfigWindow
 
     private void DrawPlayerHidingMasterSwitch()
     {
-        var statusText = configuration.HideAllOtherPlayers
-            ? Loc.Text("Config.MasterSwitch.Enabled")
-            : Loc.Text("Config.MasterSwitch.Disabled");
+        var statusText = configuration.HideAllOtherPlayers ? Loc.Text("Status.Enabled") : Loc.Text("Status.Disabled");
         var label = $"{Loc.Text("Config.HideAllOtherPlayers.Short")} · {statusText}###PlayerHidingMasterSwitch";
         var width = Math.Max(1f, ImGui.GetContentRegionAvail().X - 18f);
         var pushedColors = false;
@@ -249,15 +244,20 @@ internal partial class ConfigWindow
 
     private string GetCullingSuspensionReason(CullingStatus status)
     {
+        if (status.SuspendedByTemporaryReveal)
+        {
+            return Loc.Text("PauseReason.TemporaryReveal");
+        }
+
         if (status.SuspendedInDuty)
         {
-            return Loc.Text("Config.DutyPauseReason");
+            return Loc.Text("PauseReason.InDuty");
         }
 
         if (status.SuspendedByLowPlayerCount)
         {
             return string.Format(
-                Loc.Text("Config.LowPlayerCountPauseReason"),
+                Loc.Text("Config.StatusSummary.PauseReason.LowPlayerCount"),
                 status.OtherPlayerCount,
                 configuration.DisableCullingPlayerCountThreshold
             );
@@ -306,37 +306,8 @@ internal partial class ConfigWindow
     private void DrawVisiblePlayerLimitRule()
     {
         var label = Loc.Text("Config.LimitVisiblePlayerCount");
-        if (!ImGui.BeginTable("###VisiblePlayerLimitRule", 2, ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.NoSavedSettings))
-        {
-            DrawVisiblePlayerLimitRuleFallback();
-            return;
-        }
-
-        ImGui.TableSetupColumn("###VisibleLimitEnabled", ImGuiTableColumnFlags.WidthFixed);
-        ImGui.TableSetupColumn("###VisibleLimitSlider", ImGuiTableColumnFlags.WidthStretch);
-        ImGui.TableNextRow();
-
-        ImGui.TableNextColumn();
         var limitVisiblePlayerCount = configuration.LimitVisiblePlayerCount;
-        if (DrawAutoFitCheckbox("LimitVisiblePlayerCount", label, ref limitVisiblePlayerCount))
-        {
-            configuration.LimitVisiblePlayerCount = limitVisiblePlayerCount;
-            SaveAndRefresh();
-        }
-
-        ImGui.TableNextColumn();
-        DrawVisiblePlayerLimitSlider(Math.Max(1f, ImGui.GetContentRegionAvail().X - 6f));
-
-        ImGui.EndTable();
-
-        AddVerticalSpace(4f);
-        DrawHelpText(Loc.Text("Config.LimitVisiblePlayerCount.Help"));
-    }
-
-    private void DrawVisiblePlayerLimitRuleFallback()
-    {
-        var limitVisiblePlayerCount = configuration.LimitVisiblePlayerCount;
-        if (DrawAutoFitCheckbox("LimitVisiblePlayerCountFallback", Loc.Text("Config.LimitVisiblePlayerCount"), ref limitVisiblePlayerCount))
+        if (ImGui.Checkbox($"{label}###LimitVisiblePlayerCount", ref limitVisiblePlayerCount))
         {
             configuration.LimitVisiblePlayerCount = limitVisiblePlayerCount;
             SaveAndRefresh();

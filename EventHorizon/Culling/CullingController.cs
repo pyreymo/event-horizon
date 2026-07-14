@@ -50,6 +50,7 @@ internal sealed unsafe class CullingController : IDisposable
 
     public int HiddenPlayerCount => hiddenObjects.HiddenPlayerCount;
     public PlayerPreviewSnapshot PlayerPreviewSnapshot => playerPreview.Snapshot;
+    public bool TemporarilyShowAllPlayers { private get; set; }
 
     public CullingStatus GetStatus() => BuildStatus(GameObjectManager.Instance());
 
@@ -63,7 +64,7 @@ internal sealed unsafe class CullingController : IDisposable
         {
             nonPlayers.Clear();
             hiddenPlayerMarker.Clear();
-            playerPreview.Clear();
+            playerPreview.Clear(GetPreviewEmptyReason(mode));
             return;
         }
 
@@ -101,7 +102,7 @@ internal sealed unsafe class CullingController : IDisposable
 
         nonPlayers.Clear();
         hiddenPlayerMarker.Clear();
-        playerPreview.Clear();
+        playerPreview.Clear(GetPreviewEmptyReason(mode));
     }
 
     public void RefreshPlayerPreview() => players.RefreshPlayerPreview(GameObjectManager.Instance(), playerPreview);
@@ -116,7 +117,7 @@ internal sealed unsafe class CullingController : IDisposable
         RestoreAndClearAllState(GameObjectManager.Instance());
         nonPlayers.Clear();
         hiddenPlayerMarker.Clear();
-        playerPreview.Clear();
+        playerPreview.Clear(PlayerPreviewEmptyReason.PlayerUnavailable);
     }
 
     private CullingRuntimeMode UpdateRuntimeMode(GameObjectManager* manager, out bool requiresRefresh)
@@ -156,6 +157,11 @@ internal sealed unsafe class CullingController : IDisposable
             return CullingRuntimeMode.Disabled;
         }
 
+        if (TemporarilyShowAllPlayers)
+        {
+            return CullingRuntimeMode.SuspendedTemporaryReveal;
+        }
+
         if (!playerState.IsLoaded || manager == null)
         {
             return CullingRuntimeMode.PlayerUnavailable;
@@ -170,6 +176,17 @@ internal sealed unsafe class CullingController : IDisposable
         return status.SuspendedByLowPlayerCount ? CullingRuntimeMode.SuspendedLowPlayerCount : CullingRuntimeMode.Active;
     }
 
+    private static PlayerPreviewEmptyReason GetPreviewEmptyReason(CullingRuntimeMode mode) =>
+        mode switch
+        {
+            CullingRuntimeMode.Disabled => PlayerPreviewEmptyReason.PlayerHidingDisabled,
+            CullingRuntimeMode.SuspendedTemporaryReveal => PlayerPreviewEmptyReason.TemporaryReveal,
+            CullingRuntimeMode.PlayerUnavailable => PlayerPreviewEmptyReason.PlayerUnavailable,
+            CullingRuntimeMode.SuspendedDuty => PlayerPreviewEmptyReason.SuspendedInDuty,
+            CullingRuntimeMode.SuspendedLowPlayerCount => PlayerPreviewEmptyReason.SuspendedByLowPlayerCount,
+            _ => PlayerPreviewEmptyReason.NoOtherPlayers,
+        };
+
     private CullingStatus BuildStatus(GameObjectManager* manager)
     {
         var enabled = configuration.HideAllOtherPlayers;
@@ -177,6 +194,7 @@ internal sealed unsafe class CullingController : IDisposable
         var otherPlayerCount = CountOtherPlayers(manager);
         return new(
             enabled,
+            enabled && TemporarilyShowAllPlayers,
             enabled
                 && playerAvailable
                 && configuration.DisableInDuty
@@ -247,10 +265,17 @@ internal sealed unsafe class CullingController : IDisposable
 internal enum CullingRuntimeMode
 {
     Disabled,
+    SuspendedTemporaryReveal,
     PlayerUnavailable,
     SuspendedDuty,
     SuspendedLowPlayerCount,
     Active,
 }
 
-internal readonly record struct CullingStatus(bool Enabled, bool SuspendedInDuty, bool SuspendedByLowPlayerCount, int OtherPlayerCount);
+internal readonly record struct CullingStatus(
+    bool Enabled,
+    bool SuspendedByTemporaryReveal,
+    bool SuspendedInDuty,
+    bool SuspendedByLowPlayerCount,
+    int OtherPlayerCount
+);

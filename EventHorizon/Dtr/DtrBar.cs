@@ -129,14 +129,19 @@ internal sealed class DtrBar : IDisposable
         }
 
         var pauseReasonKeys = new List<string>();
+        if (status.SuspendedByTemporaryReveal)
+        {
+            pauseReasonKeys.Add("PauseReason.TemporaryReveal");
+        }
+
         if (status.SuspendedInDuty)
         {
-            pauseReasonKeys.Add("Dtr.PauseReason.InDuty");
+            pauseReasonKeys.Add("PauseReason.InDuty");
         }
 
         if (status.SuspendedByLowPlayerCount)
         {
-            pauseReasonKeys.Add("Dtr.PauseReason.LowPlayerCount");
+            pauseReasonKeys.Add("PauseReason.LowPlayerCount");
         }
 
         return new(true, pauseReasonKeys);
@@ -169,12 +174,12 @@ internal sealed class DtrBar : IDisposable
     {
         if (!state.Enabled)
         {
-            return Loc.Text("Dtr.Status.Disabled");
+            return Loc.Text("Status.Disabled");
         }
 
         if (state.PauseReasonKeys.Count == 0)
         {
-            return Loc.Text("Dtr.Status.Enabled");
+            return Loc.Text("Status.Enabled");
         }
 
         var reasons = new List<string>();
@@ -183,7 +188,7 @@ internal sealed class DtrBar : IDisposable
             reasons.Add(Loc.Text(key));
         }
 
-        return string.Format(Loc.Text("Dtr.Status.Paused"), string.Join(Loc.Text("Dtr.PauseReason.Separator"), reasons));
+        return string.Format(Loc.Text("Status.Paused"), string.Join(Loc.Text("PauseReason.Separator"), reasons));
     }
 
     private sealed record DtrBarState(bool Enabled, IReadOnlyList<string> PauseReasonKeys);

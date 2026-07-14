@@ -11,6 +11,10 @@ internal class Configuration : IPluginConfiguration
     public int Version { get; set; } = 0;
 
     public bool HideAllOtherPlayers { get; set; } = true;
+    public bool EnableTemporaryShowAllPlayersShortcut { get; set; } = true;
+
+    [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+    public List<int> TemporarilyShowAllPlayersKeys { get; set; } = [0x11, 0x12];
     public bool DisableInDuty { get; set; } = true;
     public bool DisableCullingBelowPlayerCount { get; set; } = true;
     public int DisableCullingPlayerCountThreshold { get; set; } = 25;

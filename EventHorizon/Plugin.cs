@@ -78,6 +78,9 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService]
     internal static IPluginLog Log { get; private set; } = null!;
 
+    [PluginService]
+    internal static IKeyState KeyState { get; private set; } = null!;
+
     #endregion
 
     #region State
@@ -275,11 +278,37 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnFrameworkUpdate(IFramework framework)
     {
+        Culling.TemporarilyShowAllPlayers = IsTemporaryShowAllPlayersShortcutHeld();
+
         SceneVisibilityController.Update();
         DtrStatusBar.Update();
         PlayerPreviewHighlighter.Update();
 
         Culling.Update();
+    }
+
+    private bool IsTemporaryShowAllPlayersShortcutHeld()
+    {
+        if (!Configuration.EnableTemporaryShowAllPlayersShortcut)
+        {
+            return false;
+        }
+
+        var keys = Configuration.TemporarilyShowAllPlayersKeys;
+        if (keys.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var key in keys)
+        {
+            if (!KeyState.IsVirtualKeyValid(key) || !KeyState[key])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public void RefreshObjectCulling(bool resetRuleState = false)
