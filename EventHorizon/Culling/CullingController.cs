@@ -12,7 +12,7 @@ namespace EventHorizon.Culling;
 
 internal sealed unsafe class CullingController : IDisposable
 {
-    private const int RefreshIntervalMs = 200;
+    private const int RefreshIntervalMs = 100;
     private readonly Configuration configuration;
     private readonly IPlayerState playerState;
     private readonly ICondition condition;
@@ -25,6 +25,7 @@ internal sealed unsafe class CullingController : IDisposable
     private readonly UpdateObjectArraysHook updateObjectArraysHook;
     private readonly EnableDrawHook enableDrawHook;
     private CullingRuntimeMode? currentMode;
+    private int otherPlayerCount;
     private long nextRefresh;
 
     public CullingController(
@@ -59,6 +60,8 @@ internal sealed unsafe class CullingController : IDisposable
             updateObjectArraysHook.Dispose();
             throw;
         }
+
+        otherPlayerCount = CountOtherPlayers(GameObjectManager.Instance());
     }
 
     public int HiddenPlayerCount => hiddenObjects.HiddenPlayerCount;
@@ -86,29 +89,45 @@ internal sealed unsafe class CullingController : IDisposable
     {
         admissionGate.BeginFrameworkFrame();
         var manager = GameObjectManager.Instance();
+        var topologyChanged = updateObjectArraysHook.ConsumePlayerTopologyChanged();
+        var admissionChanged = admissionGate.ConsumeChanged();
+        var now = Environment.TickCount64;
+        var refreshDue = now >= nextRefresh;
+        if (topologyChanged)
+        {
+            admissionGate.PruneObservedPlayers(manager);
+        }
+
+        if (topologyChanged || refreshDue)
+        {
+            otherPlayerCount = CountOtherPlayers(manager);
+        }
+
         var mode = UpdateRuntimeMode(manager, out var requiresRefresh);
+        var shouldRefresh = requiresRefresh || topologyChanged || admissionChanged || refreshDue;
         if (mode != CullingRuntimeMode.Active)
         {
+            if (topologyChanged || refreshDue)
+            {
+                nextRefresh = now + RefreshIntervalMs;
+            }
+
             nonPlayers.Clear();
             hiddenPlayerMarker.Clear();
             playerPreview.Clear(GetPreviewEmptyReason(mode));
             return;
         }
 
-        admissionGate.PruneObservedPlayers(manager);
-        var topologyChanged = updateObjectArraysHook.ConsumePlayerTopologyChanged();
-        var admissionChanged = admissionGate.ConsumeChanged();
-        var now = Environment.TickCount64;
-        if (requiresRefresh || topologyChanged || admissionChanged || now >= nextRefresh)
+        if (shouldRefresh)
         {
+            hiddenObjects.PruneMissing(manager);
             nonPlayers.Refresh(manager);
             players.Update(manager, hiddenObjects, playerPreview);
-            nextRefresh = Environment.TickCount64 + RefreshIntervalMs;
+            nextRefresh = now + RefreshIntervalMs;
         }
 
         players.Tick(manager, hiddenObjects);
         nonPlayers.Tick(manager, hiddenObjects, HiddenObjectTracker.PluginHiddenFlags);
-        hiddenObjects.PruneMissing(manager);
         hiddenPlayerMarker.Update(manager, hiddenObjects);
     }
 
@@ -120,12 +139,21 @@ internal sealed unsafe class CullingController : IDisposable
         }
 
         var manager = GameObjectManager.Instance();
+        var topologyChanged = updateObjectArraysHook.ConsumePlayerTopologyChanged();
+        if (topologyChanged)
+        {
+            admissionGate.PruneObservedPlayers(manager);
+        }
+
+        otherPlayerCount = CountOtherPlayers(manager);
+        hiddenObjects.PruneMissing(manager);
+        var now = Environment.TickCount64;
         var mode = UpdateRuntimeMode(manager, out _);
+        nextRefresh = now + RefreshIntervalMs;
         if (mode == CullingRuntimeMode.Active)
         {
             nonPlayers.Refresh(manager);
             players.Update(manager, hiddenObjects, playerPreview);
-            nextRefresh = Environment.TickCount64 + RefreshIntervalMs;
             return;
         }
 
@@ -202,13 +230,17 @@ internal sealed unsafe class CullingController : IDisposable
             return CullingRuntimeMode.PlayerUnavailable;
         }
 
-        var status = BuildStatus(manager);
-        if (status.SuspendedInDuty)
+        if (configuration.DisableInDuty && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]))
         {
             return CullingRuntimeMode.SuspendedDuty;
         }
 
-        return status.SuspendedByLowPlayerCount ? CullingRuntimeMode.SuspendedLowPlayerCount : CullingRuntimeMode.Active;
+        if (configuration.DisableCullingBelowPlayerCount && otherPlayerCount < configuration.DisableCullingPlayerCountThreshold)
+        {
+            return CullingRuntimeMode.SuspendedLowPlayerCount;
+        }
+
+        return CullingRuntimeMode.Active;
     }
 
     private static PlayerPreviewEmptyReason GetPreviewEmptyReason(CullingRuntimeMode mode) =>
@@ -226,7 +258,7 @@ internal sealed unsafe class CullingController : IDisposable
     {
         var enabled = configuration.HideAllOtherPlayers;
         var playerAvailable = playerState.IsLoaded && manager != null;
-        var otherPlayerCount = CountOtherPlayers(manager);
+        var currentOtherPlayerCount = manager == null ? 0 : otherPlayerCount;
         return new(
             enabled,
             enabled && TemporarilyShowAllPlayers,
@@ -237,8 +269,8 @@ internal sealed unsafe class CullingController : IDisposable
             enabled
                 && playerAvailable
                 && configuration.DisableCullingBelowPlayerCount
-                && otherPlayerCount < configuration.DisableCullingPlayerCountThreshold,
-            otherPlayerCount
+                && currentOtherPlayerCount < configuration.DisableCullingPlayerCountThreshold,
+            currentOtherPlayerCount
         );
     }
 

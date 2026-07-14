@@ -44,12 +44,16 @@ internal sealed class LocalSpeedSmoother(PlayerVisibilitySelectionParameters par
         var distance = displacement.Length();
         var instantaneousSpeed = distance / elapsedSeconds;
         var instantaneousVelocity = displacement / (float)elapsedSeconds;
-        var alpha = 1 - Math.Exp(-Ln2 * elapsedSeconds / parameters.LocalSpeedHalfLifeSeconds);
+        var alpha = 1 - Math.Exp(-Ln2 * elapsedSeconds / PlayerVisibilitySelectionParameters.LocalSpeedHalfLifeSeconds);
 
         previousTimestamp = timestamp;
         previousPosition = position;
 
-        if (!float.IsFinite(distance) || !double.IsFinite(instantaneousSpeed) || instantaneousSpeed > parameters.MaxTrustedLocalSpeed)
+        if (
+            !float.IsFinite(distance)
+            || !double.IsFinite(instantaneousSpeed)
+            || instantaneousSpeed > PlayerVisibilitySelectionParameters.MaxTrustedLocalSpeed
+        )
         {
             instantaneousSpeed = 0;
             instantaneousVelocity = Vector3.Zero;
@@ -117,14 +121,18 @@ internal sealed class PlayerVelocityTracker(PlayerVisibilitySelectionParameters 
         var displacement = position - state.Position;
         var distance = displacement.Length();
         var instantaneousSpeed = distance / elapsedSeconds;
-        if (!float.IsFinite(distance) || !double.IsFinite(instantaneousSpeed) || instantaneousSpeed > parameters.MaxTrustedLocalSpeed)
+        if (
+            !float.IsFinite(distance)
+            || !double.IsFinite(instantaneousSpeed)
+            || instantaneousSpeed > PlayerVisibilitySelectionParameters.MaxTrustedLocalSpeed
+        )
         {
             states[identity] = new MotionState(timestamp, position, Vector3.Zero, false);
             return default;
         }
 
         var instantaneousVelocity = displacement / (float)elapsedSeconds;
-        var alpha = 1 - Math.Exp(-Ln2 * elapsedSeconds / parameters.LocalSpeedHalfLifeSeconds);
+        var alpha = 1 - Math.Exp(-Ln2 * elapsedSeconds / PlayerVisibilitySelectionParameters.LocalSpeedHalfLifeSeconds);
         var smoothedVelocity = state.SmoothedVelocity + ((float)alpha * (instantaneousVelocity - state.SmoothedVelocity));
         if (!IsFinite(smoothedVelocity))
         {

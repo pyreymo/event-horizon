@@ -128,6 +128,11 @@ internal sealed unsafe class PlayerAdmissionGate
         List<AdmissionHold> currentHolds;
         lock (stateLock)
         {
+            if (holds.Count == 0)
+            {
+                return;
+            }
+
             currentHolds = [.. holds.Values];
         }
 

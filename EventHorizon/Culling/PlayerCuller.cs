@@ -34,6 +34,7 @@ internal sealed unsafe class PlayerCuller(
         log.Error(exception, "Player visibility selection failed; using legacy fallback.")
     );
     private readonly ShowTransitionBudget showTransitionBudget = new();
+    private readonly List<PlayerVisibilityAction> pendingVisibilityActions = [];
     private PlayerVisibilityFrameState? latestPlayerVisibilityFrame;
 
     #region Lifecycle
@@ -58,6 +59,8 @@ internal sealed unsafe class PlayerCuller(
             objectTable.LocalPlayer?.Position,
             hiddenObjects
         );
+        pendingVisibilityActions.Clear();
+        pendingVisibilityActions.AddRange(frameState.Actions);
         Volatile.Write(ref latestPlayerVisibilityFrame, frameState);
         playerVisibilityPlanner.Commit(frameState);
     }
@@ -114,32 +117,35 @@ internal sealed unsafe class PlayerCuller(
         hiddenObjects.RestoreIfHidden(gameObject);
     }
 
-    private void ApplyPlayerVisibilityReconciliation(
+    private void ApplyPendingPlayerVisibilityActions(GameObjectManager* manager, HiddenObjectTracker hiddenObjects)
+    {
+        var retryCount = 0;
+        var actionCount = pendingVisibilityActions.Count;
+        for (var index = 0; index < actionCount; index++)
+        {
+            var action = pendingVisibilityActions[index];
+            if (ApplyPlayerVisibilityAction(manager, action, hiddenObjects) == PlayerVisibilityActionResult.Retry)
+            {
+                pendingVisibilityActions[retryCount++] = action;
+            }
+        }
+
+        pendingVisibilityActions.RemoveRange(retryCount, pendingVisibilityActions.Count - retryCount);
+    }
+
+    private PlayerVisibilityActionResult ApplyPlayerVisibilityAction(
         GameObjectManager* manager,
-        PlayerVisibilityAction[] actions,
+        PlayerVisibilityAction action,
         HiddenObjectTracker hiddenObjects
     )
     {
-        foreach (var action in actions)
+        return action.Kind switch
         {
-            ApplyPlayerVisibilityAction(manager, action, hiddenObjects);
-        }
-    }
-
-    private void ApplyPlayerVisibilityAction(GameObjectManager* manager, PlayerVisibilityAction action, HiddenObjectTracker hiddenObjects)
-    {
-        switch (action.Kind)
-        {
-            case PlayerVisibilityActionKind.Show:
-                ApplyShowAction(manager, action.Target, hiddenObjects);
-                break;
-            case PlayerVisibilityActionKind.Hide:
-                ApplyHideAction(manager, action.Target, hiddenObjects);
-                break;
-            case PlayerVisibilityActionKind.Swap:
-                ApplySwapAction(manager, action, hiddenObjects);
-                break;
-        }
+            PlayerVisibilityActionKind.Show => ApplyShowAction(manager, action.Target, hiddenObjects),
+            PlayerVisibilityActionKind.Hide => ApplyHideAction(manager, action.Target, hiddenObjects),
+            PlayerVisibilityActionKind.Swap => ApplySwapAction(manager, action, hiddenObjects),
+            _ => PlayerVisibilityActionResult.Completed,
+        };
     }
 
     private void TickVisibility(GameObjectManager* manager, HiddenObjectTracker hiddenObjects)
@@ -152,21 +158,25 @@ internal sealed unsafe class PlayerCuller(
 
         showTransitionBudget.BeginFrame();
         admissionGate.Reconcile(manager, frame.ActiveTarget, hiddenObjects, showTransitionBudget);
-        ApplyPlayerVisibilityReconciliation(manager, frame.Actions, hiddenObjects);
+        ApplyPendingPlayerVisibilityActions(manager, hiddenObjects);
     }
 
-    private void ApplyShowAction(GameObjectManager* manager, PlayerVisibilityTarget target, HiddenObjectTracker hiddenObjects)
+    private PlayerVisibilityActionResult ApplyShowAction(
+        GameObjectManager* manager,
+        PlayerVisibilityTarget target,
+        HiddenObjectTracker hiddenObjects
+    )
     {
         var gameObject = FindPlayerObject(manager, target.Identity, target.ObjectIndex);
         if (gameObject == null)
         {
-            return;
+            return PlayerVisibilityActionResult.Completed;
         }
 
         var wasHidden = hiddenObjects.IsHidden(gameObject);
         if (wasHidden && !showTransitionBudget.CanStartShow())
         {
-            return;
+            return PlayerVisibilityActionResult.Retry;
         }
 
         RestoreIfHidden(gameObject, hiddenObjects);
@@ -174,35 +184,46 @@ internal sealed unsafe class PlayerCuller(
         {
             showTransitionBudget.ConsumeShow();
         }
+
+        return PlayerVisibilityActionResult.Completed;
     }
 
-    private void ApplyHideAction(GameObjectManager* manager, PlayerVisibilityTarget target, HiddenObjectTracker hiddenObjects)
+    private static PlayerVisibilityActionResult ApplyHideAction(
+        GameObjectManager* manager,
+        PlayerVisibilityTarget target,
+        HiddenObjectTracker hiddenObjects
+    )
     {
         var gameObject = FindPlayerObject(manager, target.Identity, target.ObjectIndex);
         if (gameObject != null)
         {
             Hide(gameObject, target.ObjectIndex, hiddenObjects);
         }
+
+        return PlayerVisibilityActionResult.Completed;
     }
 
-    private void ApplySwapAction(GameObjectManager* manager, PlayerVisibilityAction action, HiddenObjectTracker hiddenObjects)
+    private PlayerVisibilityActionResult ApplySwapAction(
+        GameObjectManager* manager,
+        PlayerVisibilityAction action,
+        HiddenObjectTracker hiddenObjects
+    )
     {
         if (!action.PairedTarget.HasValue)
         {
-            ApplyShowAction(manager, action.Target, hiddenObjects);
-            return;
+            return ApplyShowAction(manager, action.Target, hiddenObjects);
         }
 
         var incoming = FindPlayerObject(manager, action.Target.Identity, action.Target.ObjectIndex);
         if (incoming == null)
         {
-            return;
+            return PlayerVisibilityActionResult.Completed;
         }
 
         var incomingWasHidden = hiddenObjects.IsHidden(incoming);
         if (incomingWasHidden && !showTransitionBudget.CanStartShow())
         {
-            return;
+            return PlayerVisibilityActionResult.Retry;
         }
 
         var outgoingTarget = action.PairedTarget.Value;
@@ -217,12 +238,15 @@ internal sealed unsafe class PlayerCuller(
         {
             showTransitionBudget.ConsumeShow();
         }
+
+        return PlayerVisibilityActionResult.Completed;
     }
 
     public void ClearRuntimeState()
     {
         showTransitionBudget.Reset();
         playerVisibilityPlanner.Reset();
+        pendingVisibilityActions.Clear();
         Volatile.Write(ref latestPlayerVisibilityFrame, null);
     }
 
@@ -233,6 +257,12 @@ internal sealed unsafe class PlayerCuller(
     }
 
     #endregion
+
+    private enum PlayerVisibilityActionResult
+    {
+        Completed,
+        Retry,
+    }
 
     #region Culling Rules
 
@@ -328,7 +358,7 @@ internal sealed unsafe class PlayerCuller(
 
     internal sealed class ShowTransitionBudget
     {
-        private const double ShowTransitionsPerSecond = 6.0;
+        private const double ShowTransitionsPerSecond = 12.0;
         private const double ShowTransitionCapacity = 1.0;
         private const int MaxShowStartsPerFrame = 1;
 

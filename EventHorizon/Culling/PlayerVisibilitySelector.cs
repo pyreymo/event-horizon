@@ -31,29 +31,29 @@ internal sealed class PlayerVisibilitySelectionParameters
     public const long DefaultRankStep = 3_000;
     public const long DefaultSoftScoreScale = 1_000;
     public const long DefaultRestRetentionBonus = 500;
-    public const long DefaultMoveRetentionBonus = 23_000;
+    public const long DefaultMoveRetentionBonus = 6_000;
     public const int DefaultPredictionSteps = 4;
     public const double DefaultPredictionStepSeconds = 0.2;
     public const double DefaultPredictionGamma = 0.85;
     public const double DefaultDistanceSigma = 30.0;
     public const double DefaultMotionStartSpeed = 0.5;
     public const double DefaultMotionFullSpeed = 4.0;
-    public const double DefaultLocalSpeedHalfLifeSeconds = 0.35;
+    public const double DefaultLocalSpeedHalfLifeSeconds = 0.20;
     public const double DefaultMaxTrustedLocalSpeed = 50.0;
 
-    public int RankCount => DefaultRankCount;
-    public long RankStep => DefaultRankStep;
-    public long SoftScoreScale => DefaultSoftScoreScale;
-    public long RestRetentionBonus => DefaultRestRetentionBonus;
-    public long MoveRetentionBonus => DefaultMoveRetentionBonus;
-    public int PredictionSteps => DefaultPredictionSteps;
-    public double PredictionStepSeconds => DefaultPredictionStepSeconds;
-    public double PredictionGamma => DefaultPredictionGamma;
-    public double DistanceSigma => DefaultDistanceSigma;
-    public double MotionStartSpeed => DefaultMotionStartSpeed;
-    public double MotionFullSpeed => DefaultMotionFullSpeed;
-    public double LocalSpeedHalfLifeSeconds => DefaultLocalSpeedHalfLifeSeconds;
-    public double MaxTrustedLocalSpeed => DefaultMaxTrustedLocalSpeed;
+    public static int RankCount => DefaultRankCount;
+    public static long RankStep => DefaultRankStep;
+    public static long SoftScoreScale => DefaultSoftScoreScale;
+    public static long RestRetentionBonus => DefaultRestRetentionBonus;
+    public static long MoveRetentionBonus => DefaultMoveRetentionBonus;
+    public static int PredictionSteps => DefaultPredictionSteps;
+    public static double PredictionStepSeconds => DefaultPredictionStepSeconds;
+    public static double PredictionGamma => DefaultPredictionGamma;
+    public static double DistanceSigma => DefaultDistanceSigma;
+    public static double MotionStartSpeed => DefaultMotionStartSpeed;
+    public static double MotionFullSpeed => DefaultMotionFullSpeed;
+    public static double LocalSpeedHalfLifeSeconds => DefaultLocalSpeedHalfLifeSeconds;
+    public static double MaxTrustedLocalSpeed => DefaultMaxTrustedLocalSpeed;
 }
 
 internal static class PlayerVisibilitySelector
@@ -63,7 +63,7 @@ internal static class PlayerVisibilitySelector
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(parameters);
 
-        var candidates = CopyAndValidateCandidates(snapshot.Candidates, parameters.RankCount);
+        var candidates = CopyAndValidateCandidates(snapshot.Candidates, PlayerVisibilitySelectionParameters.RankCount);
         var effectiveBudget = Math.Clamp(snapshot.Budget, 0, candidates.Length);
         var motionFactor = CalculateMotionFactor(snapshot.SmoothedLocalSpeed, parameters);
         var retentionBonus = CalculateRetentionBonus(motionFactor, parameters);
@@ -73,9 +73,11 @@ internal static class PlayerVisibilitySelector
         {
             var candidate = candidates[i];
             var softScore = CalculateSoftScore(candidate.RelativePosition, candidate.RelativeVelocity, parameters);
-            var softPoints = checked((long)Math.Round(parameters.SoftScoreScale * softScore, MidpointRounding.AwayFromZero));
-            var priorityLevel = parameters.RankCount - 1 - candidate.Rank;
-            var baseScore = checked((parameters.RankStep * priorityLevel) + softPoints);
+            var softPoints = checked(
+                (long)Math.Round(PlayerVisibilitySelectionParameters.SoftScoreScale * softScore, MidpointRounding.AwayFromZero)
+            );
+            var priorityLevel = PlayerVisibilitySelectionParameters.RankCount - 1 - candidate.Rank;
+            var baseScore = checked((PlayerVisibilitySelectionParameters.RankStep * priorityLevel) + softPoints);
             var adjustedScore = checked(baseScore + (candidate.WasPreviouslySelected ? retentionBonus : 0));
             rankedCandidates[i] = new ScoredCandidate(
                 candidate.SourceIndex,
@@ -120,9 +122,9 @@ internal static class PlayerVisibilitySelector
         var weightedScore = 0.0;
         var totalWeight = 0.0;
         var weight = 1.0;
-        for (var step = 0; step < parameters.PredictionSteps; step++)
+        for (var step = 0; step < PlayerVisibilitySelectionParameters.PredictionSteps; step++)
         {
-            var time = step * parameters.PredictionStepSeconds;
+            var time = step * PlayerVisibilitySelectionParameters.PredictionStepSeconds;
             var predictedPosition = relativePosition + (relativeVelocity * (float)time);
             if (!IsFinite(predictedPosition))
             {
@@ -135,11 +137,11 @@ internal static class PlayerVisibilitySelector
                 return 0;
             }
 
-            var normalizedDistance = distance / parameters.DistanceSigma;
+            var normalizedDistance = distance / PlayerVisibilitySelectionParameters.DistanceSigma;
             var distanceScore = 1.0 / (1.0 + (normalizedDistance * normalizedDistance));
             weightedScore += weight * distanceScore;
             totalWeight += weight;
-            weight *= parameters.PredictionGamma;
+            weight *= PlayerVisibilitySelectionParameters.PredictionGamma;
         }
 
         if (!double.IsFinite(weightedScore) || !double.IsFinite(totalWeight) || totalWeight <= 0)
@@ -196,13 +198,23 @@ internal static class PlayerVisibilitySelector
             return 1;
         }
 
-        var t = Math.Clamp((speed - parameters.MotionStartSpeed) / (parameters.MotionFullSpeed - parameters.MotionStartSpeed), 0, 1);
+        var t = Math.Clamp(
+            (speed - PlayerVisibilitySelectionParameters.MotionStartSpeed)
+                / (PlayerVisibilitySelectionParameters.MotionFullSpeed - PlayerVisibilitySelectionParameters.MotionStartSpeed),
+            0,
+            1
+        );
         return t * t * (3 - (2 * t));
     }
 
     private static long CalculateRetentionBonus(double motionFactor, PlayerVisibilitySelectionParameters parameters)
     {
-        var bonus = parameters.RestRetentionBonus + ((parameters.MoveRetentionBonus - parameters.RestRetentionBonus) * motionFactor);
+        var bonus =
+            PlayerVisibilitySelectionParameters.RestRetentionBonus
+            + (
+                (PlayerVisibilitySelectionParameters.MoveRetentionBonus - PlayerVisibilitySelectionParameters.RestRetentionBonus)
+                * motionFactor
+            );
         return checked((long)Math.Round(bonus, MidpointRounding.AwayFromZero));
     }
 
