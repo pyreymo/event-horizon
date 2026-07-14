@@ -1,13 +1,11 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
-using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.Culling;
 
-internal sealed unsafe class PlayerAdmissionGate(IPluginLog log)
+internal sealed unsafe class PlayerAdmissionGate
 {
     private const long MissingTargetTimeoutMs = 1500;
 
@@ -19,50 +17,24 @@ internal sealed unsafe class PlayerAdmissionGate(IPluginLog log)
         long HeldTimestamp
     );
 
-    private readonly record struct TransitionLog(
-        AdmissionTransition Transition,
-        PlayerObjectIdentity Identity,
-        int ObjectIndex,
-        VisibilityFlags Before,
-        VisibilityFlags After,
-        nint DrawObject,
-        long FrameworkFrame
-    );
-
-    private enum AdmissionTransition
-    {
-        EnableDrawCompleted,
-        HoldCreated,
-        ModelAlreadySet,
-        ReleasedVisible,
-        TransferredHidden,
-        TimedOut,
-        RestoredStopped,
-        ObjectDisappeared,
-    }
-
-    private readonly IPluginLog log = log;
     private readonly Lock stateLock = new();
     private readonly HashSet<PlayerObjectIdentity> observedPlayers = [];
+    private readonly HashSet<PlayerObjectIdentity> livePlayers = [];
+    private readonly List<PlayerObjectIdentity> staleObservedPlayers = [];
     private readonly Dictionary<PlayerObjectIdentity, AdmissionHold> holds = [];
-    private readonly ConcurrentQueue<TransitionLog> pendingLogs = new();
     private int active;
     private int changed;
     private long frameworkFrame;
 
-    public void BeginFrameworkFrame()
-    {
-        Interlocked.Increment(ref frameworkFrame);
-        DrainLogs();
-    }
+    public void BeginFrameworkFrame() => Interlocked.Increment(ref frameworkFrame);
 
     public void Activate(GameObjectManager* manager)
     {
-        var baseline = CollectRemotePlayers(manager);
+        CollectRemotePlayers(manager, livePlayers);
         lock (stateLock)
         {
             observedPlayers.Clear();
-            observedPlayers.UnionWith(baseline);
+            observedPlayers.UnionWith(livePlayers);
             holds.Clear();
             Interlocked.Exchange(ref changed, 0);
             Volatile.Write(ref active, 1);
@@ -83,23 +55,17 @@ internal sealed unsafe class PlayerAdmissionGate(IPluginLog log)
         Interlocked.Exchange(ref changed, 0);
         foreach (var hold in stoppedHolds)
         {
-            var gameObject = FindLivePlayer(manager, hold.Identity, hold.ObjectIndex, out var objectIndex);
+            var gameObject = FindLivePlayer(manager, hold.Identity, hold.ObjectIndex, out _);
             if (gameObject == null)
             {
-                Enqueue(AdmissionTransition.ObjectDisappeared, hold, objectIndex, 0, 0, 0);
                 continue;
             }
 
-            var before = gameObject->RenderFlags;
             if (hold.OwnsModelFlag)
             {
                 gameObject->RenderFlags &= ~VisibilityFlags.Model;
             }
-
-            Enqueue(AdmissionTransition.RestoredStopped, hold, objectIndex, before, gameObject->RenderFlags, (nint)gameObject->DrawObject);
         }
-
-        DrainLogs();
     }
 
     public bool ConsumeChanged() => Interlocked.Exchange(ref changed, 0) != 0;
@@ -113,8 +79,6 @@ internal sealed unsafe class PlayerAdmissionGate(IPluginLog log)
 
         var identity = PlayerObjectIdentity.From(gameObject);
         var frame = Volatile.Read(ref frameworkFrame);
-        var before = gameObject->RenderFlags;
-        var drawObject = (nint)gameObject->DrawObject;
 
         lock (stateLock)
         {
@@ -123,31 +87,10 @@ internal sealed unsafe class PlayerAdmissionGate(IPluginLog log)
                 return;
             }
 
-            pendingLogs.Enqueue(
-                new TransitionLog(AdmissionTransition.EnableDrawCompleted, identity, objectIndex, before, before, drawObject, frame)
-            );
-
-            if ((before & VisibilityFlags.Model) != 0)
-            {
-                pendingLogs.Enqueue(
-                    new TransitionLog(AdmissionTransition.ModelAlreadySet, identity, objectIndex, before, before, drawObject, frame)
-                );
-            }
-            else
+            if ((gameObject->RenderFlags & VisibilityFlags.Model) == 0)
             {
                 gameObject->RenderFlags |= VisibilityFlags.Model;
                 holds[identity] = new AdmissionHold(identity, objectIndex, true, frame, Environment.TickCount64);
-                pendingLogs.Enqueue(
-                    new TransitionLog(
-                        AdmissionTransition.HoldCreated,
-                        identity,
-                        objectIndex,
-                        before,
-                        gameObject->RenderFlags,
-                        drawObject,
-                        frame
-                    )
-                );
             }
         }
 
@@ -156,10 +99,22 @@ internal sealed unsafe class PlayerAdmissionGate(IPluginLog log)
 
     public void PruneObservedPlayers(GameObjectManager* manager)
     {
-        var livePlayers = CollectRemotePlayers(manager);
+        CollectRemotePlayers(manager, livePlayers);
         lock (stateLock)
         {
-            observedPlayers.RemoveWhere(identity => !livePlayers.Contains(identity) && !holds.ContainsKey(identity));
+            staleObservedPlayers.Clear();
+            foreach (var identity in observedPlayers)
+            {
+                if (!livePlayers.Contains(identity) && !holds.ContainsKey(identity))
+                {
+                    staleObservedPlayers.Add(identity);
+                }
+            }
+
+            foreach (var identity in staleObservedPlayers)
+            {
+                observedPlayers.Remove(identity);
+            }
         }
     }
 
@@ -183,11 +138,7 @@ internal sealed unsafe class PlayerAdmissionGate(IPluginLog log)
             var gameObject = FindLivePlayer(manager, hold.Identity, hold.ObjectIndex, out var objectIndex);
             if (gameObject == null)
             {
-                if (RemoveHold(hold))
-                {
-                    Enqueue(AdmissionTransition.ObjectDisappeared, hold, objectIndex, 0, 0, 0);
-                }
-
+                RemoveHold(hold);
                 continue;
             }
 
@@ -198,37 +149,22 @@ internal sealed unsafe class PlayerAdmissionGate(IPluginLog log)
                     continue;
                 }
 
-                var before = gameObject->RenderFlags;
                 if (hold.OwnsModelFlag)
                 {
                     gameObject->RenderFlags &= ~VisibilityFlags.Model;
                 }
-
-                Enqueue(AdmissionTransition.TimedOut, hold, objectIndex, before, gameObject->RenderFlags, (nint)gameObject->DrawObject);
                 continue;
             }
 
             if (!target.DesiredVisible)
             {
-                var transferBefore = gameObject->RenderFlags;
                 hiddenObjects.AdoptHidden(
                     gameObject,
                     HiddenObjectTracker.PluginHiddenFlags,
                     hold.OwnsModelFlag ? VisibilityFlags.Model : 0,
                     objectIndex
                 );
-                if (RemoveHold(hold))
-                {
-                    Enqueue(
-                        AdmissionTransition.TransferredHidden,
-                        hold,
-                        objectIndex,
-                        transferBefore,
-                        gameObject->RenderFlags,
-                        (nint)gameObject->DrawObject
-                    );
-                }
-
+                RemoveHold(hold);
                 continue;
             }
 
@@ -258,18 +194,7 @@ internal sealed unsafe class PlayerAdmissionGate(IPluginLog log)
             {
                 showTransitionBudget.ConsumeShow();
             }
-
-            Enqueue(
-                AdmissionTransition.ReleasedVisible,
-                hold,
-                objectIndex,
-                releaseBefore,
-                gameObject->RenderFlags,
-                (nint)gameObject->DrawObject
-            );
         }
-
-        DrainLogs();
     }
 
     private bool RemoveHold(AdmissionHold hold)
@@ -280,58 +205,12 @@ internal sealed unsafe class PlayerAdmissionGate(IPluginLog log)
         }
     }
 
-    private void Enqueue(
-        AdmissionTransition transition,
-        AdmissionHold hold,
-        int objectIndex,
-        VisibilityFlags before,
-        VisibilityFlags after,
-        nint drawObject
-    ) =>
-        pendingLogs.Enqueue(
-            new TransitionLog(transition, hold.Identity, objectIndex, before, after, drawObject, Volatile.Read(ref frameworkFrame))
-        );
-
-    private void DrainLogs()
+    private static void CollectRemotePlayers(GameObjectManager* manager, HashSet<PlayerObjectIdentity> players)
     {
-        while (pendingLogs.TryDequeue(out var entry))
-        {
-            var message =
-                $"Player admission {GetTransitionText(entry.Transition)}: ObjectIndex={entry.ObjectIndex}, "
-                + $"GameObject=0x{entry.Identity.Address.ToInt64():X}, GameObjectId=0x{entry.Identity.GameObjectId:X}, "
-                + $"EntityId=0x{entry.Identity.EntityId:X}, RenderFlags=0x{(uint)entry.Before:X}->0x{(uint)entry.After:X}, "
-                + $"DrawObject=0x{entry.DrawObject.ToInt64():X}, FrameworkGeneration={entry.FrameworkFrame}.";
-            if (entry.Transition == AdmissionTransition.TimedOut)
-            {
-                log.Warning(message);
-            }
-            else
-            {
-                log.Debug(message);
-            }
-        }
-    }
-
-    private static string GetTransitionText(AdmissionTransition transition) =>
-        transition switch
-        {
-            AdmissionTransition.EnableDrawCompleted => "EnableDraw completed",
-            AdmissionTransition.HoldCreated => "hold created",
-            AdmissionTransition.ModelAlreadySet => "hold skipped because model bit was already set",
-            AdmissionTransition.ReleasedVisible => "released as visible",
-            AdmissionTransition.TransferredHidden => "transferred to normal hidden state",
-            AdmissionTransition.TimedOut => "timed out",
-            AdmissionTransition.RestoredStopped => "restored because runtime mode stopped",
-            AdmissionTransition.ObjectDisappeared => "identity mismatch or object disappeared",
-            _ => transition.ToString(),
-        };
-
-    private static HashSet<PlayerObjectIdentity> CollectRemotePlayers(GameObjectManager* manager)
-    {
-        var players = new HashSet<PlayerObjectIdentity>();
+        players.Clear();
         if (manager == null)
         {
-            return players;
+            return;
         }
 
         for (var index = CharacterObjectSlots.FirstRemoteSlot; index <= CharacterObjectSlots.LastEvenSlot; index += 2)
@@ -342,8 +221,6 @@ internal sealed unsafe class PlayerAdmissionGate(IPluginLog log)
                 players.Add(PlayerObjectIdentity.From(gameObject));
             }
         }
-
-        return players;
     }
 
     private static bool IsRemotePlayer(GameObject* gameObject, out int objectIndex)

@@ -44,7 +44,7 @@ internal sealed unsafe class CullingController : IDisposable
         this.configuration = configuration;
         this.playerState = playerState;
         this.condition = condition;
-        admissionGate = new PlayerAdmissionGate(log);
+        admissionGate = new PlayerAdmissionGate();
         players = new PlayerCuller(configuration, playerState, objectTable, targetManager, gameGui, admissionGate, log);
         nonPlayers = new NonPlayerCuller(configuration);
         hiddenPlayerMarker = new HiddenPlayerMarker(configuration, gameGui, staticVfxController, worldDotOverlay);
