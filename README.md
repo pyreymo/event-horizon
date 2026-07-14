@@ -21,6 +21,9 @@ It hides distant or less relevant player characters while keeping important play
 
 The goal is simple: keep the world readable without turning every crowded city into a wall of character models.
 
+**Vanilla (~50 FPS)**: <img src="./images/gameplay-vanilla.png" alt="Gameplay preview - vanilla">
+**Event Horizon (110 FPS+)**: <img src="./images/gameplay-event-horizon.png" alt="Gameplay preview - Event Horizon">
+
 ## Install
 
 Add this custom plugin repository in Dalamud:
