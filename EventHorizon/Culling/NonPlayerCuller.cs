@@ -1,24 +1,20 @@
 using System;
-using System.Collections.Generic;
 using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Client.Game.Event;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
-using GameEventHandler = FFXIVClientStructs.FFXIV.Client.Game.Event.EventHandler;
 
 namespace EventHorizon.Culling;
 
 internal sealed unsafe class NonPlayerCuller(Configuration configuration)
 {
-    private readonly HashSet<uint> hiddenPlayerOwnerEntityIds = [];
-    private readonly HashSet<uint> oddSlotPlayerOwnerIds = [];
     private readonly EventNpcRule eventNpcs = new();
+    private uint localPlayerEntityId;
 
     public void Refresh(GameObjectManager* manager) => eventNpcs.Refresh(manager, configuration.HideUnattachedEventNpcs);
 
     public void Tick(GameObjectManager* manager, HiddenObjectTracker hiddenObjects, VisibilityFlags hiddenFlags)
     {
-        CollectHiddenPlayerOwnerEntityIds(manager, hiddenObjects);
-        CollectOddSlotPlayerOwnerIds(manager);
+        localPlayerEntityId = GetLocalPlayerEntityId(manager);
 
         var maxIndex = Math.Min(EventNpcRule.LastSlot, manager->Objects.IndexSorted.Length - 1);
         for (var index = 0; index <= maxIndex; index++)
@@ -38,21 +34,17 @@ internal sealed unsafe class NonPlayerCuller(Configuration configuration)
                 hiddenObjects.RestoreIfHidden(gameObject);
             }
         }
-
-        hiddenPlayerOwnerEntityIds.Clear();
-        oddSlotPlayerOwnerIds.Clear();
     }
 
     public void Clear()
     {
         eventNpcs.Clear();
-        hiddenPlayerOwnerEntityIds.Clear();
-        oddSlotPlayerOwnerIds.Clear();
+        localPlayerEntityId = 0;
     }
 
     private bool ShouldHide(GameObject* gameObject, int index)
     {
-        if (PlayerObjectSlots.IsLocalReserved(index))
+        if (CharacterObjectSlots.IsLocalReservedSlot(index))
         {
             return false;
         }
@@ -62,84 +54,31 @@ internal sealed unsafe class NonPlayerCuller(Configuration configuration)
             return eventNpcs.ShouldHide(gameObject, index);
         }
 
-        if (PlayerObjectSlots.IsPlayer(index))
+        if (CharacterObjectSlots.IsEvenSlot(index))
         {
-            return gameObject->ObjectKind == ObjectKind.BattleNpc
-                && gameObject->OwnerId != 0
-                && hiddenPlayerOwnerEntityIds.Contains(gameObject->OwnerId);
+            return configuration.HideOtherPlayerBattlePets
+                && localPlayerEntityId != 0
+                && gameObject->ObjectKind == ObjectKind.BattleNpc
+                && gameObject->OwnerId != localPlayerEntityId;
         }
 
-        if (!PlayerObjectSlots.IsAttached(index))
+        if (CharacterObjectSlots.IsOddSlot(index))
         {
-            return false;
+            return gameObject->ObjectKind switch
+            {
+                ObjectKind.Companion => configuration.HideOtherPlayerCompanions,
+                ObjectKind.Ornament => configuration.HideOtherPlayerOrnaments,
+                _ => false,
+            };
         }
 
-        if (
-            configuration.HideOtherPlayerBattlePets
-            && gameObject->ObjectKind == ObjectKind.BattleNpc
-            && gameObject->OwnerId != 0
-            && oddSlotPlayerOwnerIds.Contains(gameObject->OwnerId)
-        )
-        {
-            return true;
-        }
-
-        return gameObject->ObjectKind switch
-        {
-            ObjectKind.Companion => configuration.HideOtherPlayerCompanions,
-            ObjectKind.Ornament => configuration.HideOtherPlayerOrnaments,
-            _ => false,
-        };
+        return false;
     }
 
-    private void CollectHiddenPlayerOwnerEntityIds(GameObjectManager* manager, HiddenObjectTracker hiddenObjects)
+    private static uint GetLocalPlayerEntityId(GameObjectManager* manager)
     {
-        hiddenPlayerOwnerEntityIds.Clear();
-        var maxIndex = Math.Min(PlayerObjectSlots.LastPlayerRelated, manager->Objects.IndexSorted.Length - 1);
-        for (var index = 0; index <= maxIndex; index++)
-        {
-            if (!PlayerObjectSlots.IsPlayer(index))
-            {
-                continue;
-            }
-
-            var gameObject = manager->Objects.IndexSorted[index].Value;
-            if (gameObject != null && gameObject->ObjectKind == ObjectKind.Pc && hiddenObjects.IsHidden(gameObject))
-            {
-                hiddenPlayerOwnerEntityIds.Add(gameObject->EntityId);
-            }
-        }
-    }
-
-    private void CollectOddSlotPlayerOwnerIds(GameObjectManager* manager)
-    {
-        oddSlotPlayerOwnerIds.Clear();
-        if (!configuration.HideOtherPlayerBattlePets)
-        {
-            return;
-        }
-
-        var maxIndex = Math.Min(PlayerObjectSlots.LastPlayerRelated, manager->Objects.IndexSorted.Length - 1);
-        for (var index = 0; index <= maxIndex; index++)
-        {
-            if (!PlayerObjectSlots.IsAttached(index) || PlayerObjectSlots.IsLocalReserved(index))
-            {
-                continue;
-            }
-
-            var gameObject = manager->Objects.IndexSorted[index].Value;
-            if (gameObject == null || gameObject->ObjectKind != ObjectKind.Pc)
-            {
-                continue;
-            }
-
-            oddSlotPlayerOwnerIds.Add(gameObject->EntityId);
-            var gameObjectId = (ulong)gameObject->GetGameObjectId();
-            if (gameObjectId <= uint.MaxValue)
-            {
-                oddSlotPlayerOwnerIds.Add((uint)gameObjectId);
-            }
-        }
+        var localPlayer = manager->Objects.IndexSorted[0].Value;
+        return localPlayer != null && localPlayer->ObjectKind == ObjectKind.Pc ? localPlayer->EntityId : 0;
     }
 
     private sealed class EventNpcRule
@@ -180,19 +119,24 @@ internal sealed unsafe class NonPlayerCuller(Configuration configuration)
                 return false;
             }
 
+            if (gameObject->NamePlateIconId != 0)
+            {
+                return false;
+            }
+
             if ((gameObject->TargetableStatus & ObjectTargetableFlags.IsTargetable) == 0)
             {
                 return true;
             }
 
-            var handlers = stackalloc GameEventHandler*[MaxEventHandlers];
-            var handlerCount = Math.Clamp(gameObject->GetEventHandlersImpl(handlers), 0, MaxEventHandlers);
-            if (handlerCount == 0)
+            var handlers = stackalloc FFXIVClientStructs.FFXIV.Client.Game.Event.EventHandler*[MaxEventHandlers];
+            var handlerCount = gameObject->GetEventHandlersImpl(handlers);
+            if (handlerCount <= 0 || handlerCount > MaxEventHandlers)
             {
                 return false;
             }
 
-            var hasDialogueHandler = false;
+            var hasDefaultTalk = false;
             for (var index = 0; index < handlerCount; index++)
             {
                 var handler = handlers[index];
@@ -204,8 +148,7 @@ internal sealed unsafe class NonPlayerCuller(Configuration configuration)
                 switch (handler->Info.EventId.ContentId)
                 {
                     case EventHandlerContent.DefaultTalk:
-                    case EventHandlerContent.CustomTalk:
-                        hasDialogueHandler = true;
+                        hasDefaultTalk = true;
                         break;
                     case EventHandlerContent.Quest:
                         if (handler->GetNameplateIconForObject(gameObject) != 0)
@@ -218,7 +161,7 @@ internal sealed unsafe class NonPlayerCuller(Configuration configuration)
                 }
             }
 
-            return hasDialogueHandler;
+            return hasDefaultTalk;
         }
     }
 }

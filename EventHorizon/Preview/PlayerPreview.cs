@@ -61,7 +61,7 @@ internal sealed unsafe class PlayerPreview(Configuration configuration)
         var builder = PlayerPreviewBuilder.Begin(manager, configuration);
         foreach (var target in targets)
         {
-            if (!PlayerObjectSlots.IsPlayer(target.ObjectIndex))
+            if (!CharacterObjectSlots.IsEvenSlot(target.ObjectIndex))
             {
                 continue;
             }

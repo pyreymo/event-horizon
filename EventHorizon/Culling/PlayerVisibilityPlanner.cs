@@ -237,7 +237,7 @@ internal sealed class PlayerVisibilityPlanner(Action<Exception> reportSelectionF
 
     private static PlayerVisibilityClassification Classify(int index, PlayerKeepDecision keepDecision, bool previewVisible)
     {
-        if (!PlayerObjectSlots.IsPlayer(index))
+        if (!CharacterObjectSlots.IsEvenSlot(index))
         {
             return PlayerVisibilityClassification.Unmanaged;
         }

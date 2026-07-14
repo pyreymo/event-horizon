@@ -287,7 +287,7 @@ internal sealed unsafe class PlayerCuller(
 
         for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
         {
-            if (!PlayerObjectSlots.IsPlayer(index))
+            if (!CharacterObjectSlots.IsEvenSlot(index))
             {
                 continue;
             }

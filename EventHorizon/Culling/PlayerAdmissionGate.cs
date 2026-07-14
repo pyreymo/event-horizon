@@ -6,8 +6,8 @@ namespace EventHorizon.Culling;
 
 internal sealed class PlayerAdmissionGate
 {
-    internal const int FirstPlayerSlot = PlayerObjectSlots.FirstPlayer;
-    internal const int LastPlayerSlot = PlayerObjectSlots.LastPlayer;
+    internal const int FirstPlayerSlot = CharacterObjectSlots.FirstRemoteSlot;
+    internal const int LastPlayerSlot = CharacterObjectSlots.LastEvenSlot;
     internal const int PlayerSlotStep = 2;
 
     private readonly PlayerSlotIdentityTracker slotTracker = new();
