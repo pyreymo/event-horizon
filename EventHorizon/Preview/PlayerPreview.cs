@@ -75,7 +75,8 @@ internal sealed unsafe class PlayerPreview(Configuration configuration)
                     GetName(gameObject),
                     target.Decision,
                     !target.DesiredVisible,
-                    target.CutByBudget
+                    target.CutByBudget,
+                    target.SelectionScore
                 );
             }
         }
@@ -173,7 +174,8 @@ internal readonly record struct PlayerPreviewEntry(
     PlayerKeepBudgetPolicy BudgetPolicy,
     int? BudgetRank,
     bool CutByBudget,
-    PlayerKeepRuleMask MatchedRules
+    PlayerKeepRuleMask MatchedRules,
+    PlayerVisibilitySelectionScore? SelectionScore
 );
 
 internal readonly record struct PlayerPreviewStats(int TotalPlayers, int VisiblePlayers, int HiddenPlayers, int BudgetLimit)
@@ -224,7 +226,8 @@ internal sealed unsafe class PlayerPreviewBuilder
         string name,
         PlayerKeepDecision keepDecision,
         bool shouldHide,
-        bool cutByBudget
+        bool cutByBudget,
+        PlayerVisibilitySelectionScore? selectionScore
     )
     {
         if (gameObject == null)
@@ -256,7 +259,8 @@ internal sealed unsafe class PlayerPreviewBuilder
                 keepDecision.BudgetPolicy,
                 keepDecision.Kind == PlayerKeepDecisionKind.Keep ? keepDecision.Rank : null,
                 cutByBudget,
-                keepDecision.MatchedRules
+                keepDecision.MatchedRules,
+                selectionScore
             )
         );
     }

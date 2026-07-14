@@ -30,7 +30,7 @@ internal sealed class PlayerVisibilitySelectionParameters
     public const int DefaultRankCount = 8;
     public const long DefaultRankStep = 3_000;
     public const long DefaultSoftScoreScale = 1_000;
-    public const long DefaultRestRetentionBonus = 500;
+    public const long DefaultRestRetentionBonus = 200;
     public const long DefaultMoveRetentionBonus = 6_000;
     public const int DefaultPredictionSteps = 4;
     public const double DefaultPredictionStepSeconds = 0.2;
@@ -49,7 +49,7 @@ internal sealed class PlayerVisibilitySelectionParameters
     public static int PredictionSteps => DefaultPredictionSteps;
     public static double PredictionStepSeconds => DefaultPredictionStepSeconds;
     public static double PredictionGamma => DefaultPredictionGamma;
-    public static double DistanceSigma => DefaultDistanceSigma;
+    public double DistanceSigma { get; set; } = DefaultDistanceSigma;
     public static double MotionStartSpeed => DefaultMotionStartSpeed;
     public static double MotionFullSpeed => DefaultMotionFullSpeed;
     public static double LocalSpeedHalfLifeSeconds => DefaultLocalSpeedHalfLifeSeconds;
@@ -58,10 +58,20 @@ internal sealed class PlayerVisibilitySelectionParameters
 
 internal static class PlayerVisibilitySelector
 {
-    public static int[] Select(PlayerVisibilitySelectionSnapshot snapshot, PlayerVisibilitySelectionParameters parameters)
+    public static int[] Select(PlayerVisibilitySelectionSnapshot snapshot, PlayerVisibilitySelectionParameters parameters) =>
+        Evaluate(snapshot, parameters).SelectedSourceIndices;
+
+    public static PlayerVisibilitySelectionResult Evaluate(
+        PlayerVisibilitySelectionSnapshot snapshot,
+        PlayerVisibilitySelectionParameters parameters
+    )
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(parameters);
+        if (!double.IsFinite(parameters.DistanceSigma) || parameters.DistanceSigma <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(parameters), "DistanceSigma must be finite and greater than zero.");
+        }
 
         var candidates = CopyAndValidateCandidates(snapshot.Candidates, PlayerVisibilitySelectionParameters.RankCount);
         var effectiveBudget = Math.Clamp(snapshot.Budget, 0, candidates.Length);
@@ -72,18 +82,25 @@ internal static class PlayerVisibilitySelector
         for (var i = 0; i < candidates.Length; i++)
         {
             var candidate = candidates[i];
-            var softScore = CalculateSoftScore(candidate.RelativePosition, candidate.RelativeVelocity, parameters);
+            var softScoreTrace = CalculateSoftScoreTrace(candidate.RelativePosition, candidate.RelativeVelocity, parameters);
             var softPoints = checked(
-                (long)Math.Round(PlayerVisibilitySelectionParameters.SoftScoreScale * softScore, MidpointRounding.AwayFromZero)
+                (long)Math.Round(PlayerVisibilitySelectionParameters.SoftScoreScale * softScoreTrace.Score, MidpointRounding.AwayFromZero)
             );
             var priorityLevel = PlayerVisibilitySelectionParameters.RankCount - 1 - candidate.Rank;
-            var baseScore = checked((PlayerVisibilitySelectionParameters.RankStep * priorityLevel) + softPoints);
-            var adjustedScore = checked(baseScore + (candidate.WasPreviouslySelected ? retentionBonus : 0));
+            var rankPoints = checked(PlayerVisibilitySelectionParameters.RankStep * priorityLevel);
+            var baseScore = checked(rankPoints + softPoints);
+            var appliedRetentionBonus = candidate.WasPreviouslySelected ? retentionBonus : 0;
+            var adjustedScore = checked(baseScore + appliedRetentionBonus);
             rankedCandidates[i] = new ScoredCandidate(
                 candidate.SourceIndex,
                 candidate.GameObjectId,
                 candidate.EntityId,
                 candidate.ObjectIndex,
+                softScoreTrace.Score,
+                softScoreTrace.PredictedDistances,
+                softPoints,
+                rankPoints,
+                appliedRetentionBonus,
                 baseScore,
                 adjustedScore,
                 candidate.WasPreviouslySelected
@@ -99,10 +116,32 @@ internal static class PlayerVisibilitySelector
             selectedSourceIndices[i] = selected.SourceIndex;
         }
 
-        return selectedSourceIndices;
+        var scores = new PlayerVisibilitySelectionScore[rankedCandidates.Length];
+        for (var i = 0; i < rankedCandidates.Length; i++)
+        {
+            var candidate = rankedCandidates[i];
+            scores[i] = new PlayerVisibilitySelectionScore(
+                candidate.SourceIndex,
+                candidate.SoftScore,
+                candidate.PredictedDistances,
+                parameters.DistanceSigma,
+                candidate.SoftPoints,
+                candidate.RankPoints,
+                candidate.RetentionPoints,
+                candidate.AdjustedScore
+            );
+        }
+
+        return new PlayerVisibilitySelectionResult(selectedSourceIndices, scores);
     }
 
     internal static double CalculateSoftScore(
+        Vector3 relativePosition,
+        Vector3 relativeVelocity,
+        PlayerVisibilitySelectionParameters parameters
+    ) => CalculateSoftScoreTrace(relativePosition, relativeVelocity, parameters).Score;
+
+    private static SoftScoreTrace CalculateSoftScoreTrace(
         Vector3 relativePosition,
         Vector3 relativeVelocity,
         PlayerVisibilitySelectionParameters parameters
@@ -111,7 +150,7 @@ internal static class PlayerVisibilitySelector
         ArgumentNullException.ThrowIfNull(parameters);
         if (!IsFinite(relativePosition))
         {
-            return 0;
+            return SoftScoreTrace.Zero;
         }
 
         if (!IsFinite(relativeVelocity))
@@ -122,22 +161,25 @@ internal static class PlayerVisibilitySelector
         var weightedScore = 0.0;
         var totalWeight = 0.0;
         var weight = 1.0;
+        var predictedDistances = Vector4.Zero;
         for (var step = 0; step < PlayerVisibilitySelectionParameters.PredictionSteps; step++)
         {
             var time = step * PlayerVisibilitySelectionParameters.PredictionStepSeconds;
             var predictedPosition = relativePosition + (relativeVelocity * (float)time);
             if (!IsFinite(predictedPosition))
             {
-                return 0;
+                return SoftScoreTrace.Zero;
             }
 
             var distance = predictedPosition.Length();
             if (!float.IsFinite(distance))
             {
-                return 0;
+                return SoftScoreTrace.Zero;
             }
 
-            var normalizedDistance = distance / PlayerVisibilitySelectionParameters.DistanceSigma;
+            predictedDistances[step] = distance;
+
+            var normalizedDistance = distance / parameters.DistanceSigma;
             var distanceScore = 1.0 / (1.0 + (normalizedDistance * normalizedDistance));
             weightedScore += weight * distanceScore;
             totalWeight += weight;
@@ -146,11 +188,11 @@ internal static class PlayerVisibilitySelector
 
         if (!double.IsFinite(weightedScore) || !double.IsFinite(totalWeight) || totalWeight <= 0)
         {
-            return 0;
+            return SoftScoreTrace.Zero;
         }
 
         var softScore = weightedScore / totalWeight;
-        return double.IsFinite(softScore) ? Math.Clamp(softScore, 0, 1) : 0;
+        return new SoftScoreTrace(double.IsFinite(softScore) ? Math.Clamp(softScore, 0, 1) : 0, predictedDistances);
     }
 
     private static PlayerVisibilitySelectionCandidate[] CopyAndValidateCandidates(
@@ -261,11 +303,34 @@ internal static class PlayerVisibilitySelector
         ulong GameObjectId,
         uint EntityId,
         int ObjectIndex,
+        double SoftScore,
+        Vector4 PredictedDistances,
+        long SoftPoints,
+        long RankPoints,
+        long RetentionPoints,
         long BaseScore,
         long AdjustedScore,
         bool WasPreviouslySelected
     );
+
+    private readonly record struct SoftScoreTrace(double Score, Vector4 PredictedDistances)
+    {
+        public static readonly SoftScoreTrace Zero = new(0, Vector4.Zero);
+    }
 }
+
+internal sealed record PlayerVisibilitySelectionResult(int[] SelectedSourceIndices, IReadOnlyList<PlayerVisibilitySelectionScore> Scores);
+
+internal readonly record struct PlayerVisibilitySelectionScore(
+    int SourceIndex,
+    double SoftScore,
+    Vector4 PredictedDistances,
+    double HalfScoreDistance,
+    long SoftPoints,
+    long RankPoints,
+    long RetentionPoints,
+    long TotalPoints
+);
 
 internal sealed class PlayerVisibilitySelectionController
 {
@@ -290,7 +355,8 @@ internal sealed class PlayerVisibilitySelectionController
         PlayerVisibilityTarget[] legacyTargets,
         bool limitVisiblePlayerCount,
         int visiblePlayerCountLimit,
-        Vector3? localPosition
+        Vector3? localPosition,
+        float softScoreHalfDistance
     )
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -298,17 +364,18 @@ internal sealed class PlayerVisibilitySelectionController
 
         if (!localPosition.HasValue || !IsFinite(localPosition.Value))
         {
-            return new PlayerVisibilitySelectionEvaluation(PlayerVisibilitySelectionStatus.Unavailable, []);
+            return new PlayerVisibilitySelectionEvaluation(PlayerVisibilitySelectionStatus.Unavailable, [], []);
         }
 
         try
         {
+            parameters.DistanceSigma = softScoreHalfDistance;
             return EvaluateCore(plan, legacyTargets, limitVisiblePlayerCount, visiblePlayerCountLimit, localPosition.Value);
         }
         catch (Exception exception)
         {
             reportFailure?.Invoke(exception);
-            return new PlayerVisibilitySelectionEvaluation(PlayerVisibilitySelectionStatus.Failed, []);
+            return new PlayerVisibilitySelectionEvaluation(PlayerVisibilitySelectionStatus.Failed, [], []);
         }
     }
 
@@ -400,12 +467,12 @@ internal sealed class PlayerVisibilitySelectionController
 
         var budget = limitVisiblePlayerCount ? Math.Clamp(visiblePlayerCountLimit, 1, 100) : candidates.Count;
         var snapshot = new PlayerVisibilitySelectionSnapshot(budget, localSpeedSmoother.SmoothedSpeed, candidates);
-        var selection = PlayerVisibilitySelector.Select(snapshot, parameters);
+        var selection = PlayerVisibilitySelector.Evaluate(snapshot, parameters);
 
-        var selectedKeys = new PlayerVisibilitySelectionKey[selection.Length];
-        for (var selectedIndex = 0; selectedIndex < selection.Length; selectedIndex++)
+        var selectedKeys = new PlayerVisibilitySelectionKey[selection.SelectedSourceIndices.Length];
+        for (var selectedIndex = 0; selectedIndex < selection.SelectedSourceIndices.Length; selectedIndex++)
         {
-            var sourceIndex = selection[selectedIndex];
+            var sourceIndex = selection.SelectedSourceIndices[selectedIndex];
             var entry = plan.Entries[sourceIndex];
             selectedKeys[selectedIndex] = new(sourceIndex, entry.Identity, entry.ObjectIndex);
         }
@@ -413,7 +480,7 @@ internal sealed class PlayerVisibilitySelectionController
         var status = localSpeedSmoother.HasVelocityEstimate
             ? PlayerVisibilitySelectionStatus.Ready
             : PlayerVisibilitySelectionStatus.Warmup;
-        return new PlayerVisibilitySelectionEvaluation(status, Array.AsReadOnly(selectedKeys));
+        return new PlayerVisibilitySelectionEvaluation(status, Array.AsReadOnly(selectedKeys), selection.Scores);
     }
 
     private static HashSet<PlayerObjectIdentity> GetLegacySelectedIdentities(PlayerVisibilityTarget[] targets)
@@ -442,7 +509,8 @@ internal sealed class PlayerVisibilitySelectionController
 
 internal sealed record PlayerVisibilitySelectionEvaluation(
     PlayerVisibilitySelectionStatus Status,
-    IReadOnlyList<PlayerVisibilitySelectionKey> SelectedKeys
+    IReadOnlyList<PlayerVisibilitySelectionKey> SelectedKeys,
+    IReadOnlyList<PlayerVisibilitySelectionScore> Scores
 );
 
 internal readonly record struct PlayerVisibilitySelectionKey(int SourceIndex, PlayerObjectIdentity Identity, int ObjectIndex);

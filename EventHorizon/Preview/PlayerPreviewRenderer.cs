@@ -299,6 +299,33 @@ internal sealed class PlayerPreviewRenderer
             string.Format(Loc.Text("Config.Preview.Status"), Loc.Text(player.IsVisible ? "Status.Visible" : "Status.Hidden"))
         );
 
+        if (player.SelectionScore is { } score)
+        {
+            ImGui.TextUnformatted(string.Format(Loc.Text("Config.Preview.Tooltip.SoftScore"), score.SoftScore, score.SoftPoints));
+            ImGui.TextUnformatted(
+                string.Format(
+                    Loc.Text("Config.Preview.Tooltip.PredictedDistances"),
+                    score.PredictedDistances.X,
+                    score.PredictedDistances.Y,
+                    score.PredictedDistances.Z,
+                    score.PredictedDistances.W
+                )
+            );
+            ImGui.TextUnformatted(
+                string.Format(
+                    Loc.Text("Config.Preview.Tooltip.ScoreBreakdown"),
+                    score.RankPoints,
+                    score.SoftPoints,
+                    score.RetentionPoints,
+                    score.TotalPoints
+                )
+            );
+        }
+        else
+        {
+            ImGui.TextUnformatted(Loc.Text("Config.Preview.Tooltip.SoftScoreUnavailable"));
+        }
+
         if (player.BestRule.HasValue)
         {
             ImGui.TextUnformatted(string.Format(Loc.Text("Config.Preview.Tooltip.Rule"), getRuleLabel(player.BestRule.Value)));

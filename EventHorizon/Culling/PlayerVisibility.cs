@@ -30,7 +30,8 @@ internal readonly record struct PlayerVisibilityTarget(
     PlayerVisibilityClassification Classification,
     bool DesiredVisible,
     PlayerKeepDecision Decision,
-    bool CutByBudget
+    bool CutByBudget,
+    PlayerVisibilitySelectionScore? SelectionScore
 );
 
 internal enum PlayerVisibilityClassification

@@ -57,6 +57,7 @@ internal sealed unsafe class PlayerCuller(
             configuration.LimitVisiblePlayerCount,
             configuration.VisiblePlayerCountLimit,
             objectTable.LocalPlayer?.Position,
+            Math.Clamp(configuration.KeepNearbyPlayersRange, PlayerKeepRuleSettings.NearbyRangeMin, PlayerKeepRuleSettings.NearbyRangeMax),
             hiddenObjects
         );
         pendingVisibilityActions.Clear();

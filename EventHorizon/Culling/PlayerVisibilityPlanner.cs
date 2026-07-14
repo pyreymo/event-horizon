@@ -24,23 +24,35 @@ internal sealed class PlayerVisibilityPlanner(Action<Exception> reportSelectionF
         bool limitVisiblePlayerCount,
         int visiblePlayerCountLimit,
         Vector3? localPosition,
+        float softScoreHalfDistance,
         HiddenObjectTracker hiddenObjectTracker
     )
     {
         var plan = BuildPlan(manager, keepPlan, previewVisibleEntityId);
         var legacyTarget = BuildLegacyTarget(plan);
-        var evaluation = selectionController.Evaluate(plan, legacyTarget, limitVisiblePlayerCount, visiblePlayerCountLimit, localPosition);
+        var evaluation = selectionController.Evaluate(
+            plan,
+            legacyTarget,
+            limitVisiblePlayerCount,
+            visiblePlayerCountLimit,
+            localPosition,
+            softScoreHalfDistance
+        );
         var activeTarget = legacyTarget;
         if (evaluation.Status == PlayerVisibilitySelectionStatus.Ready)
         {
             try
             {
-                activeTarget = BuildStableTarget(plan, evaluation.SelectedKeys);
+                activeTarget = BuildStableTarget(plan, evaluation.SelectedKeys, evaluation.Scores);
             }
             catch (Exception exception)
             {
                 reportFailure(exception);
             }
+        }
+        else
+        {
+            activeTarget = AddSelectionScores(plan, legacyTarget, evaluation.Scores);
         }
 
         var actions = Reconcile(activeTarget, hiddenObjectTracker);
@@ -96,7 +108,8 @@ internal sealed class PlayerVisibilityPlanner(Action<Exception> reportSelectionF
                         entry.Classification,
                         GetLegacyDesiredVisible(entry),
                         entry.Decision,
-                        entry.CutByBudget
+                        entry.CutByBudget,
+                        null
                     )
                 );
             }
@@ -107,7 +120,8 @@ internal sealed class PlayerVisibilityPlanner(Action<Exception> reportSelectionF
 
     private PlayerVisibilityTarget[] BuildStableTarget(
         PlayerVisibilityPlan plan,
-        IReadOnlyCollection<PlayerVisibilitySelectionKey> selectedCompetitiveKeys
+        IReadOnlyCollection<PlayerVisibilitySelectionKey> selectedCompetitiveKeys,
+        IReadOnlyCollection<PlayerVisibilitySelectionScore> selectionScores
     )
     {
         var competitiveSourceIndices = new HashSet<int>();
@@ -136,6 +150,18 @@ internal sealed class PlayerVisibilityPlanner(Action<Exception> reportSelectionF
             selected.Add(key.SourceIndex);
         }
 
+        var scoresBySourceIndex = new Dictionary<int, PlayerVisibilitySelectionScore>();
+        foreach (var score in selectionScores)
+        {
+            if (!competitiveSourceIndices.Contains(score.SourceIndex) || !scoresBySourceIndex.TryAdd(score.SourceIndex, score))
+            {
+                throw new ArgumentException(
+                    "Selection score does not map uniquely to a Competitive entry in the current player visibility plan.",
+                    nameof(selectionScores)
+                );
+            }
+        }
+
         stableTargetBuffer.Clear();
         for (var sourceIndex = 0; sourceIndex < plan.Entries.Count; sourceIndex++)
         {
@@ -159,12 +185,58 @@ internal sealed class PlayerVisibilityPlanner(Action<Exception> reportSelectionF
                     entry.Classification,
                     desiredVisible,
                     entry.Decision,
-                    entry.Classification == PlayerVisibilityClassification.Competitive && !desiredVisible
+                    entry.Classification == PlayerVisibilityClassification.Competitive && !desiredVisible,
+                    scoresBySourceIndex.TryGetValue(sourceIndex, out var score) ? score : null
                 )
             );
         }
 
         return [.. stableTargetBuffer];
+    }
+
+    private static PlayerVisibilityTarget[] AddSelectionScores(
+        PlayerVisibilityPlan plan,
+        PlayerVisibilityTarget[] targets,
+        IReadOnlyCollection<PlayerVisibilitySelectionScore> selectionScores
+    )
+    {
+        if (selectionScores.Count == 0)
+        {
+            return targets;
+        }
+
+        var scoresByIdentity = new Dictionary<PlayerObjectIdentity, PlayerVisibilitySelectionScore>();
+        foreach (var score in selectionScores)
+        {
+            if ((uint)score.SourceIndex >= (uint)plan.Entries.Count)
+            {
+                throw new ArgumentException(
+                    "Selection score source index is outside the current player visibility plan.",
+                    nameof(selectionScores)
+                );
+            }
+
+            var entry = plan.Entries[score.SourceIndex];
+            if (entry.Classification != PlayerVisibilityClassification.Competitive || !scoresByIdentity.TryAdd(entry.Identity, score))
+            {
+                throw new ArgumentException(
+                    "Selection score does not map uniquely to a Competitive entry in the current player visibility plan.",
+                    nameof(selectionScores)
+                );
+            }
+        }
+
+        var scoredTargets = new PlayerVisibilityTarget[targets.Length];
+        for (var index = 0; index < targets.Length; index++)
+        {
+            var target = targets[index];
+            scoredTargets[index] = target with
+            {
+                SelectionScore = scoresByIdentity.TryGetValue(target.Identity, out var score) ? score : null,
+            };
+        }
+
+        return scoredTargets;
     }
 
     private PlayerVisibilityAction[] Reconcile(PlayerVisibilityTarget[] targets, HiddenObjectTracker hiddenObjectTracker)
