@@ -107,13 +107,15 @@ The dot does not follow in-game world occlusion, so it may remain visible throug
 
 ### World graphics controls
 
-Optional scene controls can hide the current area's BG Part graphics, terrain rendering, or both. These settings are disabled by default and operate independently from player hiding.
+Optional scene controls can independently hide background objects, terrain, water, and grass. A separate global switch can hide all 3D rendering, including characters, when you want the lightest possible scene.
+
+These settings are disabled by default and operate independently from player hiding unless the global 3D switch is enabled.
 
 ### Server info bar controls
 
 Event Horizon can add a compact Server Info Bar entry for quick status and toggling.
 
-The entry can show the current player-hiding state, optionally include FPS, and can be removed entirely from the behavior settings. An experimental native background can also be enabled for the full Server Info Bar.
+The entry can show the current player-hiding state, optionally include FPS, and can be removed entirely from the behavior settings. A native background can also be enabled for the full Server Info Bar.
 
 ### Safety options
 
@@ -121,6 +123,8 @@ Event Horizon can automatically suspend hiding:
 
 - In duties
 - When the number of other players is below your configured threshold
+
+You can also configure a hold shortcut—Ctrl + Alt by default—to temporarily show all players without disabling your rules or changing your settings.
 
 You can also preview the nearby-player keep range in the world.
 
