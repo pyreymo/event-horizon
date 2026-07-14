@@ -1,9 +1,6 @@
 using System;
-using System.Collections.Frozen;
 using System.Collections.Generic;
-using System.Linq;
 using System.Numerics;
-using System.Threading;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.Culling;
@@ -56,39 +53,16 @@ internal readonly record struct PlayerObjectIdentity(nint Address, ulong GameObj
         && gameObject->EntityId == EntityId;
 }
 
-internal sealed class PlayerVisibilityAppliedState
-{
-    private PlayerVisibilityFrameState? activeFrame;
-
-    public PlayerVisibilityFrameState? ActiveFrame => Volatile.Read(ref activeFrame);
-    public PlayerVisibilityTarget[]? ActiveTarget => ActiveFrame?.ActiveTarget;
-
-    public void Publish(PlayerVisibilityFrameState frame) => Volatile.Write(ref activeFrame, frame);
-
-    public bool IsExplicitlyVisible(PlayerObjectIdentity identity, int objectIndex)
-    {
-        var snapshot = ActiveFrame;
-        return snapshot != null && snapshot.VisibleSlots.Contains((identity, objectIndex));
-    }
-
-    public void Clear() => Volatile.Write(ref activeFrame, null);
-}
-
 internal sealed record PlayerVisibilityFrameState
 {
     public PlayerVisibilityFrameState(PlayerVisibilityTarget[] activeTarget, PlayerVisibilityAction[] actions)
     {
         ActiveTarget = activeTarget;
         Actions = actions;
-        VisibleSlots = activeTarget
-            .Where(static target => target.DesiredVisible)
-            .Select(static target => (target.Identity, target.ObjectIndex))
-            .ToFrozenSet();
     }
 
     public PlayerVisibilityTarget[] ActiveTarget { get; }
     public PlayerVisibilityAction[] Actions { get; }
-    public FrozenSet<(PlayerObjectIdentity Identity, int ObjectIndex)> VisibleSlots { get; }
 }
 
 internal readonly record struct PlayerVisibilityAction(

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using System.Threading;
 using Dalamud.Game.Chat;
 using Dalamud.Plugin.Services;
 using EventHorizon.Preview;
@@ -31,13 +32,7 @@ internal sealed unsafe class PlayerCuller(
         log.Error(exception, "Player visibility selection failed; using legacy fallback.")
     );
     private readonly ShowTransitionBudget showTransitionBudget = new();
-    private readonly PlayerAdmissionGate playerAdmissionGate = new();
-    private readonly PlayerTopologyDirtySignal playerTopologyDirtySignal = new();
-    private readonly PlayerVisibilityAppliedState appliedVisibilityState = new();
-    private readonly PlayerObjectIdentity?[] playerAdmissionSlotIdentities = new PlayerObjectIdentity?[
-        PlayerAdmissionGate.LastPlayerSlot + 1
-    ];
-    private PlayerVisibilityAction[]? latestPlayerVisibilityActions;
+    private PlayerVisibilityFrameState? latestPlayerVisibilityFrame;
 
     #region Lifecycle
 
@@ -61,8 +56,7 @@ internal sealed unsafe class PlayerCuller(
             objectTable.LocalPlayer?.Position,
             hiddenObjects
         );
-        appliedVisibilityState.Publish(frameState);
-        latestPlayerVisibilityActions = frameState.Actions;
+        Volatile.Write(ref latestPlayerVisibilityFrame, frameState);
         playerVisibilityPlanner.Commit(frameState);
     }
 
@@ -74,48 +68,12 @@ internal sealed unsafe class PlayerCuller(
             return;
         }
 
-        if (latestPlayerVisibilityActions == null)
+        if (Volatile.Read(ref latestPlayerVisibilityFrame) == null)
         {
             return;
         }
 
         TickVisibility(manager, hiddenObjects);
-    }
-
-    public void ApplyAdmissionGate(GameObjectManager* manager, HiddenObjectTracker hiddenObjects)
-    {
-        for (
-            var slot = PlayerAdmissionGate.FirstPlayerSlot;
-            slot <= PlayerAdmissionGate.LastPlayerSlot;
-            slot += PlayerAdmissionGate.PlayerSlotStep
-        )
-        {
-            var gameObject = manager->Objects.IndexSorted[slot].Value;
-            playerAdmissionSlotIdentities[slot] =
-                gameObject != null && gameObject->ObjectKind == ObjectKind.Pc ? PlayerObjectIdentity.From(gameObject) : null;
-        }
-
-        var result = playerAdmissionGate.Apply(
-            playerAdmissionSlotIdentities,
-            appliedVisibilityState,
-            (slot, identity) =>
-            {
-                var gameObject = manager->Objects.IndexSorted[slot].Value;
-                if (!identity.Matches(gameObject))
-                {
-                    throw new InvalidOperationException("Admission slot identity changed before the hard hide could be applied.");
-                }
-
-                Hide(gameObject, slot, hiddenObjects);
-            }
-        );
-        playerTopologyDirtySignal.MarkFrom(result);
-    }
-
-    public void ResetAdmissionGate()
-    {
-        playerAdmissionGate.ResetTracking();
-        playerTopologyDirtySignal.Clear();
     }
 
     public void ClearRuleState()
@@ -131,12 +89,13 @@ internal sealed unsafe class PlayerCuller(
 
     public void RefreshPlayerPreview(GameObjectManager* manager, PlayerPreview preview)
     {
-        if (manager == null || !IsCullingEnabled() || !playerState.IsLoaded || appliedVisibilityState.ActiveTarget == null)
+        var frame = Volatile.Read(ref latestPlayerVisibilityFrame);
+        if (manager == null || !IsCullingEnabled() || !playerState.IsLoaded || frame == null)
         {
             return;
         }
 
-        preview.Refresh(manager, appliedVisibilityState.ActiveTarget);
+        preview.Refresh(manager, frame.ActiveTarget);
     }
 
     #endregion
@@ -183,13 +142,14 @@ internal sealed unsafe class PlayerCuller(
 
     private void TickVisibility(GameObjectManager* manager, HiddenObjectTracker hiddenObjects)
     {
-        if (latestPlayerVisibilityActions == null)
+        var frame = Volatile.Read(ref latestPlayerVisibilityFrame);
+        if (frame == null)
         {
             return;
         }
 
         showTransitionBudget.BeginFrame();
-        ApplyPlayerVisibilityReconciliation(manager, latestPlayerVisibilityActions, hiddenObjects);
+        ApplyPlayerVisibilityReconciliation(manager, frame.Actions, hiddenObjects);
     }
 
     private void ApplyShowAction(GameObjectManager* manager, PlayerVisibilityTarget target, HiddenObjectTracker hiddenObjects)
@@ -259,11 +219,8 @@ internal sealed unsafe class PlayerCuller(
     public void ClearRuntimeState()
     {
         showTransitionBudget.Reset();
-        playerAdmissionGate.RequestReset();
-        playerTopologyDirtySignal.Clear();
-        appliedVisibilityState.Clear();
         playerVisibilityPlanner.Reset();
-        latestPlayerVisibilityActions = null;
+        Volatile.Write(ref latestPlayerVisibilityFrame, null);
     }
 
     public void ClearAllState()
@@ -363,8 +320,6 @@ internal sealed unsafe class PlayerCuller(
     {
         return TryGetObjectPosition(gameObject, out var position) && gameGui.WorldToScreen(position, out _, out var inView) && inView;
     }
-
-    public bool ConsumePlayerTopologyDirty() => playerTopologyDirtySignal.Consume();
 
     #endregion
 

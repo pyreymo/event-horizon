@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
@@ -9,19 +10,22 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
 {
     private const string Signature = "40 57 48 83 EC ?? 48 89 5C 24 ?? 33 DB";
     private readonly Hook<UpdateObjectArraysDelegate> hook;
-    private readonly AdmissionGateCallback applyAdmissionGate;
+    private readonly Lock topologyLock = new();
+    private readonly PlayerObjectIdentity?[] previousPlayers = new PlayerObjectIdentity?[CharacterObjectSlots.LastEvenSlot + 1];
+    private int topologyChanged;
+    private bool hasBaseline;
     private bool disposed;
 
     private delegate void* UpdateObjectArraysDelegate(GameObjectManager* objectManager);
-    internal delegate void AdmissionGateCallback(GameObjectManager* objectManager);
 
-    public UpdateObjectArraysHook(IGameInteropProvider gameInteropProvider, AdmissionGateCallback applyAdmissionGate)
+    public UpdateObjectArraysHook(IGameInteropProvider gameInteropProvider)
     {
-        this.applyAdmissionGate = applyAdmissionGate;
         hook = gameInteropProvider.HookFromSignature<UpdateObjectArraysDelegate>(Signature, Detour);
     }
 
     public void Enable() => hook.Enable();
+
+    public bool ConsumePlayerTopologyChanged() => Interlocked.Exchange(ref topologyChanged, 0) != 0;
 
     public void Dispose()
     {
@@ -42,7 +46,39 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
     private void* Detour(GameObjectManager* objectManager)
     {
         var result = hook.Original(objectManager);
-        applyAdmissionGate(objectManager);
+        TrackPlayerTopology(objectManager);
         return result;
+    }
+
+    private void TrackPlayerTopology(GameObjectManager* objectManager)
+    {
+        if (objectManager == null)
+        {
+            return;
+        }
+
+        lock (topologyLock)
+        {
+            var changed = !hasBaseline;
+            for (var slot = CharacterObjectSlots.FirstRemoteSlot; slot <= CharacterObjectSlots.LastEvenSlot; slot += 2)
+            {
+                var gameObject = objectManager->Objects.IndexSorted[slot].Value;
+                PlayerObjectIdentity? current =
+                    gameObject != null && gameObject->ObjectKind == ObjectKind.Pc ? PlayerObjectIdentity.From(gameObject) : null;
+                if (previousPlayers[slot] == current)
+                {
+                    continue;
+                }
+
+                previousPlayers[slot] = current;
+                changed = true;
+            }
+
+            hasBaseline = true;
+            if (changed)
+            {
+                Interlocked.Exchange(ref topologyChanged, 1);
+            }
+        }
     }
 }

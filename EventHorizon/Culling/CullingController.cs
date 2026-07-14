@@ -45,7 +45,7 @@ internal sealed unsafe class CullingController : IDisposable
         nonPlayers = new NonPlayerCuller(configuration);
         hiddenPlayerMarker = new HiddenPlayerMarker(configuration, gameGui, staticVfxController, worldDotOverlay);
         playerPreview = new PlayerPreview(configuration);
-        hook = new UpdateObjectArraysHook(gameInteropProvider, OnObjectArraysUpdated);
+        hook = new UpdateObjectArraysHook(gameInteropProvider);
     }
 
     public int HiddenPlayerCount => hiddenObjects.HiddenPlayerCount;
@@ -68,9 +68,9 @@ internal sealed unsafe class CullingController : IDisposable
             return;
         }
 
-        var topologyDirty = players.ConsumePlayerTopologyDirty();
+        var topologyChanged = hook.ConsumePlayerTopologyChanged();
         var now = Environment.TickCount64;
-        if (requiresRefresh || topologyDirty || now >= nextRefresh)
+        if (requiresRefresh || topologyChanged || now >= nextRefresh)
         {
             nonPlayers.Refresh(manager);
             players.Update(manager, hiddenObjects, playerPreview);
@@ -248,17 +248,6 @@ internal sealed unsafe class CullingController : IDisposable
         }
 
         hiddenObjects.Clear();
-    }
-
-    private void OnObjectArraysUpdated(GameObjectManager* manager)
-    {
-        if (DetermineRuntimeMode(manager) != CullingRuntimeMode.Active)
-        {
-            players.ResetAdmissionGate();
-            return;
-        }
-
-        players.ApplyAdmissionGate(manager, hiddenObjects);
     }
 }
 
