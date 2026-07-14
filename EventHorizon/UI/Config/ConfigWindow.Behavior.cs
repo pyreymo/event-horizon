@@ -698,7 +698,7 @@ internal partial class ConfigWindow
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        DrawAutoFitText(label);
+        ImGui.TextUnformatted(label);
         ImGui.TableSetColumnIndex(1);
     }
 

@@ -48,6 +48,8 @@ Your own character is never hidden.
 
 ## Main features
 
+<img src="./images/settings.png" alt="Settings preview">
+
 ### Smart player visibility
 
 Hide other players in crowded areas while preserving players you are likely to care about.

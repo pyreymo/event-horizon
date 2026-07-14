@@ -353,9 +353,9 @@ internal partial class ConfigWindow
         }
     }
 
-    private void DrawResetKeepRuleOrderButton()
+    private void DrawResetKeepRuleOrderButton(string label)
     {
-        if (ImGui.SmallButton(Loc.Text("Config.KeepRuleOrder.Reset")))
+        if (ImGui.SmallButton(label))
         {
             PlayerKeepRuleOrder.Reset(configuration);
             SaveAndRefreshWithoutRuleReset();

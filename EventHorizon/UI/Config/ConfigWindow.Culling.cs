@@ -48,7 +48,15 @@ internal partial class ConfigWindow
         );
 
         DrawCard(Loc.Text("Config.Section.VisiblePlayerBudget"), DrawVisiblePlayerLimitRule);
-        DrawCard(Loc.Text("Config.Section.KeepRules"), DrawKeepRules, DrawResetKeepRuleOrderButton);
+        var resetKeepRuleOrderLabel = Loc.Text("Config.KeepRuleOrder.Reset");
+        var resetKeepRuleOrderWidth =
+            ImGui.CalcTextSize(resetKeepRuleOrderLabel).X + (ImGui.GetStyle().FramePadding.X * 2f) + (ImGui.GetStyle().CellPadding.X * 2f);
+        DrawCard(
+            Loc.Text("Config.Section.KeepRules"),
+            DrawKeepRules,
+            () => DrawResetKeepRuleOrderButton(resetKeepRuleOrderLabel),
+            resetKeepRuleOrderWidth
+        );
 
         DrawCard(
             Loc.Text("Config.Section.AttachedObjects"),
