@@ -40,6 +40,11 @@ internal sealed unsafe class HiddenObjectTracker
 
     public void Hide(GameObject* gameObject, VisibilityFlags targetFlags, int objectIndex)
     {
+        AdoptHidden(gameObject, targetFlags, 0, objectIndex);
+    }
+
+    public void AdoptHidden(GameObject* gameObject, VisibilityFlags targetFlags, VisibilityFlags alreadyPluginOwnedFlags, int objectIndex)
+    {
         if (gameObject == null)
         {
             return;
@@ -52,13 +57,15 @@ internal sealed unsafe class HiddenObjectTracker
         }
 
         var identity = readIdentity(gameObject);
+        var newlyAddedFlags = targetFlags & ~gameObject->RenderFlags;
+        var ownedFlags = newlyAddedFlags | (alreadyPluginOwnedFlags & targetFlags);
         if (!hiddenObjects.TryGetValue(address, out var record) || !record.IsSameObject(identity))
         {
-            hiddenObjects[address] = HiddenObjectRecord.From(gameObject, identity, targetFlags, objectIndex);
+            hiddenObjects[address] = HiddenObjectRecord.From(gameObject, identity, ownedFlags, objectIndex);
         }
         else
         {
-            hiddenObjects[address] = record with { ObjectIndex = objectIndex };
+            hiddenObjects[address] = record with { AddedFlags = record.AddedFlags | ownedFlags, ObjectIndex = objectIndex };
         }
 
         gameObject->RenderFlags |= targetFlags;
@@ -221,12 +228,11 @@ internal sealed unsafe class HiddenObjectTracker
         public static HiddenObjectRecord From(
             GameObject* gameObject,
             PlayerObjectIdentity identity,
-            VisibilityFlags targetFlags,
+            VisibilityFlags ownedFlags,
             int objectIndex
         )
         {
-            var addedFlags = targetFlags & ~gameObject->RenderFlags;
-            return new(identity.GameObjectId, identity.EntityId, gameObject->ObjectKind, addedFlags, objectIndex);
+            return new(identity.GameObjectId, identity.EntityId, gameObject->ObjectKind, ownedFlags, objectIndex);
         }
 
         public bool IsLiveAtRecordedIndex(GameObjectManager* manager, nint address, IdentityReader readIdentity)

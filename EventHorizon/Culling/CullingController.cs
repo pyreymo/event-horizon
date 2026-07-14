@@ -21,12 +21,15 @@ internal sealed unsafe class CullingController : IDisposable
     private readonly HiddenPlayerMarker hiddenPlayerMarker;
     private readonly PlayerPreview playerPreview;
     private readonly HiddenObjectTracker hiddenObjects = new();
-    private readonly UpdateObjectArraysHook hook;
+    private readonly PlayerAdmissionGate admissionGate;
+    private readonly UpdateObjectArraysHook updateObjectArraysHook;
+    private readonly EnableDrawHook enableDrawHook;
     private CullingRuntimeMode? currentMode;
     private long nextRefresh;
 
     public CullingController(
         IGameInteropProvider gameInteropProvider,
+        ISigScanner sigScanner,
         Configuration configuration,
         IPlayerState playerState,
         ICondition condition,
@@ -41,11 +44,21 @@ internal sealed unsafe class CullingController : IDisposable
         this.configuration = configuration;
         this.playerState = playerState;
         this.condition = condition;
-        players = new PlayerCuller(configuration, playerState, objectTable, targetManager, gameGui, log);
+        admissionGate = new PlayerAdmissionGate(log);
+        players = new PlayerCuller(configuration, playerState, objectTable, targetManager, gameGui, admissionGate, log);
         nonPlayers = new NonPlayerCuller(configuration);
         hiddenPlayerMarker = new HiddenPlayerMarker(configuration, gameGui, staticVfxController, worldDotOverlay);
         playerPreview = new PlayerPreview(configuration);
-        hook = new UpdateObjectArraysHook(gameInteropProvider);
+        updateObjectArraysHook = new UpdateObjectArraysHook(gameInteropProvider);
+        try
+        {
+            enableDrawHook = new EnableDrawHook(gameInteropProvider, sigScanner, admissionGate);
+        }
+        catch
+        {
+            updateObjectArraysHook.Dispose();
+            throw;
+        }
     }
 
     public int HiddenPlayerCount => hiddenObjects.HiddenPlayerCount;
@@ -54,10 +67,24 @@ internal sealed unsafe class CullingController : IDisposable
 
     public CullingStatus GetStatus() => BuildStatus(GameObjectManager.Instance());
 
-    public void Enable() => hook.Enable();
+    public void Enable()
+    {
+        try
+        {
+            enableDrawHook.Enable();
+            updateObjectArraysHook.Enable();
+        }
+        catch
+        {
+            enableDrawHook.Disable();
+            updateObjectArraysHook.Disable();
+            throw;
+        }
+    }
 
     public void Update()
     {
+        admissionGate.BeginFrameworkFrame();
         var manager = GameObjectManager.Instance();
         var mode = UpdateRuntimeMode(manager, out var requiresRefresh);
         if (mode != CullingRuntimeMode.Active)
@@ -68,9 +95,11 @@ internal sealed unsafe class CullingController : IDisposable
             return;
         }
 
-        var topologyChanged = hook.ConsumePlayerTopologyChanged();
+        admissionGate.PruneObservedPlayers(manager);
+        var topologyChanged = updateObjectArraysHook.ConsumePlayerTopologyChanged();
+        var admissionChanged = admissionGate.ConsumeChanged();
         var now = Environment.TickCount64;
-        if (requiresRefresh || topologyChanged || now >= nextRefresh)
+        if (requiresRefresh || topologyChanged || admissionChanged || now >= nextRefresh)
         {
             nonPlayers.Refresh(manager);
             players.Update(manager, hiddenObjects, playerPreview);
@@ -113,11 +142,15 @@ internal sealed unsafe class CullingController : IDisposable
 
     public void Dispose()
     {
-        hook.Dispose();
+        enableDrawHook.Disable();
+        admissionGate.Stop(GameObjectManager.Instance());
         RestoreAndClearAllState(GameObjectManager.Instance());
         nonPlayers.Clear();
         hiddenPlayerMarker.Clear();
         playerPreview.Clear(PlayerPreviewEmptyReason.PlayerUnavailable);
+        updateObjectArraysHook.Disable();
+        enableDrawHook.Dispose();
+        updateObjectArraysHook.Dispose();
     }
 
     private CullingRuntimeMode UpdateRuntimeMode(GameObjectManager* manager, out bool requiresRefresh)
@@ -132,6 +165,7 @@ internal sealed unsafe class CullingController : IDisposable
         currentMode = nextMode;
         if (nextMode != CullingRuntimeMode.Active)
         {
+            admissionGate.Stop(manager);
             if (nextMode == CullingRuntimeMode.Disabled)
             {
                 RestoreAndClearAllState(manager);
@@ -144,6 +178,7 @@ internal sealed unsafe class CullingController : IDisposable
         else
         {
             players.ClearRuntimeState();
+            admissionGate.Activate(manager);
             requiresRefresh = true;
         }
 

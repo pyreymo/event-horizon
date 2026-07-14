@@ -16,6 +16,7 @@ internal sealed unsafe class PlayerCuller(
     IObjectTable objectTable,
     ITargetManager targetManager,
     IGameGui gameGui,
+    PlayerAdmissionGate admissionGate,
     IPluginLog log
 )
 {
@@ -25,6 +26,7 @@ internal sealed unsafe class PlayerCuller(
     private readonly IPlayerState playerState = playerState;
     private readonly IObjectTable objectTable = objectTable;
     private readonly IGameGui gameGui = gameGui;
+    private readonly PlayerAdmissionGate admissionGate = admissionGate;
     private readonly PlayerKeepRules playerKeepRules = new(configuration, objectTable, targetManager);
     private readonly PlayerKeepPlan playerKeepPlan = new();
     private readonly List<PlayerKeepCandidate> playerKeepCandidates = [];
@@ -149,6 +151,7 @@ internal sealed unsafe class PlayerCuller(
         }
 
         showTransitionBudget.BeginFrame();
+        admissionGate.Reconcile(manager, frame.ActiveTarget, hiddenObjects, showTransitionBudget);
         ApplyPlayerVisibilityReconciliation(manager, frame.Actions, hiddenObjects);
     }
 
@@ -323,7 +326,7 @@ internal sealed unsafe class PlayerCuller(
 
     #endregion
 
-    private sealed class ShowTransitionBudget
+    internal sealed class ShowTransitionBudget
     {
         private const double ShowTransitionsPerSecond = 6.0;
         private const double ShowTransitionCapacity = 1.0;

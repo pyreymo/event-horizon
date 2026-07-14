@@ -25,6 +25,14 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
 
     public void Enable() => hook.Enable();
 
+    public void Disable()
+    {
+        if (hook.IsEnabled)
+        {
+            hook.Disable();
+        }
+    }
+
     public bool ConsumePlayerTopologyChanged() => Interlocked.Exchange(ref topologyChanged, 0) != 0;
 
     public void Dispose()
@@ -35,11 +43,7 @@ internal sealed unsafe class UpdateObjectArraysHook : IDisposable
         }
 
         disposed = true;
-        if (hook.IsEnabled)
-        {
-            hook.Disable();
-        }
-
+        Disable();
         hook.Dispose();
     }
 

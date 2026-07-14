@@ -100,6 +100,7 @@ public sealed class Plugin : IDalamudPlugin
     private DtrBar DtrStatusBar { get; init; }
     private DtrBackground DtrBackground { get; init; }
     private TargetingMarkerController TargetingMarkerController { get; init; }
+    private bool disposed;
 
     public int HiddenPlayerCount => Culling.HiddenPlayerCount;
     internal CullingStatus CullingStatus => Culling.GetStatus();
@@ -113,67 +114,85 @@ public sealed class Plugin : IDalamudPlugin
         Loc.Load(PluginInterface);
 
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
-        PlayerPreviewHighlighter = new PlayerPreviewHighlighter();
-        ActorVfxController = new ActorVfxController(GameInteropProvider, SigScanner, Log);
-        StaticVfxResourceRedirector = new StaticVfxResourceRedirector(PluginInterface, GameInteropProvider, Log);
-        StaticVfxController = new StaticVfxController(GameInteropProvider, SigScanner, Log);
-        WorldDotOverlay = new WorldDotOverlay(GameGui, PluginInterface);
-        SceneVisibilityController = new SceneVisibilityController(GameInteropProvider, Configuration);
-        Culling = new CullingController(
-            GameInteropProvider,
-            Configuration,
-            PlayerState,
-            Condition,
-            ObjectTable,
-            TargetManager,
-            GameGui,
-            StaticVfxController,
-            WorldDotOverlay,
-            Log
-        );
-        var playerPreviewPanel = new PlayerPreviewPanel(
-            () => Culling.PlayerPreviewSnapshot,
-            CullingRefreshPlayerPreview,
-            SetPreviewSelectedPlayer,
-            GameGui
-        );
-        ConfigWindow = new ConfigWindow(this, DataManager, playerPreviewPanel, IsPlayerPreviewWindowOpen, TogglePlayerPreviewWindow);
-        PlayerPreviewWindow = new PlayerPreviewWindow(playerPreviewPanel, OpenMainUi);
-        DtrStatusBar = new DtrBar(DtrBar, Configuration, Culling.GetStatus, SetPlayerHidingEnabled, ToggleConfigUi);
-        DtrBackground = new DtrBackground(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
-        TargetingMarkerController = new TargetingMarkerController(
-            AddonLifecycle,
-            GameGui,
-            NamePlateGui,
-            ObjectTable,
-            TargetManager,
-            Condition,
-            Configuration,
-            Framework,
-            TextureProvider,
-            ActorVfxController,
-            WorldDotOverlay,
-            Log
-        );
+        try
+        {
+            PlayerPreviewHighlighter = new PlayerPreviewHighlighter();
+            ActorVfxController = new ActorVfxController(GameInteropProvider, SigScanner, Log);
+            StaticVfxResourceRedirector = new StaticVfxResourceRedirector(PluginInterface, GameInteropProvider, Log);
+            StaticVfxController = new StaticVfxController(GameInteropProvider, SigScanner, Log);
+            WorldDotOverlay = new WorldDotOverlay(GameGui, PluginInterface);
+            SceneVisibilityController = new SceneVisibilityController(GameInteropProvider, Configuration);
+            Culling = new CullingController(
+                GameInteropProvider,
+                SigScanner,
+                Configuration,
+                PlayerState,
+                Condition,
+                ObjectTable,
+                TargetManager,
+                GameGui,
+                StaticVfxController,
+                WorldDotOverlay,
+                Log
+            );
+            var playerPreviewPanel = new PlayerPreviewPanel(
+                () => Culling.PlayerPreviewSnapshot,
+                CullingRefreshPlayerPreview,
+                SetPreviewSelectedPlayer,
+                GameGui
+            );
+            ConfigWindow = new ConfigWindow(this, DataManager, playerPreviewPanel, IsPlayerPreviewWindowOpen, TogglePlayerPreviewWindow);
+            PlayerPreviewWindow = new PlayerPreviewWindow(playerPreviewPanel, OpenMainUi);
+            DtrStatusBar = new DtrBar(DtrBar, Configuration, Culling.GetStatus, SetPlayerHidingEnabled, ToggleConfigUi);
+            DtrBackground = new DtrBackground(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
+            TargetingMarkerController = new TargetingMarkerController(
+                AddonLifecycle,
+                GameGui,
+                NamePlateGui,
+                ObjectTable,
+                TargetManager,
+                Condition,
+                Configuration,
+                Framework,
+                TextureProvider,
+                ActorVfxController,
+                WorldDotOverlay,
+                Log
+            );
 
-        windowSystem.AddWindow(ConfigWindow);
-        windowSystem.AddWindow(PlayerPreviewWindow);
+            windowSystem.AddWindow(ConfigWindow);
+            windowSystem.AddWindow(PlayerPreviewWindow);
 
-        CommandManager.AddHandler(PrimaryCommandName, new CommandInfo(OnCommand) { HelpMessage = Loc.Text("Command.Help.OpenSettings") });
-        CommandManager.AddHandler(ShortCommandName, new CommandInfo(OnCommand) { HelpMessage = BuildCommandHelp(ShortCommandName) });
+            CommandManager.AddHandler(
+                PrimaryCommandName,
+                new CommandInfo(OnCommand) { HelpMessage = Loc.Text("Command.Help.OpenSettings") }
+            );
+            CommandManager.AddHandler(ShortCommandName, new CommandInfo(OnCommand) { HelpMessage = BuildCommandHelp(ShortCommandName) });
 
-        PluginInterface.UiBuilder.Draw += OnDraw;
-        PluginInterface.UiBuilder.OpenConfigUi += OpenConfigUi;
-        PluginInterface.UiBuilder.OpenMainUi += OpenMainUi;
-        PluginInterface.LanguageChanged += OnLanguageChanged;
-        ChatGui.ChatMessage += OnChatMessage;
-        Framework.Update += OnFrameworkUpdate;
-        SceneVisibilityController.Enable();
-        Culling.Enable();
+            PluginInterface.UiBuilder.Draw += OnDraw;
+            PluginInterface.UiBuilder.OpenConfigUi += OpenConfigUi;
+            PluginInterface.UiBuilder.OpenMainUi += OpenMainUi;
+            PluginInterface.LanguageChanged += OnLanguageChanged;
+            ChatGui.ChatMessage += OnChatMessage;
+            Framework.Update += OnFrameworkUpdate;
+            SceneVisibilityController.Enable();
+            Culling.Enable();
+        }
+        catch
+        {
+            Dispose();
+            throw;
+        }
     }
 
     public void Dispose()
     {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
         PluginInterface.UiBuilder.Draw -= OnDraw;
         PluginInterface.UiBuilder.OpenConfigUi -= OpenConfigUi;
         PluginInterface.UiBuilder.OpenMainUi -= OpenMainUi;
@@ -184,16 +203,16 @@ public sealed class Plugin : IDalamudPlugin
         CommandManager.RemoveHandler(ShortCommandName);
 
         windowSystem.RemoveAllWindows();
-        SceneVisibilityController.Dispose();
-        TargetingMarkerController.Dispose();
-        DtrBackground.Dispose();
-        DtrStatusBar.Dispose();
-        Culling.Dispose();
-        WorldDotOverlay.Dispose();
-        StaticVfxController.Dispose();
-        StaticVfxResourceRedirector.Dispose();
-        ActorVfxController.Dispose();
-        PlayerPreviewHighlighter.Dispose();
+        SceneVisibilityController?.Dispose();
+        TargetingMarkerController?.Dispose();
+        DtrBackground?.Dispose();
+        DtrStatusBar?.Dispose();
+        Culling?.Dispose();
+        WorldDotOverlay?.Dispose();
+        StaticVfxController?.Dispose();
+        StaticVfxResourceRedirector?.Dispose();
+        ActorVfxController?.Dispose();
+        PlayerPreviewHighlighter?.Dispose();
     }
 
     #endregion
