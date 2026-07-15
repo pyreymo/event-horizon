@@ -12,7 +12,6 @@ internal sealed unsafe class PlayerAdmissionGate
     private readonly record struct AdmissionHold(
         PlayerObjectIdentity Identity,
         int ObjectIndex,
-        bool OwnsModelFlag,
         long HeldFrameworkFrame,
         long HeldTimestamp
     );
@@ -41,40 +40,25 @@ internal sealed unsafe class PlayerAdmissionGate
         }
     }
 
-    public void Stop(GameObjectManager* manager)
+    public void Stop()
     {
-        List<AdmissionHold> stoppedHolds;
         lock (stateLock)
         {
             Volatile.Write(ref active, 0);
-            stoppedHolds = [.. holds.Values];
             holds.Clear();
             observedPlayers.Clear();
         }
 
         Interlocked.Exchange(ref changed, 0);
-        foreach (var hold in stoppedHolds)
-        {
-            var gameObject = FindLivePlayer(manager, hold.Identity, hold.ObjectIndex, out _);
-            if (gameObject == null)
-            {
-                continue;
-            }
-
-            if (hold.OwnsModelFlag)
-            {
-                gameObject->RenderFlags &= ~VisibilityFlags.Model;
-            }
-        }
     }
 
     public bool ConsumeChanged() => Interlocked.Exchange(ref changed, 0) != 0;
 
-    public void OnEnableDrawCompleted(GameObject* gameObject)
+    public bool ShouldSuppressEnableDraw(GameObject* gameObject)
     {
         if (Volatile.Read(ref active) == 0 || !IsRemotePlayer(gameObject, out var objectIndex))
         {
-            return;
+            return false;
         }
 
         var identity = PlayerObjectIdentity.From(gameObject);
@@ -82,19 +66,26 @@ internal sealed unsafe class PlayerAdmissionGate
 
         lock (stateLock)
         {
-            if (Volatile.Read(ref active) == 0 || !observedPlayers.Add(identity))
+            if (Volatile.Read(ref active) == 0)
             {
-                return;
+                return false;
             }
 
-            if ((gameObject->RenderFlags & VisibilityFlags.Model) == 0)
+            if (holds.ContainsKey(identity))
             {
-                gameObject->RenderFlags |= VisibilityFlags.Model;
-                holds[identity] = new AdmissionHold(identity, objectIndex, true, frame, Environment.TickCount64);
+                return true;
             }
+
+            if (!observedPlayers.Add(identity))
+            {
+                return false;
+            }
+
+            holds[identity] = new AdmissionHold(identity, objectIndex, frame, Environment.TickCount64);
         }
 
         Interlocked.Exchange(ref changed, 1);
+        return true;
     }
 
     public void PruneObservedPlayers(GameObjectManager* manager)
@@ -143,33 +134,28 @@ internal sealed unsafe class PlayerAdmissionGate
             var gameObject = FindLivePlayer(manager, hold.Identity, hold.ObjectIndex, out var objectIndex);
             if (gameObject == null)
             {
-                RemoveHold(hold);
+                RemoveHold(hold, removeObserved: true);
                 continue;
             }
 
             if (!TryFindTarget(activeTarget, hold.Identity, out var target))
             {
-                if (now - hold.HeldTimestamp < MissingTargetTimeoutMs || !RemoveHold(hold))
+                if (now - hold.HeldTimestamp < MissingTargetTimeoutMs)
                 {
                     continue;
                 }
 
-                if (hold.OwnsModelFlag)
-                {
-                    gameObject->RenderFlags &= ~VisibilityFlags.Model;
-                }
+                ReleaseHold(hold, gameObject, hiddenObjects);
                 continue;
             }
 
             if (!target.DesiredVisible)
             {
-                hiddenObjects.AdoptHidden(
-                    gameObject,
-                    HiddenObjectTracker.PluginHiddenFlags,
-                    hold.OwnsModelFlag ? VisibilityFlags.Model : 0,
-                    objectIndex
-                );
-                RemoveHold(hold);
+                if (!hiddenObjects.IsHidden(hold.Identity))
+                {
+                    hiddenObjects.Hide(gameObject, HiddenObjectTracker.PluginHiddenFlags, objectIndex);
+                }
+
                 continue;
             }
 
@@ -178,35 +164,49 @@ internal sealed unsafe class PlayerAdmissionGate
                 continue;
             }
 
-            var releaseBefore = gameObject->RenderFlags;
-            var startsShow = hold.OwnsModelFlag && (releaseBefore & VisibilityFlags.Model) != 0;
-            if (startsShow && !showTransitionBudget.CanStartShow())
+            if (!showTransitionBudget.CanStartShow())
             {
                 continue;
             }
 
-            if (!RemoveHold(hold))
+            if (!ReleaseHold(hold, gameObject, hiddenObjects))
             {
                 continue;
             }
 
-            if (hold.OwnsModelFlag)
-            {
-                gameObject->RenderFlags &= ~VisibilityFlags.Model;
-            }
-
-            if (startsShow)
-            {
-                showTransitionBudget.ConsumeShow();
-            }
+            showTransitionBudget.ConsumeShow();
         }
     }
 
-    private bool RemoveHold(AdmissionHold hold)
+    private bool ReleaseHold(AdmissionHold hold, GameObject* gameObject, HiddenObjectTracker hiddenObjects)
     {
         lock (stateLock)
         {
-            return holds.TryGetValue(hold.Identity, out var current) && current == hold && holds.Remove(hold.Identity);
+            if (!holds.TryGetValue(hold.Identity, out var current) || current != hold)
+            {
+                return false;
+            }
+
+            hiddenObjects.RestoreIfHidden(gameObject);
+            return holds.Remove(hold.Identity);
+        }
+    }
+
+    private bool RemoveHold(AdmissionHold hold, bool removeObserved = false)
+    {
+        lock (stateLock)
+        {
+            if (!holds.TryGetValue(hold.Identity, out var current) || current != hold || !holds.Remove(hold.Identity))
+            {
+                return false;
+            }
+
+            if (removeObserved)
+            {
+                observedPlayers.Remove(hold.Identity);
+            }
+
+            return true;
         }
     }
 

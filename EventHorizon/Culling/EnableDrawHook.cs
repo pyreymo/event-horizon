@@ -47,7 +47,11 @@ internal sealed unsafe class EnableDrawHook : IDisposable
 
     private void Detour(GameObject* gameObject)
     {
+        if (admissionGate.ShouldSuppressEnableDraw(gameObject))
+        {
+            return;
+        }
+
         hook.Original(gameObject);
-        admissionGate.OnEnableDrawCompleted(gameObject);
     }
 }

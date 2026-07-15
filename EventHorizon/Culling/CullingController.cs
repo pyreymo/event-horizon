@@ -171,7 +171,7 @@ internal sealed unsafe class CullingController : IDisposable
     public void Dispose()
     {
         enableDrawHook.Disable();
-        admissionGate.Stop(GameObjectManager.Instance());
+        admissionGate.Stop();
         RestoreAndClearAllState(GameObjectManager.Instance());
         nonPlayers.Clear();
         hiddenPlayerMarker.Clear();
@@ -193,7 +193,7 @@ internal sealed unsafe class CullingController : IDisposable
         currentMode = nextMode;
         if (nextMode != CullingRuntimeMode.Active)
         {
-            admissionGate.Stop(manager);
+            admissionGate.Stop();
             if (nextMode == CullingRuntimeMode.Disabled)
             {
                 RestoreAndClearAllState(manager);
