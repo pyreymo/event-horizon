@@ -18,6 +18,9 @@
     "PauseReason.TemporaryReveal": "临时显示全部玩家",
     "PauseReason.Separator": "、",
 
+    "Notification.ConfigLoadFailed.Title": "配置恢复",
+    "Notification.ConfigLoadFailed.Content": "配置文件加载失败。Event Horizon 已使用安全默认配置启动，请查看日志了解详情。",
+
     "Dtr.Text.Enabled": "EH: 开",
     "Dtr.Text.Disabled": "EH: 关",
     "Dtr.Text.Paused": "EH: 暂停",

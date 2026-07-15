@@ -18,6 +18,9 @@
     "PauseReason.TemporaryReveal": "showing all players",
     "PauseReason.Separator": ", ",
 
+    "Notification.ConfigLoadFailed.Title": "Configuration recovery",
+    "Notification.ConfigLoadFailed.Content": "The configuration could not be loaded. Event Horizon started with safe defaults. Check the log for details.",
+
     "Dtr.Text.Enabled": "EH: ON",
     "Dtr.Text.Disabled": "EH: OFF",
     "Dtr.Text.Paused": "EH: PAUSED",

@@ -1,6 +1,8 @@
 using System;
+using System.IO;
 using Dalamud.Game.Chat;
 using Dalamud.Game.Command;
+using Dalamud.Interface.ImGuiNotification;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
@@ -80,6 +82,9 @@ public sealed class Plugin : IDalamudPlugin
     internal static IPluginLog Log { get; private set; } = null!;
 
     [PluginService]
+    internal static INotificationManager NotificationManager { get; private set; } = null!;
+
+    [PluginService]
     internal static IKeyState KeyState { get; private set; } = null!;
 
     #endregion
@@ -114,7 +119,19 @@ public sealed class Plugin : IDalamudPlugin
     {
         Loc.Load(PluginInterface);
 
-        Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
+        var configurationLoadFailed = false;
+        try
+        {
+            Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
+        }
+        catch (Exception exception)
+        {
+            Log.Error(exception, "Failed to load configuration. Using safe defaults.");
+            Configuration = Configuration.CreateSafeDefault();
+            configurationLoadFailed = true;
+        }
+
+        var configurationNormalized = Configuration.Normalize(KeyState.IsVirtualKeyValid);
         DebugFileLog.Initialize(PluginInterface, Log);
         try
         {
@@ -179,11 +196,54 @@ public sealed class Plugin : IDalamudPlugin
             Framework.Update += OnFrameworkUpdate;
             SceneVisibilityController.Enable();
             Culling.Enable();
+
+            PersistLoadedConfiguration(configurationLoadFailed || configurationNormalized);
+            if (configurationLoadFailed)
+            {
+                NotificationManager.AddNotification(
+                    new Notification
+                    {
+                        Title = Loc.Text("Notification.ConfigLoadFailed.Title"),
+                        Content = Loc.Text("Notification.ConfigLoadFailed.Content"),
+                        Type = NotificationType.Warning,
+                    }
+                );
+            }
         }
         catch
         {
             Dispose();
             throw;
+        }
+    }
+
+    private void PersistLoadedConfiguration(bool backupOriginal)
+    {
+        if (backupOriginal && !TryBackupConfiguration())
+        {
+            return;
+        }
+
+        Configuration.Save();
+    }
+
+    private static bool TryBackupConfiguration()
+    {
+        var configFile = PluginInterface.ConfigFile;
+        if (!configFile.Exists)
+        {
+            return true;
+        }
+
+        try
+        {
+            File.Copy(configFile.FullName, $"{configFile.FullName}.bak", true);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Log.Error(exception, "Failed to back up configuration. The original file was not overwritten.");
+            return false;
         }
     }
 
