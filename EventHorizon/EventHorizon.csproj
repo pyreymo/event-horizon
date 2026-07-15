@@ -22,6 +22,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\external\ffxiv_pictomancy\Pictomancy\Pictomancy.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\external\ffxiv_pictomancy\PictomancyDemo\DemoWindow.cs" Link="Playground3D\DemoWindow.cs" />
+    <Compile Include="..\external\ffxiv_pictomancy\PictomancyDemo\VfxTab.cs" Link="Playground3D\VfxTab.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Serilog" Version="4.3.0">
       <ExcludeAssets Condition="'$(Configuration)' == 'Debug'">runtime</ExcludeAssets>
       <ExcludeAssets Condition="'$(Configuration)' != 'Debug'">all</ExcludeAssets>

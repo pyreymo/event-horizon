@@ -1,0 +1,3 @@
+[submodule "external/ffxiv_pictomancy"]
+	path = external/ffxiv_pictomancy
+	url = https://github.com/sourpuh/ffxiv_pictomancy.git

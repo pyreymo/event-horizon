@@ -17,6 +17,8 @@ using EventHorizon.Settings;
 using EventHorizon.TargetingMarker;
 using EventHorizon.UI.Config;
 using EventHorizon.WorldGraphics;
+using Pictomancy;
+using PictomancyDemo;
 
 namespace EventHorizon;
 
@@ -96,6 +98,8 @@ public sealed class Plugin : IDalamudPlugin
     private readonly WindowSystem windowSystem = new("EventHorizon");
     private ConfigWindow ConfigWindow { get; init; }
     private PlayerPreviewWindow PlayerPreviewWindow { get; init; }
+    private DemoWindow PictomancyDemoWindow { get; init; }
+    private PctContext? PictomancyContext { get; init; }
     private CullingController Culling { get; init; }
     private PlayerPreviewHighlighter PlayerPreviewHighlighter { get; init; }
     private ActorVfxController ActorVfxController { get; init; }
@@ -163,6 +167,8 @@ public sealed class Plugin : IDalamudPlugin
             );
             ConfigWindow = new ConfigWindow(this, DataManager, playerPreviewPanel, IsPlayerPreviewWindowOpen, TogglePlayerPreviewWindow);
             PlayerPreviewWindow = new PlayerPreviewWindow(playerPreviewPanel, OpenMainUi);
+            PictomancyContext = InitializePictomancy();
+            PictomancyDemoWindow = new DemoWindow();
             DtrStatusBar = new DtrBar(DtrBar, Configuration, Culling.GetStatus, SetPlayerHidingEnabled, ToggleConfigUi);
             DtrBackground = new DtrBackground(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
             TargetingMarkerController = new TargetingMarkerController(
@@ -182,6 +188,7 @@ public sealed class Plugin : IDalamudPlugin
 
             windowSystem.AddWindow(ConfigWindow);
             windowSystem.AddWindow(PlayerPreviewWindow);
+            windowSystem.AddWindow(PictomancyDemoWindow);
 
             CommandManager.AddHandler(
                 PrimaryCommandName,
@@ -266,6 +273,8 @@ public sealed class Plugin : IDalamudPlugin
         CommandManager.RemoveHandler(ShortCommandName);
 
         windowSystem.RemoveAllWindows();
+        PictomancyDemoWindow?.Dispose();
+        PictomancyContext?.Dispose();
         SceneVisibilityController?.Dispose();
         TargetingMarkerController?.Dispose();
         DtrBackground?.Dispose();
@@ -300,6 +309,9 @@ public sealed class Plugin : IDalamudPlugin
             case "preview":
                 TogglePlayerPreviewWindow();
                 break;
+            case "3d":
+                PictomancyDemoWindow.Toggle();
+                break;
             case "debugtarget":
                 PlayerAdmissionDebugTrace.DumpCurrentTarget();
                 break;
@@ -318,7 +330,8 @@ public sealed class Plugin : IDalamudPlugin
             Loc.Text("Command.Help.Enable"),
             Loc.Text("Command.Help.Disable"),
             Loc.Text("Command.Help.Toggle"),
-            Loc.Text("Command.Help.Preview")
+            Loc.Text("Command.Help.Preview"),
+            Loc.Text("Command.Help.3D")
         );
     }
 
@@ -356,6 +369,34 @@ public sealed class Plugin : IDalamudPlugin
         catch (Exception ex)
         {
             Log.Error(ex, "WindowSystem.Draw threw.");
+        }
+
+        if (PictomancyContext is null || !PictomancyDemoWindow.IsOpen || !PictomancyDemoWindow.WorldDrawEnabled)
+        {
+            return;
+        }
+
+        try
+        {
+            PictomancyDemoWindow.DrawWorld();
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Pictomancy demo DrawWorld threw.");
+            PictomancyDemoWindow.WorldDrawEnabled = false;
+        }
+    }
+
+    private static PctContext? InitializePictomancy()
+    {
+        try
+        {
+            return PctService.Initialize(PluginInterface, new PctOptions { EnableKtkOutput = true });
+        }
+        catch (Exception exception)
+        {
+            Log.Error(exception, "Pictomancy initialization failed; the 3D demo will run without world drawing.");
+            return null;
         }
     }
 

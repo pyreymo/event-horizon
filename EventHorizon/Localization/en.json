@@ -1,10 +1,11 @@
 {
-    "Command.Help": "{0}\n{1} on -> {2}\n{1} off -> {3}\n{1} toggle -> {4}\n{1} preview -> {5}",
+    "Command.Help": "{0}\n{1} on -> {2}\n{1} off -> {3}\n{1} toggle -> {4}\n{1} preview -> {5}\n{1} 3d -> {6}",
     "Command.Help.OpenSettings": "Open Event Horizon settings.",
     "Command.Help.Enable": "enable player hiding",
     "Command.Help.Disable": "disable player hiding",
     "Command.Help.Toggle": "toggle player hiding",
     "Command.Help.Preview": "toggle the player preview window",
+    "Command.Help.3D": "toggle the Pictomancy demo window",
 
     "Status.Enabled": "Enabled",
     "Status.Disabled": "Disabled",
