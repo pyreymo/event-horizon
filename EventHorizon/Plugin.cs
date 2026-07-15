@@ -7,6 +7,7 @@ using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using EventHorizon.Culling;
 using EventHorizon.Dtr;
+using EventHorizon.Integration.Debug;
 using EventHorizon.Interop.Vfx;
 using EventHorizon.Localization;
 using EventHorizon.Preview;
@@ -114,6 +115,7 @@ public sealed class Plugin : IDalamudPlugin
         Loc.Load(PluginInterface);
 
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
+        DebugFileLog.Initialize(PluginInterface, Log);
         try
         {
             PlayerPreviewHighlighter = new PlayerPreviewHighlighter();
@@ -213,6 +215,7 @@ public sealed class Plugin : IDalamudPlugin
         StaticVfxResourceRedirector?.Dispose();
         ActorVfxController?.Dispose();
         PlayerPreviewHighlighter?.Dispose();
+        DebugFileLog.Close();
     }
 
     #endregion
