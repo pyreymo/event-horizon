@@ -1,6 +1,7 @@
 using System;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
+using EventHorizon.Integration.Debug;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.Culling;
@@ -49,9 +50,12 @@ internal sealed unsafe class EnableDrawHook : IDisposable
     {
         if (admissionGate.ShouldSuppressEnableDraw(gameObject))
         {
+            PlayerAdmissionDebugTrace.OnEnableDrawSuppressed(gameObject);
             return;
         }
 
+        PlayerAdmissionDebugTrace.OnEnableDrawOriginalEntering(gameObject);
         hook.Original(gameObject);
+        PlayerAdmissionDebugTrace.OnEnableDrawOriginalReturned(gameObject);
     }
 }

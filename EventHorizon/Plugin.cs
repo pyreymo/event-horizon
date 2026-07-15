@@ -133,6 +133,7 @@ public sealed class Plugin : IDalamudPlugin
 
         var configurationNormalized = Configuration.Normalize(KeyState.IsVirtualKeyValid);
         DebugFileLog.Initialize(PluginInterface, Log);
+        PlayerAdmissionDebugTrace.Initialize(PluginInterface, GameInteropProvider, ClientState, PlayerState, TargetManager);
         try
         {
             PlayerPreviewHighlighter = new PlayerPreviewHighlighter();
@@ -275,6 +276,7 @@ public sealed class Plugin : IDalamudPlugin
         StaticVfxResourceRedirector?.Dispose();
         ActorVfxController?.Dispose();
         PlayerPreviewHighlighter?.Dispose();
+        PlayerAdmissionDebugTrace.Close();
         DebugFileLog.Close();
     }
 
@@ -297,6 +299,9 @@ public sealed class Plugin : IDalamudPlugin
                 break;
             case "preview":
                 TogglePlayerPreviewWindow();
+                break;
+            case "debugtarget":
+                PlayerAdmissionDebugTrace.DumpCurrentTarget();
                 break;
             default:
                 ToggleConfigUi();
@@ -367,6 +372,7 @@ public sealed class Plugin : IDalamudPlugin
         PlayerPreviewHighlighter.Update();
 
         Culling.Update();
+        PlayerAdmissionDebugTrace.Update(CullingStatus);
     }
 
     private bool IsTemporaryShowAllPlayersShortcutHeld()
