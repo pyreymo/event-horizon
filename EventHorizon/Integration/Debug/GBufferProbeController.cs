@@ -20,15 +20,32 @@ namespace EventHorizon.Integration.Debug;
 
 internal readonly record struct GBufferWorldMarker(string Label, System.Numerics.Vector3 Center, System.Numerics.Vector4 Color);
 
+internal readonly record struct GBufferMaterialParameters(
+    System.Numerics.Vector4 G0,
+    System.Numerics.Vector4 G1,
+    System.Numerics.Vector4 G2,
+    System.Numerics.Vector4 G3,
+    System.Numerics.Vector4 G4,
+    byte Stencil
+)
+{
+    public static GBufferMaterialParameters Default =>
+        new(
+            new System.Numerics.Vector4(0.5f, 1f, 0.5f, 128f / 255f),
+            new System.Numerics.Vector4(243f / 255f, 216f / 255f, 0f, 0f),
+            new System.Numerics.Vector4(52f / 255f, 42f / 255f, 35f / 255f, 1f),
+            new System.Numerics.Vector4(65504f, 0f, 0f, 1f),
+            new System.Numerics.Vector4(127f / 255f, 1f, 127f / 255f, 0f),
+            0x10
+        );
+}
+
 /// <summary>
-/// Experimental textured opaque renderer. It captures one native scene-material tuple,
-/// then writes a plugin-owned world quad into the five main G-buffers and scene depth.
+/// Experimental textured opaque renderer. It writes a plugin-owned world quad into the
+/// five main G-buffers and scene depth using a runtime-adjustable material tuple.
 /// </summary>
 internal sealed unsafe class GBufferProbeController : IDisposable
 {
-    private const byte SafeOpaqueStencil = 0x10;
-    internal static readonly System.Numerics.Vector2 DonorSampleNormalized = new(0.25f, 0.75f);
-
     private readonly EventHorizonConfiguration configuration;
     private readonly IPluginLog log;
     private readonly object stateLock = new();
@@ -62,7 +79,7 @@ internal sealed unsafe class GBufferProbeController : IDisposable
     private bool disposed;
     private WorldVertex[]? quadVertices;
     private GBufferWorldMarker? quadMarker;
-    private DonorSnapshot? donorSnapshot;
+    private GBufferMaterialParameters materialParameters = GBufferMaterialParameters.Default;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct WorldVertex
@@ -76,6 +93,11 @@ internal sealed unsafe class GBufferProbeController : IDisposable
     private struct WorldConstants
     {
         public Matrix ViewProjection;
+        public Vector4 G0;
+        public Vector4 G1;
+        public Vector4 G2;
+        public Vector4 G3;
+        public Vector4 G4;
     }
 
     private sealed class PendingProbe : IDisposable
@@ -126,30 +148,6 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         }
     }
 
-    private sealed class DonorSnapshot : IDisposable
-    {
-        public Texture2D[] Textures { get; }
-        public ShaderResourceView[] Views { get; }
-
-        public DonorSnapshot(Texture2D[] textures, ShaderResourceView[] views)
-        {
-            Textures = textures;
-            Views = views;
-        }
-
-        public void Dispose()
-        {
-            foreach (var view in Views)
-            {
-                view.Dispose();
-            }
-            foreach (var texture in Textures)
-            {
-                texture.Dispose();
-            }
-        }
-    }
-
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate void OMSetRenderTargetsDelegate(nint context, uint numViews, nint* renderTargetViews, nint depthStencilView);
 
@@ -185,14 +183,14 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             cbuffer WorldConstants : register(b0)
             {
                 float4x4 ViewProjection;
+                float4 MaterialG0;
+                float4 MaterialG1;
+                float4 MaterialG2;
+                float4 MaterialG3;
+                float4 MaterialG4;
             };
 
-            Texture2D<float4> DonorG0 : register(t0);
-            Texture2D<float4> DonorG1 : register(t1);
-            Texture2D<float4> DonorG2 : register(t2);
-            Texture2D<float4> DonorG3 : register(t3);
-            Texture2D<float4> DonorG4 : register(t4);
-            Texture2D<float4> AlbedoTexture : register(t5);
+            Texture2D<float4> AlbedoTexture : register(t0);
             SamplerState AlbedoSampler : register(s0);
 
             struct VertexInput
@@ -230,11 +228,11 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             GBufferOutput PS(PixelInput input)
             {
                 GBufferOutput output;
-                output.Target0 = DonorG0.Load(int3(0, 0, 0));
-                output.Target1 = DonorG1.Load(int3(0, 0, 0));
-                output.Target2 = DonorG2.Load(int3(0, 0, 0));
-                output.Target3 = DonorG3.Load(int3(0, 0, 0));
-                output.Target4 = DonorG4.Load(int3(0, 0, 0));
+                output.Target0 = MaterialG0;
+                output.Target1 = MaterialG1;
+                output.Target2 = MaterialG2;
+                output.Target3 = MaterialG3;
+                output.Target4 = MaterialG4;
                 output.Target0.rgb = normalize(input.WorldNormal) * 0.5 + 0.5;
                 output.Target2.rgb = AlbedoTexture.Sample(AlbedoSampler, input.TexCoord).rgb;
                 return output;
@@ -337,11 +335,29 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             ResetCandidate();
             quadVertices = null;
             quadMarker = null;
-            donorSnapshot?.Dispose();
-            donorSnapshot = null;
             log.Information($"Textured opaque G-buffer probe {(lastEnabled ? "enabled" : "disabled")}.");
         }
     }
+
+    public GBufferMaterialParameters MaterialParameters
+    {
+        get
+        {
+            lock (stateLock)
+            {
+                return materialParameters;
+            }
+        }
+        set
+        {
+            lock (stateLock)
+            {
+                materialParameters = value;
+            }
+        }
+    }
+
+    public void ResetMaterialParameters() => MaterialParameters = GBufferMaterialParameters.Default;
 
     public bool TryGetWorldMarker(out GBufferWorldMarker marker)
     {
@@ -371,7 +387,6 @@ internal sealed unsafe class GBufferProbeController : IDisposable
 
         lock (stateLock)
         {
-            donorSnapshot?.Dispose();
             depthStencilState.Dispose();
             blendState.Dispose();
             rasterizerState.Dispose();
@@ -545,11 +560,10 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         {
             detouring = true;
             deferredContext.ClearState();
-            EnsureDonorSnapshot(probe);
 
             deferredContext.OutputMerger.SetTargets(probe.DepthStencil, probe.RenderTargets);
             deferredContext.OutputMerger.SetBlendState(blendState);
-            deferredContext.OutputMerger.SetDepthStencilState(depthStencilState, SafeOpaqueStencil);
+            deferredContext.OutputMerger.SetDepthStencilState(depthStencilState, materialParameters.Stencil);
             deferredContext.Rasterizer.SetViewport(0, 0, probe.Width, probe.Height, 0, 1);
             deferredContext.Rasterizer.State = rasterizerState;
             deferredContext.InputAssembler.PrimitiveTopology = PrimitiveTopology.TriangleList;
@@ -562,12 +576,19 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             deferredContext.VertexShader.SetConstantBuffer(0, constantsBuffer);
             deferredContext.PixelShader.Set(pixelShader);
             deferredContext.PixelShader.SetConstantBuffer(0, constantsBuffer);
-            deferredContext.PixelShader.SetShaderResources(0, donorSnapshot!.Views);
-            deferredContext.PixelShader.SetShaderResource(5, testTextureView);
+            deferredContext.PixelShader.SetShaderResource(0, testTextureView);
             deferredContext.PixelShader.SetSampler(0, testSampler);
 
             viewProjection.Transpose();
-            var constants = new WorldConstants { ViewProjection = viewProjection };
+            var constants = new WorldConstants
+            {
+                ViewProjection = viewProjection,
+                G0 = ToSharpDx(materialParameters.G0),
+                G1 = ToSharpDx(materialParameters.G1),
+                G2 = ToSharpDx(materialParameters.G2),
+                G3 = ToSharpDx(materialParameters.G3),
+                G4 = ToSharpDx(materialParameters.G4),
+            };
             deferredContext.UpdateSubresource(ref constants, constantsBuffer);
             deferredContext.Draw(6, 0);
 
@@ -578,74 +599,6 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         {
             detouring = false;
             deferredContext.ClearState();
-        }
-    }
-
-    private void EnsureDonorSnapshot(PendingProbe probe)
-    {
-        if (donorSnapshot != null)
-        {
-            return;
-        }
-
-        var textures = new List<Texture2D>(5);
-        var views = new List<ShaderResourceView>(5);
-        try
-        {
-            var sourceX = Math.Clamp((int)(probe.Width * DonorSampleNormalized.X), 0, (int)probe.Width - 1);
-            var sourceY = Math.Clamp((int)(probe.Height * DonorSampleNormalized.Y), 0, (int)probe.Height - 1);
-            var sourceRegion = new ResourceRegion(sourceX, sourceY, 0, sourceX + 1, sourceY + 1, 1);
-            var formats = new List<string>(5);
-
-            for (var index = 0; index < 5; index++)
-            {
-                var renderTarget = probe.RenderTargets[index];
-                using var source = renderTarget.ResourceAs<Texture2D>();
-                var sourceDescription = source.Description;
-                if (sourceDescription.SampleDescription.Count != 1)
-                {
-                    throw new NotSupportedException($"G{index} is MSAA x{sourceDescription.SampleDescription.Count}.");
-                }
-
-                var donorDescription = sourceDescription;
-                donorDescription.Width = 1;
-                donorDescription.Height = 1;
-                donorDescription.MipLevels = 1;
-                donorDescription.ArraySize = 1;
-                donorDescription.Usage = ResourceUsage.Default;
-                donorDescription.BindFlags = BindFlags.ShaderResource;
-                donorDescription.CpuAccessFlags = CpuAccessFlags.None;
-                donorDescription.OptionFlags = ResourceOptionFlags.None;
-                var texture = new Texture2D(device, donorDescription);
-                textures.Add(texture);
-
-                var viewDescription = new ShaderResourceViewDescription
-                {
-                    Format = renderTarget.Description.Format,
-                    Dimension = ShaderResourceViewDimension.Texture2D,
-                    Texture2D = { MostDetailedMip = 0, MipLevels = 1 },
-                };
-                views.Add(new ShaderResourceView(device, texture, viewDescription));
-                deferredContext.CopySubresourceRegion(source, 0, sourceRegion, texture, 0, 0, 0, 0);
-                formats.Add($"G{index}={viewDescription.Format}");
-            }
-
-            donorSnapshot = new DonorSnapshot([.. textures], [.. views]);
-            log.Information(
-                $"Captured opaque donor at ({sourceX},{sourceY}), stencil=0x{SafeOpaqueStencil:X2}: {string.Join(",", formats)}."
-            );
-        }
-        catch
-        {
-            foreach (var view in views)
-            {
-                view.Dispose();
-            }
-            foreach (var texture in textures)
-            {
-                texture.Dispose();
-            }
-            throw;
         }
     }
 
@@ -859,4 +812,6 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         candidateWidth = 0;
         candidateHeight = 0;
     }
+
+    private static Vector4 ToSharpDx(System.Numerics.Vector4 value) => new(value.X, value.Y, value.Z, value.W);
 }
