@@ -794,3 +794,20 @@ G4 A   ：自发光强度
 ```
 
 因此运行时材质编辑器按上述粒度命名；尚未确认的分量继续标记为未知，不提前固化更具体的材质模型解释。
+
+### Pictomancy opaque backend 最小迁移
+
+原先由 EventHorizon `GBufferProbeController` 自己持有的 OM hook、candidate 匹配、MRT/depth状态、shader和跨帧纹理引用，已迁移到 `ffxiv_pictomancy` 的可选 `OpaqueGBufferBackend`。公开的最小入口为：
+
+```text
+PctOptions.EnableOpaqueGBufferBackend
+PctService.DrawOpaque()
+PctService.OpaqueMaterial
+PctOpaqueDrawList.AddTriangleFilled
+PctOpaqueDrawList.AddQuadFilled
+PctOpaqueDrawList.AddImage
+```
+
+`PctOpaqueDrawList.Dispose()`发布一份不可变命令快照，backend在下一次主G-buffer candidate退出时消费。图片SRV在发布期间持有COM引用；新快照替换旧快照或调用 `ClearOpaque()` 时释放。该路径只承诺opaque/cutout语义，alpha使用0.5阈值，不提供透明混合、`PctTexture`输出、shadow caster或motion vector。
+
+EventHorizon侧的Controller现只负责创建测试纹理、确定测试四边形的世界位置、调用 `DrawOpaque().AddImage(...)` 和提供ImGui箭头；不再拥有任何G-buffer hook或MRT写入代码。

@@ -150,7 +150,8 @@ public sealed class Plugin : IDalamudPlugin
             StaticVfxController = new StaticVfxController(GameInteropProvider, SigScanner, Log);
             WorldDotOverlay = new WorldDotOverlay(GameGui, PluginInterface);
             SceneVisibilityController = new SceneVisibilityController(GameInteropProvider, Configuration);
-            GBufferProbeController = new GBufferProbeController(GameInteropProvider, Configuration, Log);
+            PictomancyContext = InitializePictomancy();
+            GBufferProbeController = new GBufferProbeController(Configuration);
             Culling = new CullingController(
                 GameInteropProvider,
                 SigScanner,
@@ -172,7 +173,6 @@ public sealed class Plugin : IDalamudPlugin
             );
             ConfigWindow = new ConfigWindow(this, DataManager, playerPreviewPanel, IsPlayerPreviewWindowOpen, TogglePlayerPreviewWindow);
             PlayerPreviewWindow = new PlayerPreviewWindow(playerPreviewPanel, OpenMainUi);
-            PictomancyContext = InitializePictomancy();
             PictomancyDemoWindow = new DemoWindow();
             DtrStatusBar = new DtrBar(DtrBar, Configuration, Culling.GetStatus, SetPlayerHidingEnabled, ToggleConfigUi);
             DtrBackground = new DtrBackground(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
@@ -208,7 +208,6 @@ public sealed class Plugin : IDalamudPlugin
             ChatGui.ChatMessage += OnChatMessage;
             Framework.Update += OnFrameworkUpdate;
             SceneVisibilityController.Enable();
-            GBufferProbeController.Enable();
             Culling.Enable();
 
             PersistLoadedConfiguration(configurationLoadFailed || configurationNormalized);
@@ -280,9 +279,9 @@ public sealed class Plugin : IDalamudPlugin
 
         windowSystem.RemoveAllWindows();
         PictomancyDemoWindow?.Dispose();
-        PictomancyContext?.Dispose();
         SceneVisibilityController?.Dispose();
         GBufferProbeController?.Dispose();
+        PictomancyContext?.Dispose();
         TargetingMarkerController?.Dispose();
         DtrBackground?.Dispose();
         DtrStatusBar?.Dispose();
@@ -378,10 +377,15 @@ public sealed class Plugin : IDalamudPlugin
             Log.Error(ex, "WindowSystem.Draw threw.");
         }
 
+        var demoOwnsOpaqueBackend =
+            PictomancyDemoWindow.IsOpen && PictomancyDemoWindow.WorldDrawEnabled && PictomancyDemoWindow.UsesOpaqueBackend;
+        GBufferProbeController.PublishingEnabled = !demoOwnsOpaqueBackend;
+
         DrawGBufferProbeWorldArrow();
 
         if (PictomancyContext is null || !PictomancyDemoWindow.IsOpen || !PictomancyDemoWindow.WorldDrawEnabled)
         {
+            PictomancyDemoWindow.StopWorldDraw();
             return;
         }
 
@@ -411,7 +415,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         try
         {
-            return PctService.Initialize(PluginInterface, new PctOptions { EnableKtkOutput = true });
+            return PctService.Initialize(PluginInterface, new PctOptions { EnableKtkOutput = true, EnableOpaqueGBufferBackend = true });
         }
         catch (Exception exception)
         {

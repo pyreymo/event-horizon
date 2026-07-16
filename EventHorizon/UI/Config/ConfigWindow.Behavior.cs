@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.Keys;
-using EventHorizon.Integration.Debug;
 using EventHorizon.Localization;
 using EventHorizon.Settings;
+using Pictomancy;
 
 namespace EventHorizon.UI.Config;
 
@@ -424,7 +424,7 @@ internal partial class ConfigWindow
 
         if (changed)
         {
-            plugin.GBufferProbe.MaterialParameters = new GBufferMaterialParameters(g0, g1, g2, g3, g4, (byte)stencil);
+            plugin.GBufferProbe.MaterialParameters = new PctOpaqueMaterial(g0, g1, g2, g3, g4, (byte)stencil);
         }
 
         if (ImGui.Button(Loc.Text("Config.GBufferMaterialParameters.Reset")))
