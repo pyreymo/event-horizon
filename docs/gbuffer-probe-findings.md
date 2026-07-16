@@ -805,9 +805,36 @@ PctService.DrawOpaque()
 PctService.OpaqueMaterial
 PctOpaqueDrawList.AddTriangleFilled
 PctOpaqueDrawList.AddQuadFilled
+PctOpaqueDrawList.AddFanFilled
 PctOpaqueDrawList.AddImage
 ```
 
-`PctOpaqueDrawList.Dispose()`发布一份不可变命令快照，backend在下一次主G-buffer candidate退出时消费。图片SRV在发布期间持有COM引用；新快照替换旧快照或调用 `ClearOpaque()` 时释放。该路径只承诺opaque/cutout语义，alpha使用0.5阈值，不提供透明混合、`PctTexture`输出、shadow caster或motion vector。
+`PctOpaqueDrawList.Dispose()`发布一份不可变命令快照，backend在下一次主G-buffer candidate退出时消费。图片SRV在发布期间持有COM引用；新快照替换旧快照或调用 `ClearOpaque()` 时释放。该路径不提供真正的G-buffer透明混合、`PctTexture`输出、shadow caster或motion vector。
 
 EventHorizon侧的Controller现只负责创建测试纹理、确定测试四边形的世界位置、调用 `DrawOpaque().AddImage(...)` 和提供ImGui箭头；不再拥有任何G-buffer hook或MRT写入代码。
+
+### Dithered opaque 半透明方案
+
+Deferred G-buffer的一个像素只能表达一个depth、normal和材质tuple，因此不能直接对G0-G4使用 `SrcAlpha/InvSrcAlpha`：混合后的法线、材质分类和depth不再对应任何真实表面。第一版半透明采用screen-door覆盖率，而不是混合G-buffer值。
+
+pixel shader将纹理alpha与插值后的顶点alpha相乘，并与固定4x4 Bayer阈值比较：
+
+```hlsl
+float opacity = saturate(texel.a * input.Color.a);
+clip(opacity - DitherThreshold(input.Position.xy));
+```
+
+保留下来的像素继续完整写入G0-G4和reverse-Z depth，被discard的像素完全保留背景。因此保留样本仍参与原生deferred lighting、depth遮挡和已有阴影接收；TAA负责在视觉上将空间点阵近似为连续透明度。Alpha仅控制覆盖率，不覆盖安全opaque tuple中的任何G-buffer alpha字段。
+
+当前实现使用固定屏幕空间4x4 Bayer矩阵：alpha 0完全discard，alpha 1完全保留，中间值形成16级覆盖率。它适合技能范围、魔法面和世界标记，但不等价于真实透明合成。已知限制包括：
+
+```text
+没有正确的多层透明排序或颜色累积
+多个透明面重叠时仍由离散depth样本竞争
+固定屏幕点阵在TAA关闭时清晰可见
+镜头运动时可能出现点阵游走或TAA拖影
+当前backend不写motion vector
+不支持折射、透射或吸收材质
+```
+
+实机验证应至少覆盖alpha 1.0/0.75/0.5/0.25/0、TAA开关、静止与移动镜头、原生物体穿过、两个不同高度Fan重叠以及远距离摩尔纹。若这些限制不可接受，下一条独立路线是在deferred lighting之后定位scene-color/light accumulation target，手动depth test后进行真正的alpha composite；该路线不能继续依赖单层G-buffer表达。
