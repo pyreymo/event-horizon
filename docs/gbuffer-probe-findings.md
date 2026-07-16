@@ -826,15 +826,236 @@ clip(opacity - DitherThreshold(input.Position.xy));
 
 保留下来的像素继续完整写入G0-G4和reverse-Z depth，被discard的像素完全保留背景。因此保留样本仍参与原生deferred lighting、depth遮挡和已有阴影接收；TAA负责在视觉上将空间点阵近似为连续透明度。Alpha仅控制覆盖率，不覆盖安全opaque tuple中的任何G-buffer alpha字段。
 
-当前实现使用固定屏幕空间4x4 Bayer矩阵：alpha 0完全discard，alpha 1完全保留，中间值形成16级覆盖率。它适合技能范围、魔法面和世界标记，但不等价于真实透明合成。已知限制包括：
+第一版固定屏幕空间4x4 Bayer矩阵实机中规则网格过于明显；即使镜头静止也能看到强烈点阵，镜头运动时几何相对固定像素网格滑动，产生明显爬动。因此改为16帧循环的temporal Bayer：每帧以不同offset平移同一阈值矩阵，offset序列在16帧内遍历全部4x4位置。对固定像素而言，16帧恰好经历全部覆盖等级，由FFXIV TAA将其积分为接近连续的透明度。
+
+当前实现中alpha 0完全discard、alpha 1完全保留，中间值形成16级时间/空间覆盖率。它适合技能范围、魔法面和世界标记，但依赖temporal accumulation，仍不等价于真实透明合成。已知限制包括：
 
 ```text
 没有正确的多层透明排序或颜色累积
 多个透明面重叠时仍由离散depth样本竞争
-固定屏幕点阵在TAA关闭时清晰可见
-镜头运动时可能出现点阵游走或TAA拖影
+TAA关闭或history失效时会看到16帧图案切换和闪烁
+镜头运动时仍可能出现残余噪声或TAA拖影
 当前backend不写motion vector
 不支持折射、透射或吸收材质
 ```
 
-实机验证应至少覆盖alpha 1.0/0.75/0.5/0.25/0、TAA开关、静止与移动镜头、原生物体穿过、两个不同高度Fan重叠以及远距离摩尔纹。若这些限制不可接受，下一条独立路线是在deferred lighting之后定位scene-color/light accumulation target，手动depth test后进行真正的alpha composite；该路线不能继续依赖单层G-buffer表达。
+temporal版本实机验证应重点比较固定版本的静止规则网格、平移/旋转镜头时的爬动、停止镜头后的收敛时间，以及两个不同高度Fan重叠时的history表现。完整矩阵仍应覆盖alpha 1.0/0.75/0.5/0.25/0、TAA开关、原生物体穿过和远距离摩尔纹。若这些限制不可接受，下一条独立路线是在deferred lighting之后定位scene-color/light accumulation target，手动depth test后进行真正的alpha composite；该路线不能继续依赖单层G-buffer表达。
+
+### 原生 semitransparent G-buffer 路线
+
+Temporal Bayer实机中静止画面有所改善，但镜头运动时仍只能得到一般效果。该方案保留为opaque/cutout覆盖率能力，不再作为真正半透明的主路线。
+
+FFXIVClientStructs当前 `RenderTargetManager` 定义明确暴露了与主opaque链平行的一组资源：
+
+```text
+SemitransparentGBuffers[5]
+SemitransparentShadow
+SemitransparentLightDiffuse
+SemitransparentLightSpecular
+```
+
+这表明FFXIV存在独立的原生半透明deferred lighting/composite链，优先级高于自行寻找post-light scene-color并实现unlit alpha blend。第一轮探针复用现有五MRT精确匹配和世界几何路径，将target切换为 `SemitransparentGBuffers[0..4]`：不使用dither，仅discard alpha 0，并暂时假设 `G2.a = textureAlpha * vertexAlpha` 是后续合成的coverage。其余tuple、真实reverse-Z depth和几何法线保持现有安全基线。
+
+Demo新增 `Semitransparent G-buffer (probe)`。候选首次命中只记录一次尺寸和DSV日志。该实验的判定为：
+
+```text
+若出现连续alpha混合并受原生光照：原生半透明路径成立，继续最小化半透明tuple
+若可见但alpha无效：candidate成立，下一轮仅扫描半透明G-buffer中的coverage字段
+若完全不可见：先根据一次性candidate日志区分“未命中pass”与“tuple被后续链拒绝”
+```
+
+首次实机测试没有candidate命中日志，也没有任何绘制，因此失败点在pass识别而不是coverage或材质tuple。当前“五张半透明G-buffer按固定顺序一次性作为MRT并带DSV”的条件尚未得到证实。诊断改为同时比较RTV指针及其底层D3D11资源，并限量记录最多12种与 `SemitransparentGBuffers` 有交集的OM绑定形态；若4096次target change都没有交集，只记录一次明确的miss。根据该日志再决定是支持部分/重排MRT，还是放弃这组FFCS资源作为实际写入点。
+
+实机交集追踪确认当前画质配置下 `SemitransparentGBuffers[3]` 为null，实际出现两种绑定：
+
+```text
+3 MRT: slot0=G0, slot1=G2, slot2=G4
+4 MRT: slot0=G0, slot1=G1, slot2=G2, slot3=G4
+```
+
+因此FFCS的五元素数组是逻辑资源表，不代表五张资源必然同时存在或按原下标直接绑定。下一轮只将四MRT区段作为完整半透明candidate；使用专门的四输出pixel shader，将逻辑G4输出到物理 `SV_Target3`。三MRT区段暂视为前置或精简子阶段，不注入。coverage仍暂时假设为G2 alpha，等待可见性结果验证。
+
+四MRT candidate实机成功命中，但没有可见几何。为把“draw/depth-stencil失败”与“tuple/composite拒绝”分开，下一轮使用一次性的宽松可见性探针：半透明draw改为 `DepthFunc=Always`、`DepthWriteMask=Zero`、stencil关闭，并同时令G0/G1/G2/G4 alpha等于opacity；命令列表执行后只记录一次command和vertex计数。若draw-issued日志出现而仍不可见，后续不再调整几何投影或depth，而应捕获原生半透明draw的完整MRT输出、blend/depth-stencil状态及后续composite读取协议。
+
+宽松探针实机记录 `commands=1, vertices=153`，但完全没有几何、颜色或画面异常。这确认命令已发布；当时使用 `DepthWriteMask=Zero`，因此尚不能排除后续deferred链依赖半透明depth。下一步先验证资源生命周期：在首个injected draw之后，限量追踪PS/CS的SRV绑定以及四张半透明G-buffer的clear。若先clear后consumer，candidate exit不是有效注入点；若consumer确实读取了未清空资源，则进一步确认MRT和depth是否形成自洽像素。
+
+生命周期实机日志显示注入后没有clear，随后多个PS pass以不同slot组合读取G0/G1/G2/G4。这确认candidate exit位于有效的producer/consumer边界。仍需补最后一个基础事实：draw-issued不等于目标像素一定被写入。因此下一轮在首个三角形的投影质心处，对四张RT各做一次1x1 GPU readback。若读回值与注入tuple一致，则正式进入原生半透明donor/state捕获；若仍是clear/native值，则检查viewport、光栅化和写掩码，而不是composite协议。
+
+1x1实机读回为 `G0=7FFF7F59,G1=00D8F359,G2=3366FF59,G4=7FFF7F59`。四张MRT均已写入，alpha `0x59` 与探针opacity一致。此时无可见结果不能直接归因于tuple：探针为了绕过depth test同时关闭了depth write，而半透明deferred consumer很可能需要对应depth重建世界位置。下一轮保持 `DepthFunc=Always` 和stencil关闭，只将 `DepthWriteMask` 恢复为All；若由此可见，再收紧为原生遮挡比较。
+
+恢复depth write后实机仍完全不可见。至此投影、MRT写入、depth写入、producer/consumer时点均已验证，不能再通过猜测alpha或depth常量推进。下一轮限量记录四MRT candidate内的原生draw数量、OM depth/stencil transitions（包括stencil ref）和blend transitions。目标是取得游戏自己用于半透明分类和MRT累积的状态；若candidate内没有原生draw，应换到存在水面、玻璃或透明VFX的场景再捕获。
+
+为处理原生半透明物体很小、不适合固定屏幕采样的问题，Demo加入运行时donor点选：点击 `Pick semitransparent donor` 后显示跟随鼠标的准星，再点击原生半透明像素。后端在下一次四MRT candidate结束、插件注入之前，读取该屏幕像素的G0/G1/G2/G4和DSV stencil。第一轮完整复用donor tuple，不覆盖normal/albedo/alpha，并以 `Always + depth write + stencil Replace(donor ref)` 绘制；目标只是确认原生合法tuple和分类能否让自定义几何进入后续合成。donor只保存在运行时，不落配置。
+
+初版点选依赖全局 `ImGui.IsMouseClicked`，且只有存在已发布自定义frame时才会构造pending targets，实机表现为点击后无反应。交互改为临时全屏透明ImGui捕获层，通过fullscreen invisible button明确接管下一次左键（Esc取消），并将桌面viewport坐标转换为render-target相对坐标。donor capture也从自定义draw解耦：只要有待捕获请求，candidate exit就保留targets并执行readback，不要求先生成Fan/Triangle或已有active frame。
+
+两个使用 `CharacterTransparency.shpk` 的装备得到五次稳定donor样本：
+
+```text
+装备1 G1 raw: 00542000 / 004F2000
+装备2 G1 raw: 332D2000 / 33282000 / 322F2000
+全部样本：
+G0=7F7F7F01
+G2=7F7F7F01
+G4=7F7F7F01
+stencil=0x00
+```
+
+这些render target为BGRA8，因此G1按shader逻辑RGBA解码后约为：
+
+```text
+装备1: R=0x20, G=0x4F..0x54, B=0x00, A=0x00
+装备2: R=0x20, G=0x28..0x2F, B=0x32..0x33, A=0x00
+```
+
+样本说明该shader不是把普通opaque tuple加一个alpha：G0/G2/G4都保持固定的中性占位值，stencil也为0，装备间稳定差异集中在G1 RGB；G1 R固定，G随像素变化，G1 B可区分两类装备。之前把coverage优先假定为G2 alpha不成立，同时“需要非零stencil分类”的假设也缺乏支持。下一轮应以完整donor为基线，只替换G1逻辑R/G/B中的单个分量；在获得背景clear样本前，不能确定G1 G或B哪一个是coverage、折射/材质参数或已积累的颜色量。
+
+后续观察修正：donor后其实已有透明fan，只是不携带明显颜色，主要改变局部反光/光学响应，因此先前多轮“完全不可见”的肉眼判断可能也遗漏了同一现象。点选非透明物体时采到的仍是半透明G-buffer中的clear/background值，并不是该opaque材质的tuple，不能用于证明donor内容无关。当前证据更符合“自定义几何已进入半透明材质/反射链，但最终颜色或coverage来自独立的 `SemitransparentLightDiffuse/Specular` 或后续composite资源”。
+
+为回溯效果从哪一步出现，Demo增加不落配置的运行时 `Semitransparent probe mode`：
+
+```text
+NoDraw                         基线
+GeneratedTupleNoDepthWrite     生成tuple，Always，不写depth，不写stencil
+GeneratedTupleDepthWrite       生成tuple，Always，写depth，不写stencil
+DonorTupleDepthWrite           完整donor tuple，写depth，不写stencil
+DonorTupleDepthWriteStencil    完整donor tuple，写depth并Replace donor stencil
+```
+
+保持相同镜头和同一个Fan，从上到下切换即可分别确定：透明反光fan是否只需写四张MRT、是否依赖depth、是否依赖donor tuple、是否依赖stencil。完成这轮前不继续扫描G1字段。
+
+A/B实机结果：`NoDraw` 和 `GeneratedTupleNoDepthWrite` 无效果，从 `GeneratedTupleDepthWrite` 开始出现透明、无明显颜色但会改变反光/光学响应的fan；两个donor模式没有带来新的必要条件。因此最小成立条件是：
+
+```text
+生成的四MRT tuple
++ 对应的半透明depth write
+```
+
+donor和stencil均可从当前主路径移除。该结果进一步支持四张G-buffer负责表面法线/光学材质，明显颜色与coverage在后续独立资源中。下一轮依据FFCS确认的 `RenderTargetManager+0xD0/0xD8`，限量追踪 `SemitransparentLightDiffuse` 与 `SemitransparentLightSpecular` 的实际OM输出slot和后续PS/CS SRV输入slot；不再调整G-buffer tuple。
+
+实机追踪确认四MRT candidate之后存在独立的双MRT光照阶段：
+
+```text
+slot0 = SemitransparentLightDiffuse
+slot1 = SemitransparentLightSpecular
+DSV   = 与四MRT candidate相同
+```
+
+四MRT candidate内原生draw使用 `GreaterEqual + DepthWriteMask.All`，并以stencil ref `0x10`执行Replace；MRT blend关闭。后续PS明确同时把 `LightDiffuse` 和 `LightSpecular` 绑定到 `t0/t1`，另有若干后续pass分别读取其中之一。这把已验证链路收敛为：
+
+```text
+Semitransparent G0/G1/G2/G4 + depth
+→ 原生半透明lighting
+→ LightDiffuse + LightSpecular
+→ 后续composite
+```
+
+下一轮不再增加tuple或depth变体。在双MRT light pass退出后，对当前Fan首个三角形的屏幕质心各读取一个 `LightDiffuse/LightSpecular` 像素，并记录原始格式和值。若Fan像素已经产生明显diffuse颜色，则缺失点位于最终composite的coverage/混合协议；若只有specular变化或diffuse接近clear值，则当前四MRT tuple只进入了反射/光学分支，必须从原生 `CharacterTransparency.shpk` draw继续追踪颜色输入，而不是继续猜G-buffer alpha。
+
+`GeneratedTupleDepthWrite` 下首次light readback得到：
+
+```text
+LightDiffuse[R11G11B10_FLOAT]  raw=06531A6B  linear RGB≈(0.1367, 0.2891, 0.3438)
+LightSpecular[R11G11B10_FLOAT] raw=8A798E3B  linear RGB≈(0.00226, 0.00482, 0.00562)
+```
+
+两张light target都不是零值，且diffuse明显高于specular；但单个样本仍可能来自该屏幕位置原有背景，不能仅据此认定Fan已经生成diffuse。下一项只做严格A/B：保持地点、相机和Fan不动，切换到 `NoDraw` 重新读取同一世界质心。若NoDraw值与上述值近似，当前读到的是背景；若diffuse/specular随Fan显著变化，则lighting链已成立，缺失点正式定位到最终composite的coverage或混合协议。
+
+多次NoDraw对照得到完全一致的两个light值，确认上述样本来自背景，`GeneratedTupleDepthWrite` 写入的Fan没有被原生半透明lighting消费。结合candidate内原生draw明确使用stencil ref `0x10` Replace，而生成模式完全不写stencil、donor模式采到并写入的是 `0x00`，当前最强假设变为缺少原生半透明分类位。新增严格单变量模式 `GeneratedTupleDepthWriteStencil16`：继续使用生成tuple和相同depth路径，只额外Replace stencil为 `0x10`。下一轮同时观察Fan是否获得颜色，以及light readback是否相对NoDraw基线发生变化。
+
+`GeneratedTupleDepthWriteStencil16` 实机仍无变化，light readback也未偏离背景，因此stencil `0x10` 不是缺失的单一条件。为避免继续逐字段编译猜测，新增运行时 `ManualTupleDepthWriteStencil16`：保留相同depth和stencil路径，将G0/G1/G2/G4的RGBA共16个分量原样写入对应UNORM target，不应用生成模式中的normal、albedo和统一opacity覆盖。Demo提供四组 `InputFloat4` 和恢复默认按钮；参数不落配置，每次修改会重新启用G-buffer及light 1x1读回。该模式用于人工定位哪个字段或字段组合能使light target首次偏离NoDraw背景。
+
+人工调节结果与opaque路径已知语义相符：G0 RGB强烈影响diffuse/specular方向响应，G1更像roughness/F0/specular mask等表面参数，G2 RGB很可能是albedo/base color，G4关联较弱；但16个分量怎样调都没有产生可见颜色。这说明缺失项不再像普通材质参数。下一轮扩展现有donor点选：在原生 `CharacterTransparency.shpk` 可见像素处先捕获G0/G1/G2/G4和stencil，再在同帧半透明lighting结束后读取完全相同坐标的LightDiffuse/LightSpecular。若原生可见装备的light值也接近背景，颜色位于更晚的独立composite输入；若原生light值明显不同，则继续比较插件像素缺少的分类或辅助资源。
+
+同点全链采样得到明确正反例。可见透明装备像素为：
+
+```text
+G0=7F7F7F01, G1=322A2000, G2=7F7F7F01, G4=7F7F7F01, stencil=0x00
+LightDiffuse  raw=FA92D863, linear RGB≈(0.1191, 0.1602, 0.1836)
+LightSpecular raw=69304412, linear RGB≈(0.000100, 0.000134, 0.000156)
+```
+
+非透明点在半透明G-buffer中仍呈占位值，但两个light target均严格为零。这证明原生透明像素确实被半透明lighting选中，也排除了“颜色完全来自更晚且与light buffer无关的composite”这一假设。下一项复用现有 `DonorTupleDepthWrite` 做严格对照：重新捕获透明装备后，让Fan原样使用该tuple、写真实depth且不写stencil。若Fan light值开始偏离背景，选择条件包含精确tuple组合；若仍不变，则light pass还依赖原生透明几何的覆盖范围、`SemitransparentShadow` 或其他辅助mask/list，继续调普通G-buffer分量不会解决。
+
+首轮DonorTuple对照确认Fan注入后的四张G-buffer已经逐字等于新捕获donor，但日志中只有较早一次的donor坐标light readback，没有同轮Fan质心light值，因此尚不能下结论。原因是切换模式后、donor捕获前的light pass已经消耗一次性Fan读回标志。修正为每次donor捕获成功都重新开放Fan light读回；下一次light pass应连续输出 `Semitransparent donor light readback` 与 `Semitransparent light pixel readback`，两者才构成有效对照。
+
+修正后的严格对照得到：原生透明donor坐标 `LightDiffuse` 非零，而逐字使用同一donor tuple的Fan质心 `LightDiffuse/LightSpecular` 都严格为零。由此确认四张G-buffer、真实depth以及已测试的stencil都不足以加入原生半透明lighting；选择条件位于其他辅助资源或原生几何覆盖/list中。依据FFCS确认的 `RenderTargetManager+0xC8 SemitransparentShadow`，下一轮限量追踪该资源的实际OM写入和PS/CS读取slot。若它位于G-buffer与light之间并对透明像素有覆盖，则继续做同点readback/注入；若没有相关绑定，则转向记录light pass的draw数量和覆盖状态，验证是否只重绘原生透明几何。
+
+实机只发现 `SemitransparentShadow` 资源存在，没有任何OM写入或PS/CS读取绑定，排除它作为当前场景的活动coverage mask。下一轮在双light MRT区段内只记录一次Draw/DrawIndexed/DrawInstanced/DrawIndexedInstanced数量，以及depth/stencil和blend transitions。若该区段包含与透明对象相关的geometry draw，而不是单个fullscreen pass，则可确认lighting依赖原生几何replay/coverage，当前“仅在G-buffer candidate结束后注入一次”的hook层级不足。
+
+双light MRT区段实机记录 `124` 次draw，全部为 `DrawIndexed`。状态并非透明模型材质状态，而是以约三次draw为一组重复：先用depth关系写临时stencil bit `0x02`，再以stencil Equal `0x02`和 `One + One` additive blend累积LightDiffuse/LightSpecular，最后清理该bit。这符合deferred局部光源volume的典型结构，约对应四十组光源，不支持“重绘透明装备几何”的猜测。`0x02`应视为逐光源临时volume stencil，而不是插件需要预写的半透明材质分类。
+
+因此不同屏幕位置的donor与Fan light值不能直接比较：Fan质心为零可能只是未落入任何局部光源volume，不能证明lighting拒绝该像素。下一项应在原生light pass结束后，使用同一Fan几何向 `SemitransparentLightDiffuse` 写入明显常量颜色，保持现有G-buffer/depth不变。若最终composite出现颜色，则可确认后端需要两阶段注入（G-buffer/depth + light accumulation），并可继续研究怎样补ambient/directional及复用原生局部光；若仍无颜色，缺失条件才位于最终composite coverage。
+
+新增 `ManualTupleLightDiffuseProbe` 模式并设为Demo默认：第一阶段与manual tuple相同，写G0/G1/G2/G4、真实depth和stencil `0x10`；第二阶段在原生双light MRT结束后，以相同世界几何和 `GreaterEqual + DepthWriteMask.Zero` 向LightDiffuse写固定HDR橙色 `(4.0, 0.25, 0.02)`，LightSpecular写零。该模式每帧执行第二阶段，避免light target清理后只保留一帧。若最终画面出现橙色Fan，则两阶段注入成立；若light readback变为固定橙色但最终仍不可见，则问题明确位于composite coverage。
+
+实机出现黄色Fan，且light readback解码约为 `(4.0, 0.25, 0.0195)`、specular为零，与固定probe值吻合。这正式确认最终composite会使用插件写入的LightDiffuse，两阶段注入路线成立。当前明显闪烁优先归因于两阶段投影/depth不一致：G-buffer与light注入此前各自读取一次 `Control.ViewProjectionMatrix`，而实际pass顺序可能跨帧或跨TAA jitter。修正为在G-buffer注入时保存实际转置后VP，light阶段严格复用该矩阵，再以相同世界几何进行GreaterEqual depth test。
+
+复用G-buffer阶段VP后黄色Fan稳定，证明闪烁确由两阶段投影/depth不对齐造成。但固定probe仍不是完整半透明材质：第一阶段沿用了诊断用 `DepthFunc=Always`，会覆盖原生场景depth；第二阶段写死橙色，且manual exact tuple不跟随对象颜色/alpha。下一版将该模式收紧为最小可用两阶段路径：G-buffer阶段使用reverse-Z `GreaterEqual + DepthWriteMask.All + stencil 0x10`，恢复几何normal、纹理/顶点albedo和opacity写入；light阶段只写中性白色 `(1,1,1)` diffuse。若对象颜色和alpha开始自然生效，即确认G2 RGB/alpha在有light输入时参与最终composite；原生局部light仍可在此前的additive volume pass中叠加。
+
+中性LightDiffuse实机又回到无颜色、只有微小光学扰动，说明最终composite不会自动把G2 base color乘到插件补入的中性light上；可见颜色必须直接进入LightDiffuse。同时第二阶段不应再独立做depth比较：第一阶段已通过GreaterEqual决定可见覆盖并在成功像素写入stencil `0x10`。调整为第二阶段关闭depth，仅在同一Fan光栅范围内通过stencil Equal `0x10`写入；LightDiffuse颜色改为 `texture.rgb * vertex.rgb * 4`，并使用One/One additive blend叠加在原生局部光结果上，LightSpecular保持零。这样对象颜色直接可调，opaque遮挡只由第一阶段决定。
+
+上述同时改动depth、颜色来源、blend和coverage，实机仍失败，不能用于判断某个单项。根据外部review收敛实验：新增 `CoverageAlphaSweep`，严格恢复已知阳性基线（Stage A `Always + depth write`，Stage B复用保存VP、GreaterEqual depth test、固定白色LightDiffuse并覆盖写），只改变四张G-buffer的alpha。单个Fan通过新加入的极坐标UV显示4×5面板：径向内到外依次为G0.a/G1.a/G2.a/G4.a，角向五段依次为0/0.25/0.5/0.75/1；每个格子只替换对应target alpha，其他tuple字段固定。该轮只观察最终固定白光的亮度/可见覆盖差异，不判断遮挡、颜色或原生局部光。
+
+`CoverageAlphaSweep` 实机无法辨认四个径向环带或五档alpha之间的稳定亮度/覆盖差异；只有Fan与水面、人物头发等原生半透明对象相交时出现少量交互差异。当前应把这类现象视为透明链之间的顺序/覆盖交互，不能作为某个alpha控制连续coverage的证据。因此四张现有G-buffer的alpha在这条最终composite路径中均暂未表现为直接coverage参数。
+
+下一轮新增 `CoverageG1Sweep`，继续保持相同的Stage A depth、保存VP以及Stage B固定白色LightDiffuse阳性基线，只扫描G1 RGB。单个Fan使用3×5面板：径向内到外依次为G1.G、G1.B、G1.R，角向五段依次为0/0.25/0.5/0.75/1；其他全部G-buffer分量固定。该顺序来自原生 `CharacterTransparency.shpk` donor样本中G1.G的像素内变化、G1.B的装备间差异，以及相对稳定的G1.R。若本轮仍无连续覆盖变化，运行时盲扫普通G-buffer字段到此停止，下一步转为定点分析shader输出或查找尚未识别的coverage资源。
+
+`CoverageG1Sweep` 实机与alpha扫描没有明显差异，G1.G/G1.B/G1.R的三圈及各自五档都没有稳定可辨的coverage变化。至此，在固定LightDiffuse阳性对照下，G0/G1/G2/G4的全部alpha以及G1 RGB均已排除为直接连续coverage参数；不再继续盲扫普通G-buffer分量。
+
+下一项改为定位读取 `SemitransparentLightDiffuse/Specular` 的最终composite draw：一次性记录该draw的完整PS SRV集合、OM输出、blend/depth状态和pixel shader身份。目标是检查除四张G-buffer与两张light buffer以外是否还有coverage/mask输入；若没有额外输入，则coverage更可能来自原生透明几何或shader自身的独立执行路径，需要提取并定点分析 `CharacterTransparency.shpk`，而不是继续修改tuple数值。
+
+## CharacterTransparency.shpk 定点分析
+
+使用 `Penumbra.GameData.ShaderPack.ShpkFile` 对完整的 `charactertransparency.shpk` 和 `character.shpk` 进行解析与DXBC反汇编。`charactertransparency.shpk` 包含72个VS、344个PS、2240个node和4类pass。代表性node在多个pass中复用同一个VS，说明透明对象会以相同几何再次执行后续材质pass，而不是只写一次半透明G-buffer后等待全屏合成。
+
+代表性的五输出G-buffer PS可确认当前物理四MRT映射：
+
+```text
+SV_Target0 -> G0
+SV_Target1 -> G1
+SV_Target2 -> G2
+SV_Target3 -> G4
+SV_Target4 -> 当前未绑定/未使用
+```
+
+其输出还显示opacity类值写入G0.a、G2.a和物理SV_Target3的G4.a；G1.a来自独立的顶点varying，并不是同一opacity。此前把统一opacity同时写入G1.a不符合原生shader，但这不是最终coverage扫描无效的根因。
+
+关键发现来自两个单输出PS pass。它们都接收完整的透明几何varying并直接采样 `g_SamplerLightDiffuse`、`g_SamplerLightSpecular` 以及原始材质纹理/参数；其中一个变体还读取 `DepthWithWater`。它们不把半透明G0/G1/G2/G4作为最终全屏composite输入，而是在shader内部重新计算最终RGB和alpha，再输出到场景颜色。因此原生链路实际为：
+
+```text
+Stage A: 透明几何 -> Semitransparent G0/G1/G2/G4 + depth
+Stage B: deferred light volume -> LightDiffuse + LightSpecular
+Stage C: 同一透明几何再次绘制
+         + 采样LightDiffuse/LightSpecular
+         + 采样原始材质资源并重新计算alpha
+         -> 场景颜色目标上的透明混合
+```
+
+这修正了此前“两阶段注入已经进入最终composite”的判断。向LightDiffuse写固定颜色后只在水面、头发等原生透明对象交叠处出现颜色，证明插件写入的light值被后续原生透明几何采样；它并不证明插件Fan本身执行了最终透明合成。G-buffer alpha/G1扫描没有产生Fan coverage变化也由此得到解释：Stage C会为原生几何独立重算alpha，而插件从未提交对应的Stage C draw。
+
+SHPK本身没有提供实际OM render target、blend/depth state和运行时pass时点。下一步不再扫描G-buffer字段，而是运行时识别读取LightDiffuse/LightSpecular的单输出透明几何区段，记录其场景颜色RTV、DSV、blend/depth state和相对时序。随后实现最小Stage C：复用Stage A保存的同一VP/jitter和几何，读取屏幕位置的LightDiffuse/Specular，以插件纹理与顶点颜色计算RGB和连续alpha，写入原生场景颜色目标。第一版不要求复刻CharacterTransparency的全部反射、折射、雾和材质key，只验证插件几何能够在正确深度下执行正常alpha blend。
+
+已新增 `NativeComposite` 最小实现。Stage A使用 `GreaterEqual + DepthWriteMask.All + stencil 0x10`，并按原生约定只把opacity写入G0.a/G2.a/G4.a，G1.a保留材质值。运行时在PS同一次绑定中识别 `LightDiffuse + LightSpecular`，随后只接受“单RTV + DSV”的首个native draw作为Stage C候选；插件在该draw之前复用Stage A保存的VP和相同几何，以 `GreaterEqual + DepthWriteMask.Zero` 和标准 `SrcAlpha/InvSrcAlpha` blend写入当前场景颜色目标。第一版Stage C颜色严格为 `texture.rgb * vertex.rgb`，alpha为 `texture.a * vertex.a`，暂不采样light buffer，以便单独验证插件几何本身是否获得可调颜色、连续alpha和正确opaque遮挡。成功时只记录一次 `Semitransparent native composite issued`，其中包含命中的RT格式、尺寸以及该native draw原有的blend/depth状态。
+
+首轮 `NativeComposite` 实机验证成功：Fan颜色与混合正常，alpha连续有效，reverse-Z depth和opaque遮挡均正确。这确认插件几何已经真正执行Stage C，而不再只是改变原生水面/头发采到的light buffer。该版本看不出受光也符合实现，因为Stage C尚未读取两张light texture。Demo的全局 `Max alpha` 只属于旧Overlay hints，不参与G-buffer后端；G-buffer下的实际opacity来自各对象颜色编辑器的alpha，因此把 `Max alpha` 设为255不能用于验证alpha=1，UI已增加说明。
+
+第二版Stage C在命中native draw时查询其当前PS SRV，按底层resource身份取得实际的LightDiffuse和LightSpecular并绑定给插件shader。shader按 `baseColor * (0.25 + LightDiffuse * 4) + LightSpecular * 4` 生成首个可观察的受光近似值，继续使用原有连续alpha。常量0.25与倍率4目前只是诊断用曝光/环境补偿，不代表已经复刻CharacterTransparency的完整PBR模型；本轮只验证Fan亮度和色调是否随场景light buffer发生空间变化。若成立，再把倍率改为运行时材质参数并逐步对齐原生shader。
+
+实机确认Fan现在能够响应场景光源，说明Stage C取得的LightDiffuse/LightSpecular、屏幕像素寻址和跨阶段几何/VP对齐均有效。至此最小真正半透明链路已经完整成立：自定义几何写半透明G-buffer/depth，原生light pass生成或保留light buffer，随后自定义几何重绘并采样原生light buffer，以连续alpha混合到场景颜色。后续工作应从probe收敛为材质参数设计，包括ambient/diffuse/specular倍率、颜色空间和alpha=1语义；不再需要继续寻找额外coverage字段或注入pass。
+
+## 最小后端收敛
+
+在上述链路实机成立后，代码删除了donor捕获、tuple/coverage扫描、像素readback、light probe及对应的额外OM/CS/Clear hooks。正式半透明路径只保留三个必要观察点：识别并写入半透明G-buffer、观察PS绑定以取得LightDiffuse/LightSpecular、在原生单RTV透明合成draw前执行Stage C。
+
+Stage C的临时常量已改为运行时材质参数：
+
+```text
+final.rgb = baseColor * (Ambient + LightDiffuse * Diffuse)
+          + LightSpecular * Specular
+
+默认值：Ambient=0.25, Diffuse=4, Specular=4
+范围：  Ambient 0..2, Diffuse 0..8, Specular 0..8
+```
+
+参数由 `PctService.SemitransparentMaterial` 提供，只存在于当前运行时，不进入配置。Demo在Semitransparent G-buffer后端下提供三项滑杆。当前参数只是可调的首个光照近似，不代表CharacterTransparency完整材质模型；但它已经把后续调光与已完成的pass/hook探索分离开。
