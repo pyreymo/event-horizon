@@ -380,6 +380,25 @@ internal static unsafe class PlayerPreviewWorldArrowRenderer
         DrawWorldArrow(localPlayer, targetPlayer, gameGui);
     }
 
+    public static void Draw(
+        Vector3 sourceWorldPosition,
+        Vector3 targetWorldPosition,
+        IGameGui gameGui,
+        Vector4? arrowColor = null,
+        string? label = null
+    )
+    {
+        if (
+            !gameGui.WorldToScreen(sourceWorldPosition, out var sourceScreenPos, out _)
+            || !gameGui.WorldToScreen(targetWorldPosition, out var targetScreenPos, out var targetInView)
+        )
+        {
+            return;
+        }
+
+        DrawWorldArrow(sourceScreenPos, targetScreenPos, targetInView, arrowColor ?? WorldArrowColor, label);
+    }
+
     private static GameObject* FindLocalPlayer(GameObjectManager* manager)
     {
         var indexSorted = manager->Objects.IndexSorted;
@@ -428,6 +447,17 @@ internal static unsafe class PlayerPreviewWorldArrowRenderer
             return;
         }
 
+        DrawWorldArrow(sourceScreenPos, targetScreenPos, targetInView, WorldArrowColor, null);
+    }
+
+    private static void DrawWorldArrow(
+        Vector2 sourceScreenPos,
+        Vector2 targetScreenPos,
+        bool targetInView,
+        Vector4 arrowColor,
+        string? label
+    )
+    {
         sourceScreenPos = ClampToViewport(sourceScreenPos);
         var arrowEnd = targetInView ? targetScreenPos : GetViewportEdgePoint(sourceScreenPos, targetScreenPos);
         if (Vector2.DistanceSquared(sourceScreenPos, arrowEnd) <= 1f)
@@ -435,12 +465,16 @@ internal static unsafe class PlayerPreviewWorldArrowRenderer
             return;
         }
 
-        var color = ImGui.GetColorU32(WorldArrowColor);
+        var color = ImGui.GetColorU32(arrowColor);
         var drawList = ImGui.GetBackgroundDrawList();
 
         drawList.AddLine(sourceScreenPos, arrowEnd, color, WorldArrowLineThickness);
         DrawArrowHead(drawList, sourceScreenPos, arrowEnd, color);
         drawList.AddCircleFilled(arrowEnd, WorldArrowTargetRadius, color);
+        if (!string.IsNullOrEmpty(label))
+        {
+            drawList.AddText(arrowEnd + new Vector2(6f, 4f), color, label);
+        }
     }
 
     private static bool TryGetScreenPosition(GameObject* gameObject, IGameGui gameGui, out Vector2 screenPos, out bool inView)

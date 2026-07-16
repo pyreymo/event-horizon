@@ -4,6 +4,7 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.Keys;
 using EventHorizon.Localization;
+using EventHorizon.Settings;
 
 namespace EventHorizon.UI.Config;
 
@@ -314,7 +315,68 @@ internal partial class ConfigWindow
             value => configuration.HideAll3DScene = value
         );
         DrawHelpMarker(Loc.Text("Config.HideAll3DScene.Help"));
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.TextDisabled(Loc.Text("Config.GBufferProbe.Section"));
+        DrawSceneVisibilityCheckbox(
+            "EnableGBufferProbe",
+            Loc.Text("Config.EnableGBufferProbe"),
+            () => configuration.EnableGBufferProbe,
+            value => configuration.EnableGBufferProbe = value
+        );
+        DrawHelpMarker(Loc.Text("Config.EnableGBufferProbe.Help"));
+
+        if (configuration.EnableGBufferProbe)
+        {
+            ImGui.Indent();
+            DrawGBufferProbeMode();
+
+            ImGui.TextUnformatted(Loc.Text("Config.GBufferProbeCandidateExitOrdinal"));
+            var ordinal = configuration.GBufferProbeCandidateExitOrdinal;
+            ImGui.SetNextItemWidth(-1f);
+            if (ImGui.InputInt("##GBufferProbeCandidateExitOrdinal", ref ordinal))
+            {
+                configuration.GBufferProbeCandidateExitOrdinal = Math.Clamp(ordinal, 0, 31);
+                configuration.Save();
+            }
+            DrawHelpMarker(Loc.Text("Config.GBufferProbeCandidateExitOrdinal.Help"));
+            ImGui.Unindent();
+        }
     }
+
+    private void DrawGBufferProbeMode()
+    {
+        ImGui.TextUnformatted(Loc.Text("Config.GBufferProbeMode"));
+        ImGui.SetNextItemWidth(-1f);
+        if (ImGui.BeginCombo("##GBufferProbeMode", GetGBufferProbeModeLabel(configuration.GBufferProbeMode)))
+        {
+            foreach (var mode in Enum.GetValues<GBufferProbeMode>())
+            {
+                if (ImGui.Selectable(GetGBufferProbeModeLabel(mode), mode == configuration.GBufferProbeMode))
+                {
+                    configuration.GBufferProbeMode = mode;
+                    configuration.Save();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        DrawHelpMarker(Loc.Text("Config.GBufferProbeMode.Help"));
+    }
+
+    private static string GetGBufferProbeModeLabel(GBufferProbeMode mode) =>
+        mode switch
+        {
+            GBufferProbeMode.NoOp => Loc.Text("Config.GBufferProbeMode.NoOp"),
+            GBufferProbeMode.DepthOnly => Loc.Text("Config.GBufferProbeMode.DepthOnly"),
+            GBufferProbeMode.Target0Rgb => Loc.Text("Config.GBufferProbeMode.Target0Rgb"),
+            GBufferProbeMode.Target2Rgb => Loc.Text("Config.GBufferProbeMode.Target2Rgb"),
+            GBufferProbeMode.WorldTriangle => Loc.Text("Config.GBufferProbeMode.WorldTriangle"),
+            _ => mode.ToString(),
+        };
 
     private void DrawSceneVisibilityCheckbox(string id, string label, Func<bool> getValue, Action<bool> setValue)
     {

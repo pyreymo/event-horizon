@@ -107,6 +107,7 @@ public sealed class Plugin : IDalamudPlugin
     private StaticVfxController StaticVfxController { get; init; }
     private WorldDotOverlay WorldDotOverlay { get; init; }
     private SceneVisibilityController SceneVisibilityController { get; init; }
+    private GBufferProbeController GBufferProbeController { get; init; }
     private DtrBar DtrStatusBar { get; init; }
     private DtrBackground DtrBackground { get; init; }
     private TargetingMarkerController TargetingMarkerController { get; init; }
@@ -146,6 +147,7 @@ public sealed class Plugin : IDalamudPlugin
             StaticVfxController = new StaticVfxController(GameInteropProvider, SigScanner, Log);
             WorldDotOverlay = new WorldDotOverlay(GameGui, PluginInterface);
             SceneVisibilityController = new SceneVisibilityController(GameInteropProvider, Configuration);
+            GBufferProbeController = new GBufferProbeController(GameInteropProvider, Configuration, Log);
             Culling = new CullingController(
                 GameInteropProvider,
                 SigScanner,
@@ -203,6 +205,7 @@ public sealed class Plugin : IDalamudPlugin
             ChatGui.ChatMessage += OnChatMessage;
             Framework.Update += OnFrameworkUpdate;
             SceneVisibilityController.Enable();
+            GBufferProbeController.Enable();
             Culling.Enable();
 
             PersistLoadedConfiguration(configurationLoadFailed || configurationNormalized);
@@ -276,6 +279,7 @@ public sealed class Plugin : IDalamudPlugin
         PictomancyDemoWindow?.Dispose();
         PictomancyContext?.Dispose();
         SceneVisibilityController?.Dispose();
+        GBufferProbeController?.Dispose();
         TargetingMarkerController?.Dispose();
         DtrBackground?.Dispose();
         DtrStatusBar?.Dispose();
@@ -371,6 +375,8 @@ public sealed class Plugin : IDalamudPlugin
             Log.Error(ex, "WindowSystem.Draw threw.");
         }
 
+        DrawGBufferProbeWorldArrow();
+
         if (PictomancyContext is null || !PictomancyDemoWindow.IsOpen || !PictomancyDemoWindow.WorldDrawEnabled)
         {
             return;
@@ -384,6 +390,20 @@ public sealed class Plugin : IDalamudPlugin
         {
             Log.Error(ex, "Pictomancy demo DrawWorld threw.");
             PictomancyDemoWindow.WorldDrawEnabled = false;
+        }
+    }
+
+    private void DrawGBufferProbeWorldArrow()
+    {
+        var localPlayer = ObjectTable.LocalPlayer;
+        if (localPlayer == null || !GBufferProbeController.TryGetWorldTriangleMarkers(out var markers))
+        {
+            return;
+        }
+
+        foreach (var marker in markers)
+        {
+            PlayerPreviewWorldArrowRenderer.Draw(localPlayer.Position, marker.Center, GameGui, marker.Color, marker.Label);
         }
     }
 
@@ -409,6 +429,7 @@ public sealed class Plugin : IDalamudPlugin
         Culling.TemporarilyShowAllPlayers = IsTemporaryShowAllPlayersShortcutHeld();
 
         SceneVisibilityController.Update();
+        GBufferProbeController.Update();
         DtrStatusBar.Update();
         PlayerPreviewHighlighter.Update();
 
