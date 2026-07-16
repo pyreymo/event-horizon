@@ -171,9 +171,11 @@ G-buffer probe #1 issued at candidate exit: 64x64, targets=5.
 
 这可以确认：
 
-1. `GBuffer 2 RGB` 是 diffuse/albedo 类数据。
+1. `GBuffer 2 RGB` 是 diffuse/albedo 类数据，至少控制基础明暗和原纹理信息。
 2. 它与 lighting 分离存储，而不是已经包含最终光照结果。
 3. 当前 candidate exit 位于 deferred lighting 之前，注入的 albedo 会被 FFXIV 原生光照消费。
+
+该轮仅使用中性灰，尚未验证三个通道是否是直接的 RGB 色彩编码；后续世界三角形的彩色测试需要继续收紧这一点。
 
 ### 第二轮结论
 
@@ -240,3 +242,45 @@ GBuffer 2 RGB 的 diffuse/albedo 语义得到确认
 
 - `ClipControl` 可见而六个世界三角形都不可见：问题集中在世界坐标到 clip-space 的变换。
 - `ClipControl` 也不可见：优先检查 WorldTriangle 专用 shader、input layout、顶点范围或 draw 提交，不再把原因归到矩阵/depth。
+
+### 首轮 WorldTriangle 诊断结果与修正
+
+实机结果：
+
+- `ClipControl` 有三角形轮廓，但经过 lighting 后呈黑色。这证明 WorldTriangle 专用 VS/PS、input layout、MRT 绑定和 draw command 已经生效；黑色不能解释为“没有提交 draw”。
+- 六个世界标记都落在初始化镜头的背面；转身后离屏箭头出现并持续指向固定世界位置。
+- 六个离屏箭头汇聚到同一屏幕边缘点，是箭头裁边后的投影结果，不足以证明六个世界中心相同。
+
+根因首先落在旧的摆放逻辑：它通过 `inverse(ViewMatrix)` 和猜测的 `+Z/-Z` 约定反推 forward/right/up，但该 forward 与 FFXIV/Dalamud 的实际屏幕投影方向相反。因此此轮没有产生有效的矩阵/depth 对比结果。
+
+修正：
+
+- 使用 FFCS `Scene.Camera.ScreenPointToRay`，在屏幕归一化位置 `(0.30/0.50/0.70, 0.32/0.62)` 直接生成六个固定世界三角形；每个顶点也分别由对应屏幕射线在 5m 处构造。初始化时它们应当处于视锥内并彼此分离。
+- 红、绿、蓝三个无 depth 变体和橙色 `ClipControl` 改为只写 G2 RGB，保留原始 normal，避免错误/无关法线把 albedo 控制样本照成黑色。
+- 黄、洋红、青仍写 G0 RGB + G2 RGB，并分别使用 `Always` 或 `GreaterEqual`，继续承担真实 depth 与 normal/albedo tuple 的验证。
+
+### 第二轮 WorldTriangle 诊断结果
+
+实机可见性：
+
+| 变体 | 结果 |
+| --- | --- |
+| 橙 `ClipControl` | 可见，最终呈灰/黑色 |
+| 红 `C/NoDepth/T` | 可见，最终呈灰/黑色 |
+| 绿 `S/NoDepth/T` | 可见，最终呈灰/黑色 |
+| 蓝 `C/NoDepth/Raw` | 不可见 |
+| 黄 `C/Always/T` | 可见，最终呈灰/黑色 |
+| 洋红 `C/GreaterEqual/T` | 可见，最终呈灰/黑色 |
+| 青 `S/GreaterEqual/T` | 不可见 |
+
+由此确认：
+
+1. CPU 矩阵上传到当前 `mul(rowVector, ViewProjection)` shader 前必须 transpose；蓝色失败排除了 raw 上传。
+2. `Control.ViewProjectionMatrix` 是当前 opaque depth 对齐所需的矩阵来源。Scene VP 足以生成落在视口内的片元（绿色可见），但它产生的 rasterized depth 无法通过现有 DSV 的 `GreaterEqual`（青色失败）。
+3. FFXIV 当前路径使用 reverse-Z；`GreaterEqual + DepthWriteMask.All` 的洋红色世界三角形可见，证明真实 rasterized depth、DSV 测试/写入和 G-buffer draw 已贯通。
+4. `Always` 黄色可见说明 depth 写入本身也工作；洋红色进一步证明最终实现无需依赖 `Always`。
+5. 世界空间不透明几何的最小技术路径已经成立：`Control VP + transpose + GreaterEqual + G0/G2 write`。
+
+所有三角形最终呈灰/黑色是下一阶段的 G-buffer 语义/材质 tuple 问题，不再是投影或 depth 问题。尤其是橙、红、绿样本关闭了 depth 且只写 G2 RGB，却没有按写入值表现出对应色彩；这说明此前由中性灰实验得出的 `G2 RGB ≈ diffuse/albedo` 还不能扩大成“G2 三通道就是直接 RGB albedo”。另一种可能是继承的 G0/G2 alpha、G1、G3、G4 中存在材质分类或色彩解释字段。
+
+下一步应固定 `Control VP + transpose`，先以相同的 no-depth 条件并排测试 G2 的纯 R、纯 G、纯 B、白和黑，同时记录 G2 RTV 的实际 DXGI format。确认色彩通道映射后，再使用 `GreaterEqual + DepthWriteMask.All` 建立 `KnownSafeOpaqueTuple`；不应继续增加 ViewProjection 或 depth 比较变体。

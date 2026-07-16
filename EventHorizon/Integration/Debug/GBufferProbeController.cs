@@ -880,7 +880,10 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             var isWorldTriangle = configuration.GBufferProbeMode == GBufferProbeMode.WorldTriangle;
             Matrix controlViewProjection = default;
             Matrix sceneViewProjection = default;
-            if (isWorldTriangle && !TryUpdateWorldTriangleResources(out controlViewProjection, out sceneViewProjection))
+            if (
+                isWorldTriangle
+                && !TryUpdateWorldTriangleResources(probe.Width, probe.Height, out controlViewProjection, out sceneViewProjection)
+            )
             {
                 LogProbeResult(probe, "world triangle skipped because the active scene camera was unavailable");
                 return;
@@ -951,7 +954,12 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         }
     }
 
-    private bool TryUpdateWorldTriangleResources(out Matrix controlViewProjection, out Matrix sceneViewProjection)
+    private bool TryUpdateWorldTriangleResources(
+        uint viewportWidth,
+        uint viewportHeight,
+        out Matrix controlViewProjection,
+        out Matrix sceneViewProjection
+    )
     {
         controlViewProjection = default;
         sceneViewProjection = default;
@@ -970,38 +978,41 @@ internal sealed unsafe class GBufferProbeController : IDisposable
 
         if (worldTriangleVertices == null)
         {
-            var inverseView = viewMatrix;
-            inverseView.Invert();
-
-            var cameraPosition = new Vector3(renderCamera->Origin.X, renderCamera->Origin.Y, renderCamera->Origin.Z);
-            var right = Vector3.Normalize(Vector3.TransformNormal(Vector3.UnitX, inverseView));
-            var up = Vector3.Normalize(Vector3.TransformNormal(Vector3.UnitY, inverseView));
-            var forward = Vector3.Normalize(Vector3.TransformNormal(Vector3.UnitZ, inverseView));
-            var cameraViewPosition = Vector3.TransformCoordinate(cameraPosition, viewMatrix);
-            var forwardViewPosition = Vector3.TransformCoordinate(cameraPosition + forward, viewMatrix);
-            if (forwardViewPosition.Z <= cameraViewPosition.Z)
+            var cameraPosition = new Vector3(
+                activeCamera->SceneCamera.Position.X,
+                activeCamera->SceneCamera.Position.Y,
+                activeCamera->SceneCamera.Position.Z
+            );
+            var definitions = new (string Label, float ScreenX, float ScreenY, Vector4 Color)[]
             {
-                forward = -forward;
-            }
-
-            var definitions = new (string Label, float Right, float Up, Vector4 Color)[]
-            {
-                ("C/NoDepth/T", -2.2f, 1.25f, new Vector4(1f, 0.1f, 0.1f, 1f)),
-                ("S/NoDepth/T", 0f, 1.25f, new Vector4(0.1f, 1f, 0.1f, 1f)),
-                ("C/NoDepth/Raw", 2.2f, 1.25f, new Vector4(0.1f, 0.3f, 1f, 1f)),
-                ("C/Always/T", -2.2f, -0.75f, new Vector4(1f, 1f, 0.1f, 1f)),
-                ("C/GreaterEqual/T", 0f, -0.75f, new Vector4(1f, 0.1f, 1f, 1f)),
-                ("S/GreaterEqual/T", 2.2f, -0.75f, new Vector4(0.1f, 1f, 1f, 1f)),
+                ("C/NoDepth/T", 0.30f, 0.32f, new Vector4(1f, 0.1f, 0.1f, 1f)),
+                ("S/NoDepth/T", 0.50f, 0.32f, new Vector4(0.1f, 1f, 0.1f, 1f)),
+                ("C/NoDepth/Raw", 0.70f, 0.32f, new Vector4(0.1f, 0.3f, 1f, 1f)),
+                ("C/Always/T", 0.30f, 0.62f, new Vector4(1f, 1f, 0.1f, 1f)),
+                ("C/GreaterEqual/T", 0.50f, 0.62f, new Vector4(1f, 0.1f, 1f, 1f)),
+                ("S/GreaterEqual/T", 0.70f, 0.62f, new Vector4(0.1f, 1f, 1f, 1f)),
             };
 
             var vertices = new List<WorldVertex>(definitions.Length * 3);
             var markers = new List<GBufferWorldTriangleMarker>(definitions.Length);
             foreach (var definition in definitions)
             {
-                var center = cameraPosition + forward * 5f + right * definition.Right + up * definition.Up;
-                var p0 = center - right * 0.9f - up * 0.75f - forward * 0.45f;
-                var p1 = center + right * 0.9f - up * 0.75f + forward * 0.45f;
-                var p2 = center + up * 0.9f;
+                var center = GetScreenRayPoint(activeCamera, viewportWidth, viewportHeight, definition.ScreenX, definition.ScreenY);
+                var p0 = GetScreenRayPoint(
+                    activeCamera,
+                    viewportWidth,
+                    viewportHeight,
+                    definition.ScreenX - 0.045f,
+                    definition.ScreenY + 0.065f
+                );
+                var p1 = GetScreenRayPoint(
+                    activeCamera,
+                    viewportWidth,
+                    viewportHeight,
+                    definition.ScreenX + 0.045f,
+                    definition.ScreenY + 0.065f
+                );
+                var p2 = GetScreenRayPoint(activeCamera, viewportWidth, viewportHeight, definition.ScreenX, definition.ScreenY - 0.065f);
                 var normal = Vector3.Normalize(Vector3.Cross(p1 - p0, p2 - p0));
                 if (Vector3.Dot(normal, cameraPosition - center) < 0)
                 {
@@ -1026,7 +1037,7 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             log.Information(
                 "World-triangle diagnostics initialized: matrixSources=Control.ViewProjectionMatrix|Scene.Camera.ViewMatrix*Render.Camera.ProjectionMatrix, "
                     + $"camera={FormatVector(cameraPosition)}, matrixMaxDelta={GetMatrixMaxDelta(controlViewProjection, sceneViewProjection):G4}, "
-                    + "variants=C/NoDepth/T,S/NoDepth/T,C/NoDepth/Raw,C/Always/T,C/GreaterEqual/T,S/GreaterEqual/T, cull=None."
+                    + "placement=Scene.Camera.ScreenPointToRay, variants=C/NoDepth/T,S/NoDepth/T,C/NoDepth/Raw,C/Always/T,C/GreaterEqual/T,S/GreaterEqual/T, cull=None."
             );
         }
 
@@ -1036,14 +1047,14 @@ internal sealed unsafe class GBufferProbeController : IDisposable
 
     private void DrawWorldTriangleDiagnostics(Matrix controlViewProjection, Matrix sceneViewProjection)
     {
-        var variants = new (Matrix ViewProjection, bool Transpose, DepthStencilState DepthState, Vector4 Albedo)[]
+        var variants = new (Matrix ViewProjection, bool Transpose, DepthStencilState DepthState, BlendState BlendState, Vector4 Albedo)[]
         {
-            (controlViewProjection, true, noDepthWriteState, new Vector4(1f, 0.1f, 0.1f, 1f)),
-            (sceneViewProjection, true, noDepthWriteState, new Vector4(0.1f, 1f, 0.1f, 1f)),
-            (controlViewProjection, false, noDepthWriteState, new Vector4(0.1f, 0.3f, 1f, 1f)),
-            (controlViewProjection, true, depthWriteState, new Vector4(1f, 1f, 0.1f, 1f)),
-            (controlViewProjection, true, worldDepthWriteState, new Vector4(1f, 0.1f, 1f, 1f)),
-            (sceneViewProjection, true, worldDepthWriteState, new Vector4(0.1f, 1f, 1f, 1f)),
+            (controlViewProjection, true, noDepthWriteState, target2RgbBlendState, new Vector4(1f, 0.1f, 0.1f, 1f)),
+            (sceneViewProjection, true, noDepthWriteState, target2RgbBlendState, new Vector4(0.1f, 1f, 0.1f, 1f)),
+            (controlViewProjection, false, noDepthWriteState, target2RgbBlendState, new Vector4(0.1f, 0.3f, 1f, 1f)),
+            (controlViewProjection, true, depthWriteState, worldTriangleBlendState, new Vector4(1f, 1f, 0.1f, 1f)),
+            (controlViewProjection, true, worldDepthWriteState, worldTriangleBlendState, new Vector4(1f, 0.1f, 1f, 1f)),
+            (sceneViewProjection, true, worldDepthWriteState, worldTriangleBlendState, new Vector4(0.1f, 1f, 1f, 1f)),
         };
 
         for (var index = 0; index < variants.Length; index++)
@@ -1061,6 +1072,7 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             }
 
             deferredContext.OutputMerger.SetDepthStencilState(variant.DepthState);
+            deferredContext.OutputMerger.SetBlendState(variant.BlendState);
             deferredContext.UpdateSubresource(ref constants, worldConstantsBuffer);
             deferredContext.Draw(3, index * 3);
         }
@@ -1072,8 +1084,24 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             Diagnostic = new Vector4(1f, 0f, 0f, 0f),
         };
         deferredContext.OutputMerger.SetDepthStencilState(noDepthWriteState);
+        deferredContext.OutputMerger.SetBlendState(target2RgbBlendState);
         deferredContext.UpdateSubresource(ref clipControlConstants, worldConstantsBuffer);
         deferredContext.Draw(3, 0);
+    }
+
+    private static Vector3 GetScreenRayPoint(
+        FFXIVClientStructs.FFXIV.Client.Game.Camera* activeCamera,
+        uint viewportWidth,
+        uint viewportHeight,
+        float normalizedX,
+        float normalizedY
+    )
+    {
+        var screenPoint = new FFXIVClientStructs.FFXIV.Common.Math.Vector2(normalizedX * viewportWidth, normalizedY * viewportHeight);
+        var ray = activeCamera->SceneCamera.ScreenPointToRay(screenPoint);
+        var origin = new Vector3(ray.Origin.X, ray.Origin.Y, ray.Origin.Z);
+        var direction = Vector3.Normalize(new Vector3(ray.Direction.X, ray.Direction.Y, ray.Direction.Z));
+        return origin + direction * 5f;
     }
 
     private static float GetMatrixMaxDelta(Matrix left, Matrix right)
