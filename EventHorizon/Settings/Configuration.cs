@@ -98,10 +98,6 @@ internal class Configuration : IPluginConfiguration
     public bool HideGrass { get; set; } = false;
     public bool HideAll3DScene { get; set; } = false;
     public bool EnableGBufferProbe { get; set; } = false;
-    public GBufferProbeMode GBufferProbeMode { get; set; } = GBufferProbeMode.NoOp;
-
-    [ConfigRange(0, 31)]
-    public int GBufferProbeCandidateExitOrdinal { get; set; } = 0;
 
     [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
     public List<PlayerKeepRuleId> KeepRuleOrder { get; set; } = PlayerKeepRuleOrder.CreateDefaultOrder();
@@ -124,20 +120,12 @@ internal class Configuration : IPluginConfiguration
             HideGrass = false,
             HideAll3DScene = false,
             EnableGBufferProbe = false,
-            GBufferProbeMode = GBufferProbeMode.NoOp,
-            GBufferProbeCandidateExitOrdinal = 0,
         };
 
     public bool Normalize(Func<int, bool> isValidVirtualKey)
     {
         var defaults = new Configuration();
         var changed = false;
-
-        if (!Enum.IsDefined(GBufferProbeMode))
-        {
-            GBufferProbeMode = defaults.GBufferProbeMode;
-            changed = true;
-        }
 
         foreach (var property in typeof(Configuration).GetProperties())
         {

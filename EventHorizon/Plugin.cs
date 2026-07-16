@@ -400,20 +400,17 @@ public sealed class Plugin : IDalamudPlugin
         DrawGBufferDonorSampleMarker();
 
         var localPlayer = ObjectTable.LocalPlayer;
-        if (localPlayer == null || !GBufferProbeController.TryGetWorldTriangleMarkers(out var markers))
+        if (localPlayer == null || !GBufferProbeController.TryGetWorldMarker(out var marker))
         {
             return;
         }
 
-        foreach (var marker in markers)
-        {
-            PlayerPreviewWorldArrowRenderer.Draw(localPlayer.Position, marker.Center, GameGui, marker.Color, marker.Label);
-        }
+        PlayerPreviewWorldArrowRenderer.Draw(localPlayer.Position, marker.Center, GameGui, marker.Color, marker.Label);
     }
 
     private void DrawGBufferDonorSampleMarker()
     {
-        if (!Configuration.EnableGBufferProbe || Configuration.GBufferProbeMode != GBufferProbeMode.DonorOpaqueTuple)
+        if (!Configuration.EnableGBufferProbe)
         {
             return;
         }
