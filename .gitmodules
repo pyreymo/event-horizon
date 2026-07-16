@@ -1,6 +1,3 @@
 [submodule "external/ffxiv_pictomancy"]
 	path = external/ffxiv_pictomancy
 	url = git@github.com:pyreymo/ffxiv_pictomancy.git
-[submodule "external/FFXIV-TV"]
-	path = external/FFXIV-TV
-	url = git@github.com:Sansflaire/FFXIV-TV.git
