@@ -715,3 +715,71 @@ Donor triangle normal ：只用真实几何平面法线替换G0 RGB
 ```
 
 两者继续使用各自真实rasterized depth和同一个donor stencil；其他所有MRT字段相同。若triangle-normal版本的光照方向明显合理，便可确认当前异常完全来自法线/几何不一致；若仍有无法解释的高光，再开始从donor tuple中隔离roughness/specular/reflection相关字段。
+
+实机确认triangle-normal版本的光照方向合理，并且能够接收原生阴影。三角形不会阻挡shadow map中的光线，阴影仍会落到后方地面，这是因为它只参与主相机G-buffer，尚未参与更早的shadow caster pass；该问题暂不纳入opaque材质实验。
+
+下一轮改为验证自定义albedo。六个三角形全部使用真实几何法线、相同donor G0 alpha/G1/G2 alpha/G3/G4、真实depth和donor stencil，仅控制G2 RGB：
+
+```text
+Donor albedo
+18% gray       (0.18, 0.18, 0.18)
+Red            (0.65, 0.05, 0.05)
+Green          (0.05, 0.65, 0.05)
+Blue           (0.05, 0.05, 0.65)
+White          (0.75, 0.75, 0.75)
+```
+
+pixel shader先加载完整donor tuple并替换G0 RGB为几何法线；除基线样本外，再以 `Diagnostic.w`控制是否用 `Albedo.rgb`覆盖G2 RGB，G2 alpha保持donor值。该矩阵用于确认颜色通道、阴影结构、局部光响应以及高光是否基本独立于albedo。
+
+实机结果：颜色可明确区分且符合预期；不同颜色与场景光颜色的叠加自然，局部光响应正常。由于六个样本位于不同世界位置，无法用它们比较同一片外部阴影；地板donor偏哑光，也没有观察到足够明确的高光差异。结论是G2 RGB可作为正式自定义albedo输入。
+
+`FFXIV-TV`未提供roughness/specular通道解码；Pictomancy只明确标注G0为world-space normal、G3为scene-info分类。下一轮转向G1，但先不修改更可能承载分类的alpha。六个样本统一使用：
+
+```text
+真实几何法线
+G2 RGB = (0.35,0.35,0.35)
+其余完整donor tuple
+donor stencil + 真实depth
+```
+
+仅改变：
+
+```text
+G1 donor
+G1.R = 0
+G1.R = 1
+G1.G = 0
+G1.G = 1
+G1.B = 1（donor B约为0）
+```
+
+shader通过独立 `MaterialOverride` 与 `MaterialMask` 对G1执行分量级替换。测试时应移动相机并靠近明显局部灯，观察高光宽度、强度、环境反射、整体明暗或材质分类变化；R/G的0/1对照优先用于定位roughness与specular，B只做第一轮单向探针。
+
+实机中G1.B=1整体接近纯黑、光源响应显著减弱但并非完全消失，因此B更像lighting model、分类或mask，而不是普通连续roughness参数；后续保持donor B。G1.G=0出现类似镜面或折射的强烈性质，但当前无法区分它究竟控制roughness、reflection、transmission还是某种特殊lighting分支。其余样本大致都是中性灰，G1.R=1只在背面出现轻微绿色。当前平面、纯色和不可控光源不足以可靠命名R/G/B，这里只记录现象，不继续推断。这里的“材质参数”与“有UV纹理的表面材质”概念不同，因此停止继续盲扫G1；roughness/specular若继续研究，应改用球体或其他法线连续变化的曲面。
+
+下一里程碑改为带纹理的opaque表面：
+
+```text
+世界空间倾斜四边形（两个三角形）
+Position + Normal + UV
+插件自有256x256 RGBA测试纹理
+线性过滤、Clamp寻址
+G0 RGB = 真实平面法线
+G2 RGB = TestAlbedo.Sample(UV).rgb
+其余G-buffer = 完整donor tuple
+真实depth + donor stencil
+```
+
+测试纹理由8x8明暗棋盘、白色网格和四象限红/绿/蓝/黄tint组成，便于判断UV方向、三角形接缝、透视插值和颜色响应。纹理alpha固定为1且本轮不写入G2 alpha；透明/cutout不在本轮范围。ImGui只显示一个 `Textured opaque quad` 世界箭头。
+
+实机结果自然：四象限方向正确，棋盘与网格连续，两个三角形之间没有可见对角接缝；倾斜平面呈现合理的透视变化。纹理颜色接受场景光源及其颜色叠加，原生角色/武器和场景几何能够按depth正确遮挡四边形。至此确认首个实用opaque backend基线：
+
+```text
+自定义world-space mesh
++ perspective-correct UV
++ 插件自有颜色纹理
++ 自定义几何法线
++ donor安全opaque tuple
++ 主场景depth/stencil
+→ 原生deferred lighting与遮挡
+```

@@ -51,6 +51,9 @@ internal sealed unsafe class GBufferProbeController : IDisposable
     private readonly VertexShader worldVertexShader;
     private readonly PixelShader worldPixelShader;
     private readonly D3D11Buffer worldConstantsBuffer;
+    private readonly Texture2D materialTestTexture;
+    private readonly ShaderResourceView materialTestTextureView;
+    private readonly SamplerState materialTestSampler;
     private readonly RasterizerState rasterizerState;
     private readonly RasterizerState worldRasterizerState;
     private readonly BlendState depthOnlyBlendState;
@@ -129,6 +132,7 @@ internal sealed unsafe class GBufferProbeController : IDisposable
     {
         public Vector3 Position;
         public Vector3 Normal;
+        public Vector2 TexCoord;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -137,6 +141,9 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         public Matrix ViewProjection;
         public Vector4 Albedo;
         public Vector4 Diagnostic;
+        public Vector4 MaterialOverride;
+        public Vector4 MaterialMask;
+        public Vector4 TextureControl;
     }
 
     private sealed class PendingProbe : IDisposable
@@ -425,6 +432,9 @@ internal sealed unsafe class GBufferProbeController : IDisposable
                 float4x4 ViewProjection;
                 float4 Albedo;
                 float4 Diagnostic;
+                float4 MaterialOverride;
+                float4 MaterialMask;
+                float4 TextureControl;
             };
 
             Texture2D<float4> DonorG0 : register(t0);
@@ -432,11 +442,14 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             Texture2D<float4> DonorG2 : register(t2);
             Texture2D<float4> DonorG3 : register(t3);
             Texture2D<float4> DonorG4 : register(t4);
+            Texture2D<float4> TestAlbedo : register(t5);
+            SamplerState TestSampler : register(s0);
 
             struct VertexInput
             {
                 float3 Position : POSITION;
                 float3 Normal : NORMAL;
+                float2 TexCoord : TEXCOORD0;
                 uint VertexId : SV_VertexID;
             };
 
@@ -444,6 +457,7 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             {
                 float4 Position : SV_POSITION;
                 float3 WorldNormal : NORMAL;
+                float2 TexCoord : TEXCOORD0;
             };
 
             PixelInput VS(VertexInput input)
@@ -464,6 +478,7 @@ internal sealed unsafe class GBufferProbeController : IDisposable
                     output.Position = mul(float4(input.Position, 1.0), ViewProjection);
                 }
                 output.WorldNormal = input.Normal;
+                output.TexCoord = input.TexCoord;
                 return output;
             }
 
@@ -490,6 +505,15 @@ internal sealed unsafe class GBufferProbeController : IDisposable
                     {
                         output.Target0.rgb = normalize(input.WorldNormal) * 0.5 + 0.5;
                     }
+                    if (Diagnostic.w > 0.5)
+                    {
+                        output.Target2.rgb = Albedo.rgb;
+                    }
+                    output.Target1 = lerp(output.Target1, MaterialOverride, MaterialMask);
+                    if (TextureControl.x > 0.5)
+                    {
+                        output.Target2.rgb = TestAlbedo.Sample(TestSampler, input.TexCoord).rgb;
+                    }
                     return output;
                 }
 
@@ -512,16 +536,34 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             [
                 new InputElement("POSITION", 0, SharpDX.DXGI.Format.R32G32B32_Float, 0, 0),
                 new InputElement("NORMAL", 0, SharpDX.DXGI.Format.R32G32B32_Float, sizeof(float) * 3, 0),
+                new InputElement("TEXCOORD", 0, SharpDX.DXGI.Format.R32G32_Float, sizeof(float) * 6, 0),
             ]
         );
         worldVertexBuffer = new D3D11Buffer(
             device,
-            Utilities.SizeOf<WorldVertex>() * 18,
+            Utilities.SizeOf<WorldVertex>() * 24,
             ResourceUsage.Default,
             BindFlags.VertexBuffer,
             CpuAccessFlags.None,
             ResourceOptionFlags.None,
             0
+        );
+        (materialTestTexture, materialTestTextureView) = CreateMaterialTestTexture();
+        materialTestSampler = new SamplerState(
+            device,
+            new SamplerStateDescription
+            {
+                Filter = Filter.MinMagMipLinear,
+                AddressU = TextureAddressMode.Clamp,
+                AddressV = TextureAddressMode.Clamp,
+                AddressW = TextureAddressMode.Clamp,
+                ComparisonFunction = Comparison.Never,
+                MaximumAnisotropy = 1,
+                MipLodBias = 0,
+                MinimumLod = 0,
+                MaximumLod = 0,
+                BorderColor = Color.Transparent,
+            }
         );
         worldConstantsBuffer = new D3D11Buffer(
             device,
@@ -598,6 +640,55 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             vtable[53],
             ClearDepthStencilViewDetour
         );
+    }
+
+    private (Texture2D Texture, ShaderResourceView View) CreateMaterialTestTexture()
+    {
+        const int size = 256;
+        const int cells = 8;
+        var pixels = new byte[size * size * 4];
+        for (var y = 0; y < size; y++)
+        {
+            for (var x = 0; x < size; x++)
+            {
+                var cellX = x * cells / size;
+                var cellY = y * cells / size;
+                var bright = (cellX + cellY) % 2 == 0 ? 1f : 0.28f;
+                var tint = (x >= size / 2, y >= size / 2) switch
+                {
+                    (false, false) => new Vector3(1f, 0.18f, 0.18f),
+                    (true, false) => new Vector3(0.18f, 1f, 0.18f),
+                    (false, true) => new Vector3(0.18f, 0.35f, 1f),
+                    _ => new Vector3(1f, 0.82f, 0.18f),
+                };
+                var grid = x % (size / cells) < 2 || y % (size / cells) < 2;
+                var color = grid ? Vector3.One : tint * bright;
+                var offset = (y * size + x) * 4;
+                pixels[offset] = (byte)(Math.Clamp(color.X, 0f, 1f) * 255f);
+                pixels[offset + 1] = (byte)(Math.Clamp(color.Y, 0f, 1f) * 255f);
+                pixels[offset + 2] = (byte)(Math.Clamp(color.Z, 0f, 1f) * 255f);
+                pixels[offset + 3] = 255;
+            }
+        }
+
+        var description = new Texture2DDescription
+        {
+            Width = size,
+            Height = size,
+            MipLevels = 1,
+            ArraySize = 1,
+            Format = SharpDX.DXGI.Format.R8G8B8A8_UNorm,
+            SampleDescription = new SharpDX.DXGI.SampleDescription(1, 0),
+            Usage = ResourceUsage.Immutable,
+            BindFlags = BindFlags.ShaderResource,
+            CpuAccessFlags = CpuAccessFlags.None,
+            OptionFlags = ResourceOptionFlags.None,
+        };
+        fixed (byte* data = pixels)
+        {
+            var texture = new Texture2D(device, description, [new DataRectangle((nint)data, size * 4)]);
+            return (texture, new ShaderResourceView(device, texture));
+        }
     }
 
     private BlendState CreateWriteMaskBlendState(params int[] rgbTargets)
@@ -708,13 +799,8 @@ internal sealed unsafe class GBufferProbeController : IDisposable
                 ?
                 [
                     new GBufferWorldTriangleMarker(
-                        "Donor floor normal",
-                        snapshot[0].Center,
-                        new System.Numerics.Vector4(1f, 0.55f, 0.1f, 1f)
-                    ),
-                    new GBufferWorldTriangleMarker(
-                        "Donor triangle normal",
-                        snapshot[1].Center,
+                        "Textured opaque quad",
+                        snapshot[6].Center,
                         new System.Numerics.Vector4(1f, 0.1f, 1f, 1f)
                     ),
                 ]
@@ -755,6 +841,9 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         worldRasterizerState.Dispose();
         rasterizerState.Dispose();
         worldConstantsBuffer.Dispose();
+        materialTestSampler.Dispose();
+        materialTestTextureView.Dispose();
+        materialTestTexture.Dispose();
         worldPixelShader.Dispose();
         worldVertexShader.Dispose();
         worldInputLayout.Dispose();
@@ -1346,8 +1435,7 @@ internal sealed unsafe class GBufferProbeController : IDisposable
                 deferredContext.PixelShader.SetConstantBuffer(0, worldConstantsBuffer);
                 if (isDonorTuple)
                 {
-                    DrawDonorOpaqueTuple(controlViewProjection, 0);
-                    DrawDonorOpaqueTuple(controlViewProjection, 1);
+                    DrawTexturedDonorQuad(controlViewProjection);
                 }
                 else
                 {
@@ -1639,8 +1727,8 @@ internal sealed unsafe class GBufferProbeController : IDisposable
                 ("Donor write stencil 0x80", 0.70f, 0.62f, new Vector4(1f, 0.1f, 1f, 1f)),
             };
 
-            var vertices = new List<WorldVertex>(definitions.Length * 3);
-            var markers = new List<GBufferWorldTriangleMarker>(definitions.Length);
+            var vertices = new List<WorldVertex>(definitions.Length * 3 + 6);
+            var markers = new List<GBufferWorldTriangleMarker>(definitions.Length + 1);
             foreach (var definition in definitions)
             {
                 var center = GetScreenRayPoint(activeCamera, viewportWidth, viewportHeight, definition.ScreenX, definition.ScreenY);
@@ -1665,9 +1753,30 @@ internal sealed unsafe class GBufferProbeController : IDisposable
                     normal = -normal;
                 }
 
-                vertices.Add(new WorldVertex { Position = p0, Normal = normal });
-                vertices.Add(new WorldVertex { Position = p1, Normal = normal });
-                vertices.Add(new WorldVertex { Position = p2, Normal = normal });
+                vertices.Add(
+                    new WorldVertex
+                    {
+                        Position = p0,
+                        Normal = normal,
+                        TexCoord = new Vector2(0f, 1f),
+                    }
+                );
+                vertices.Add(
+                    new WorldVertex
+                    {
+                        Position = p1,
+                        Normal = normal,
+                        TexCoord = new Vector2(1f, 1f),
+                    }
+                );
+                vertices.Add(
+                    new WorldVertex
+                    {
+                        Position = p2,
+                        Normal = normal,
+                        TexCoord = new Vector2(0.5f, 0f),
+                    }
+                );
                 markers.Add(
                     new GBufferWorldTriangleMarker(
                         definition.Label,
@@ -1676,6 +1785,84 @@ internal sealed unsafe class GBufferProbeController : IDisposable
                     )
                 );
             }
+
+            var quadCenter = GetScreenRayPoint(activeCamera, viewportWidth, viewportHeight, 0.50f, 0.48f);
+            var forward = Vector3.Normalize(quadCenter - cameraPosition);
+            var screenRight = Vector3.Normalize(
+                GetScreenRayPoint(activeCamera, viewportWidth, viewportHeight, 0.55f, 0.48f)
+                    - GetScreenRayPoint(activeCamera, viewportWidth, viewportHeight, 0.45f, 0.48f)
+            );
+            var screenUp = Vector3.Normalize(
+                GetScreenRayPoint(activeCamera, viewportWidth, viewportHeight, 0.50f, 0.43f)
+                    - GetScreenRayPoint(activeCamera, viewportWidth, viewportHeight, 0.50f, 0.53f)
+            );
+            var horizontal = screenRight * 1.25f + forward * 0.65f;
+            var vertical = screenUp * 0.9f;
+            var bottomLeft = quadCenter - horizontal - vertical;
+            var bottomRight = quadCenter + horizontal - vertical;
+            var topLeft = quadCenter - horizontal + vertical;
+            var topRight = quadCenter + horizontal + vertical;
+            var quadNormal = Vector3.Normalize(Vector3.Cross(bottomRight - bottomLeft, topLeft - bottomLeft));
+            if (Vector3.Dot(quadNormal, cameraPosition - quadCenter) < 0)
+            {
+                quadNormal = -quadNormal;
+            }
+
+            vertices.Add(
+                new WorldVertex
+                {
+                    Position = bottomLeft,
+                    Normal = quadNormal,
+                    TexCoord = new Vector2(0f, 1f),
+                }
+            );
+            vertices.Add(
+                new WorldVertex
+                {
+                    Position = bottomRight,
+                    Normal = quadNormal,
+                    TexCoord = new Vector2(1f, 1f),
+                }
+            );
+            vertices.Add(
+                new WorldVertex
+                {
+                    Position = topLeft,
+                    Normal = quadNormal,
+                    TexCoord = new Vector2(0f, 0f),
+                }
+            );
+            vertices.Add(
+                new WorldVertex
+                {
+                    Position = topLeft,
+                    Normal = quadNormal,
+                    TexCoord = new Vector2(0f, 0f),
+                }
+            );
+            vertices.Add(
+                new WorldVertex
+                {
+                    Position = bottomRight,
+                    Normal = quadNormal,
+                    TexCoord = new Vector2(1f, 1f),
+                }
+            );
+            vertices.Add(
+                new WorldVertex
+                {
+                    Position = topRight,
+                    Normal = quadNormal,
+                    TexCoord = new Vector2(1f, 0f),
+                }
+            );
+            markers.Add(
+                new GBufferWorldTriangleMarker(
+                    "Textured opaque quad",
+                    new System.Numerics.Vector3(quadCenter.X, quadCenter.Y, quadCenter.Z),
+                    new System.Numerics.Vector4(1f, 0.1f, 1f, 1f)
+                )
+            );
 
             worldTriangleVertices = [.. vertices];
             worldTriangleMarkers = [.. markers];
@@ -1718,7 +1905,7 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         }
     }
 
-    private void DrawDonorOpaqueTuple(Matrix controlViewProjection, int triangleIndex)
+    private void DrawTexturedDonorQuad(Matrix controlViewProjection)
     {
         if (donorSnapshot == null)
         {
@@ -1729,8 +1916,39 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         var constants = new WorldConstants
         {
             ViewProjection = controlViewProjection,
-            Albedo = Vector4.Zero,
-            Diagnostic = new Vector4(0f, 1f, triangleIndex % 2 == 0 ? 1f : 0f, 0f),
+            Diagnostic = new Vector4(0f, 1f, 0f, 0f),
+            TextureControl = new Vector4(1f, 0f, 0f, 0f),
+        };
+        deferredContext.OutputMerger.SetBlendState(fullGBufferBlendState);
+        deferredContext.PixelShader.SetShaderResources(0, donorSnapshot.Views);
+        deferredContext.PixelShader.SetShaderResource(5, materialTestTextureView);
+        deferredContext.PixelShader.SetSampler(0, materialTestSampler);
+        deferredContext.UpdateSubresource(ref constants, worldConstantsBuffer);
+        deferredContext.OutputMerger.SetDepthStencilState(donorStencilWriteState, donorStencilReference);
+        deferredContext.Draw(6, 18);
+    }
+
+    private void DrawDonorOpaqueTuple(
+        Matrix controlViewProjection,
+        int triangleIndex,
+        Vector3? albedoOverride = null,
+        Vector4 materialOverride = default,
+        Vector4 materialMask = default
+    )
+    {
+        if (donorSnapshot == null)
+        {
+            return;
+        }
+
+        controlViewProjection.Transpose();
+        var constants = new WorldConstants
+        {
+            ViewProjection = controlViewProjection,
+            Albedo = albedoOverride.HasValue ? new Vector4(albedoOverride.Value, 1f) : Vector4.Zero,
+            Diagnostic = new Vector4(0f, 1f, 0f, albedoOverride.HasValue ? 1f : 0f),
+            MaterialOverride = materialOverride,
+            MaterialMask = materialMask,
         };
         deferredContext.OutputMerger.SetBlendState(fullGBufferBlendState);
         deferredContext.PixelShader.SetShaderResources(0, donorSnapshot.Views);
