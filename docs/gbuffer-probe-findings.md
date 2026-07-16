@@ -284,3 +284,434 @@ GBuffer 2 RGB 的 diffuse/albedo 语义得到确认
 所有三角形最终呈灰/黑色是下一阶段的 G-buffer 语义/材质 tuple 问题，不再是投影或 depth 问题。尤其是橙、红、绿样本关闭了 depth 且只写 G2 RGB，却没有按写入值表现出对应色彩；这说明此前由中性灰实验得出的 `G2 RGB ≈ diffuse/albedo` 还不能扩大成“G2 三通道就是直接 RGB albedo”。另一种可能是继承的 G0/G2 alpha、G1、G3、G4 中存在材质分类或色彩解释字段。
 
 下一步应固定 `Control VP + transpose`，先以相同的 no-depth 条件并排测试 G2 的纯 R、纯 G、纯 B、白和黑，同时记录 G2 RTV 的实际 DXGI format。确认色彩通道映射后，再使用 `GreaterEqual + DepthWriteMask.All` 建立 `KnownSafeOpaqueTuple`；不应继续增加 ViewProjection 或 depth 比较变体。
+
+## Donor opaque tuple 实现
+
+矩阵/depth 基线固定后，探针分成两个独立模式：
+
+### WorldTriangle：一次性 G2 通道扫描
+
+以 `Control VP + CPU transpose + no depth write` 同时绘制五个世界三角形，只写 G2 RGB：
+
+```text
+G2 R     = (1, 0, 0)
+G2 G     = (0, 1, 0)
+G2 B     = (0, 0, 1)
+G2 White = (1, 1, 1)
+G2 Black = (0, 0, 0)
+```
+
+这轮只用于确认独立通道响应，不再承担矩阵或 depth 验证。
+
+### DonorOpaqueTuple：完整原生模板
+
+选择模式前，将屏幕中心对准普通不透明地板或墙面。模式启用后的第一个有效 candidate exit 会：
+
+1. 获取旧 G0..G4 RTV 对应的 Texture2D 和实际 resource/RTV DXGI format。
+2. 在重新绑定旧 MRT 前，对每张 G-buffer 从屏幕中心执行一次 1x1 `CopySubresourceRegion`，写入插件拥有的同格式 1x1 texture。
+3. 为五张 donor texture 创建独立 SRV；源 G-buffer 不会同时作为 SRV 和 RTV。
+4. 将旧 G0..G4 重新绑定为 MRT，用 `Control VP + transpose + GreaterEqual + DepthWriteMask.All` 绘制一个世界三角形。
+5. pixel shader 从五张 donor SRV 完整读取并输出 RGBA，只把 G0 RGB 替换为三角形的编码法线；首轮保留 donor G2 RGB，不写自定义颜色。
+
+donor 只在进入模式时捕获一次，随后持续复用。切换模式或重载探针会释放并重新捕获。日志记录捕获坐标及五张 G-buffer 的 resource/RTV formats。
+
+当前仍不修改 stencil。同时新增 `OMSetDepthStencilState` hook：持续记录游戏最近绑定的原生 DepthStencilState，在 candidate 开始时取快照，并在区段内发生变化时更新；candidate/probe 日志包含 depth enable、write mask、comparison、stencil enable、read/write mask、front/back操作和 `StencilRef`。若完整 donor MRT tuple 仍异常，下一步可直接依据该日志验证背景 stencil 或写入普通 opaque stencil reference，无需再次增加观测 hook。
+
+## 首轮 donor tuple 实机结果
+
+- G2 纯 R、纯 G、纯 B、白、黑五个 no-depth 三角形均呈灰黑、近似半透明，彼此没有显著差异。
+- 完整 donor G0..G4 三角形没有正常颜色或亮度，主体近似纯黑。
+- donor 三角形能够遮挡或切断局部光源效果，证明它的 rasterized depth 与 `GreaterEqual + WriteAll` 仍然有效。
+- 人物模型与三角形重叠的部分呈白色轮廓，和早期 `DepthOnly` 探针中的人物/NPC白色异常一致。
+
+当前可以排除“世界几何或 reverse-Z 又失效”。失败集中在 donor 数据有效性或 lighting 分类：
+
+1. 1x1 donor copy/SRV 可能因 resource format、RTV format、typed SRV解释或采样内容不合适而返回零或错误值；在确认 raw donor 值前，不能把黑色直接归因于材质协议。
+2. 捕获的屏幕中心像素若不是普通 opaque表面，而是角色、天空、透明效果或未覆盖像素，完整 tuple 本身就不是安全 donor。
+3. 即使五个 MRT 正确，未写 stencil 仍可能让 lighting pass 跳过三角形或走错误分类。人物白色轮廓以及三角形影响局部光源，使 stencil/后续角色 pass 成为高优先级嫌疑。
+4. 还可能存在 G0..G4 之外的 lighting输入，例如额外目标、stencil分类或与 depth/屏幕位置耦合的数据。
+
+下一步不应继续目测更多常量。先获取本轮日志中的五张 `resource/rtv DXGI format` 与 `nativeOM` stencil state；随后为 donor 1x1 增加一次性 staging readback，记录每张纹理的 raw bytes，证明 copy 和 SRV源数据非零。只有 donor 数据确认有效后，才并排测试“保留背景 stencil”和“写入原生普通 opaque StencilRef”两个三角形。
+
+### Donor format 与原生 stencil 观测
+
+实机日志：
+
+```text
+G0 B8G8R8A8_UNorm
+G1 B8G8R8A8_UNorm
+G2 B8G8R8A8_UNorm
+G3 R16G16B16A16_Float
+G4 B8G8R8A8_UNorm
+```
+
+resource 和 RTV format 完全一致，不存在 typeless view 或明显 format 不兼容。BGRA资源在 `SV_Target`/typed SRV中仍使用逻辑 RGBA，当前不优先怀疑简单 R/B swizzle。
+
+candidate末端捕获到的原生 OM state：
+
+```text
+DepthEnable=false
+StencilEnable=true
+StencilReadMask=0x80
+StencilWriteMask=0x00
+StencilRef=128
+```
+
+这不是一个写 stencil 的 opaque draw state，而是一个读取既有 `0x80` 分类位的状态；它很可能属于 candidate 后段的分类/消费准备。插件此前使用 stencil disabled 绘制，只保留三角形屏幕覆盖位置原有的 stencil，因此“新 depth + 新 MRT，但没有相应 0x80 分类位”成为黑色结果的强嫌疑。
+
+新增一次性对照：
+
+1. donor 捕获后将五张1x1 default texture复制到 staging texture；首次 command list执行后只 Map一次，日志以十六进制输出 `G0..G4` raw bytes。
+2. `Donor preserve stencil`：完整 donor MRT + 新法线 + `GreaterEqual`，stencil disabled，保持当前行为。
+3. `Donor write stencil 0x80`：相同 donor tuple，但启用 stencil write mask `0x80`、comparison `Always`、pass `Replace`、reference `0x80`，在 depth通过时写入分类位。
+
+若 raw donor非零且只有 `write stencil 0x80` 获得正常lighting，便可确认第一个安全 opaque协议至少包括五个 MRT、depth和 stencil bit `0x80`。若两个仍同样黑，则需要继续寻找其他 stencil位、额外目标或 lighting阶段依赖。
+
+### 首轮 stencil 对照与 donor 采样修正
+
+实机结果：
+
+- `Donor preserve stencil`：半透明黑色，能遮挡场景光，保留白色人物剪影，depth正确。
+- `Donor write stencil 0x80`：同样半透明黑色并遮挡场景光，但白色人物剪影消失，depth正确。
+- donor raw readback全部非零：`G0=B2E3BD23,G1=335F51CC,G2=A0A1A4FF,G3=4E006E0000000000,G4=44EE940A`。这证明1x1 copy、staging readback和donor资源至少不是全零失败。
+
+`0x80` 明确影响角色/场景分类，但没有恢复lighting，因此它不是完整 opaque协议的充分条件。当前 donor 捕获点 `(0.5,0.5)` 实际位于第三人称角色头部，采到的是角色材质 tuple，而不是计划中的普通地板/墙面；该样本不能继续作为场景 opaque donor解释。
+
+donor采样点改为屏幕归一化 `(0.25,0.75)`，避开画面中央角色。Donor模式下 ImGui background draw list 会在该位置显示橙色圆形十字和 `Donor sample` 标签；进入模式前应让普通地板或哑光墙面覆盖该标记。切换离开再进入 Donor模式会释放并重新捕获。
+
+### 地板 donor 结果与真实 stencil readback
+
+地板 donor raw：
+
+```text
+G0=82FF7E80
+G1=04648500
+G2=2B3E4CFF
+G3=FF7B00000000003C
+G4=7FFF7F00
+```
+
+按 BGRA resource 的逻辑 RGBA解释：
+
+- G0 RGB约为 `(0x7E,0xFF,0x82)`，对应接近世界 `+Y` 的地板法线；G0 alpha为 `0x80`。
+- G2 RGB约为 `(0x4C,0x3E,0x2B)`，是合理的棕色地板基础色；这重新确认 G2 是直接 RGB albedo，先前彩色测试无差异来自不完整分类/lighting，而不是G2通道映射。
+- G3 half-float为 `(65504,0,0,1)`，符合原生 sentinel/default形态。
+- 五张 donor均为非零且内容与地板语义一致，donor MRT捕获路径确认有效。
+
+地板 donor仍与角色 donor一样呈黑，写 `0x80` 也没有恢复lighting。因此下一步不再根据“原生状态读取了 bit 0x80”猜测 donor stencil。实现改为：对原 DSV创建同尺寸 staging texture，在首次捕获时执行一次完整 `CopyResource`，随后只 Map一次并读取 donor坐标的原始4/8字节。日志追加：
+
+```text
+DS[format]=rawBytes,stencil=0xNN
+```
+
+第二个 donor三角形随后使用 write mask `0xFF` 写入读到的真实 `0xNN`，标签也会更新为该值。如果真实 stencil对照仍然黑，则五 MRT、depth、donor stencil均可排除，下一主假设应改为：当前 candidate exit 晚于某个基于旧 depth/stencil建立的 light list、light volume或分类准备阶段，世界几何必须更早注入。
+
+### 真实地板 stencil 结果与注入点前移
+
+DSV为 `R24G8_Typeless`，donor点 raw值为：
+
+```text
+DS=DA730410
+stencil=0x10
+```
+
+使用 write mask `0xFF` 写入真实地板 stencil `0x10` 后，donor三角形仍与保留背景stencil版本相同：半透明黑色、能遮挡场景光、depth正确。至此已同时验证并排除：
+
+```text
+合法地板 G0..G4
+合法地板 stencil 0x10
+Control VP + transpose
+GreaterEqual + depth write
+```
+
+“能遮光但自身不受光”最符合当前注入发生在某个基于旧 depth/stencil构建的 light list、light volume或分类准备之后。即使物理命令顺序仍早于最终lighting draw，相关准备也可能在五 MRT candidate内部通过 compute/UAV或中间pass提前完成。
+
+Donor模式改为两阶段：
+
+1. 首帧 candidate exit只捕获 donor MRT/DSV并执行 readback，不再晚期绘制世界三角形。
+2. 下一帧在所选 candidate的第一个 `Draw`、`DrawIndexed`、`DrawInstanced`或`DrawIndexedInstanced` detour中，在调用原始draw之前执行 donor command list。
+3. 此时 G-buffer/depth clear已经完成，但尚无任何原生 candidate draw；插件写入的新depth、stencil和MRT可参与candidate内部后续的全部准备工作。
+4. 随后的原生不透明几何继续使用同一DSV，距离更近的表面会正常覆盖插件三角形，距离更远的表面会被其depth挡住。
+
+日志中成功的早期绘制会显示 `geometry=world triangle at candidate begin`。若此前黑色来自过晚的light分类，这一版本应首次获得正常场景lighting；若仍黑，则需要检查candidate开始前的独立depth prepass或更早的light-culling阶段。
+
+### Candidate begin 实机结果
+
+- 保留当时 stencil 的橙色 donor 从半透明黑色变为全白。
+- 提前强写地板终态 stencil `0x10` 的洋红 donor 仍为黑色。
+- 两者仍能进行正常 depth遮挡。
+
+这证明时点确实参与结果，但 candidate begin 与 candidate exit 都不是完整答案：
+
+```text
+begin + 初始/clear后的stencil → 白色
+begin + 提前写终态0x10       → 黑色
+exit  + 终态stencil          → 黑色
+```
+
+地板 stencil `0x10` 很可能是在 candidate内部某个阶段由原生几何逐步生成，不能在第一个draw前简单预写。下一步先记录 candidate 内部全部 `OMSetDepthStencilState` 转换及其发生时的累计draw ordinal，而不是盲猜新的注入点。
+
+transition日志格式：
+
+```text
+G-buffer OM transitions: ordinal=0,
+draw=0(initial):...
+|| draw=N:state=...,depth=...,stencil=...,read=...,write=...,ref=...,front=Comparison/Fail/DepthFail/Pass,...
+```
+
+最多保留前48次转换，并将 front/back stencil操作展开为实际枚举值。另增加独立的 early injection确认日志，避免常规 probe日志节流掩盖是否真的在 draw 0 前提交。取得 transition序列后，再选择1到数个有真实 stencil write或depth阶段切换的draw边界做注入 sweep。
+
+### Candidate 内部 donor sweep
+
+实机 transition 将区段分为：
+
+```text
+draw 0     depth Greater, stencil disabled
+draw 306   depth GreaterEqual, write stencil 0x10
+draw 334   write stencil 0x08
+draw 358   write stencil 0x09
+draw 378   depth readonly, test stencil 0x01
+draw 379   depth readonly, test stencil 0x08
+draw 384   write stencil 0x80
+draw 433   再次写 stencil 0x10
+draw 626   depth readonly, Replace stencil 0x10
+draw 802   depth disabled, test stencil 0x80
+```
+
+Donor模式改为在同一帧六个真实边界前分别绘制一个不同位置的三角形：
+
+```text
+306, 334, 378, 384, 433, 626
+```
+
+每个三角形均使用相同地板 G0..G4、真实 rasterized depth、`GreaterEqual`和真实地板 stencil `0x10`；唯一变量是注入 draw ordinal。ImGui标签直接显示 `Donor before draw N`。首帧仍只在 exit 捕获 donor，从下一帧开始执行 sweep。
+
+这组边界覆盖普通场景stencil开始写入、材质分类切换、stencil只读阶段、角色分类、第二批场景写入和depth readonly末段。若其中存在正常受光的三角形，即可把最终 backend的注入点收敛到对应阶段附近；若六者仍均异常，则应继续向 candidate前的独立prepass追踪。
+
+### Donor sweep 结果与 UAV 检查
+
+draw 306、334、378、384、433、626 六个 donor三角形均为黑色，没有显著差异。结合 draw 0 的白色结果，可以确认单纯在五 MRT candidate内移动注入时点不能得到正常受光表面；继续细分 draw ordinal不再有足够信息价值。
+
+此时需要检查此前被候选识别忽略的 `OMSetRenderTargetsAndUnorderedAccessViews` 参数。原生 opaque draw可能在五个 RTV之外写 pixel-shader UAV、材质分类或其他辅助输出，而插件command list只绑定了五 MRT/DSV。新增一次性日志：
+
+```text
+G-buffer UAV transitions: ordinal=0,
+draw=N:start=S,count=C,uavs=[...]
+```
+
+记录candidate内最多32次UAV绑定变化；若没有则输出 `none`。同时修复 sweep索引曾被多次 `ClearRenderTargetView` 重置的问题，确保每个candidate只注入六次，并将candidate、transition、probe和sweep日志全部压缩为首次少量输出，避免持续刷屏。
+
+若UAV transitions非空，下一步应识别并复制/写入对应UAV，而不是继续移动注入点。若为 `none`，主假设才转向五 MRT candidate之前的独立depth prepass、light-culling compute或其他非OM阶段。
+
+### UAV 结果与 normal 最终对照
+
+实机 `G-buffer UAV transitions: none`，排除五 MRT之外的 OM UAV输出。另修复 late donor skip 每帧刷日志：该预期分支现在完全静默；此前因为 `injectionCount`不增长而始终满足“前两次日志”条件。
+
+在转向candidate之前的prepass前，还需分离最后一个未独立控制的变量：此前所有完整donor三角形都把合法地板G0 RGB替换为自定义三角形法线。如果法线坐标系、朝向或编码仍有误，它本身足以让完整donor被照黑。
+
+六点sweep改成三组相邻配对：
+
+```text
+draw 306：完整donor，保留地板G0 RGB
+draw 307：完整donor，替换为三角形法线
+draw 378：完整donor，保留地板G0 RGB
+draw 379：完整donor，替换为三角形法线
+draw 433：完整donor，保留地板G0 RGB
+draw 434：完整donor，替换为三角形法线
+```
+
+每对只相差一个draw和normal来源，标签分别显示 `floor normal` / `triangle normal`。若floor-normal版本正常而triangle-normal版本黑，问题回到法线协议；若两者均黑，normal、MRT、stencil、UAV和candidate内部时点均可排除，随后应正式追踪candidate之前的depth/light-culling阶段。
+
+### Normal 对照结论与 pre-candidate 追踪
+
+三组 floor-normal / triangle-normal donor均为黑色，无显著差异。至此 G-buffer tuple层调查结束，已排除：
+
+```text
+G0..G4原生地板内容
+原样地板法线与自定义法线
+G2 albedo
+真实地板stencil
+reverse-Z depth
+OM UAV
+candidate内部多个阶段
+```
+
+Donor sweep绘制已停止，Donor模式不再显示六个世界箭头或黑三角，只保留采样标记与捕获/追踪。新增长度32的OM绑定历史环形缓冲，统计所有 immediate-context draw，并在candidate首次开始时输出：
+
+```text
+G-buffer pre-candidate OM history:
+serial=...,previousDraws=...,OMSetRT:rtvCount=...,rtvs=[...],dsv=...
+|| ...
+```
+
+DSV clear也记录 flags、depth和stencil。目标是寻找candidate之前使用相同DSV的零RTV/少RTV pass及其draw数量。若存在明确depth-only prepass，下一实验应分两阶段：先在prepass写插件depth/stencil，再在五MRT candidate写材质tuple；若不存在，则继续追踪candidate之前的compute light-culling或其他非OM资源。
+
+### Pre-candidate OM 结果与 G-buffer consumer 追踪
+
+实机历史显示主场景DSV在五MRT之前的相邻序列是：
+
+```text
+3 RTV（对应最终G-buffer slot 0、2、3）+ 主DSV
+→ ClearDSV(depth+stencil, depth=0, stencil=0)
+→ 1个非G-buffer RTV + 同一主DSV，0 draw
+→ 5个完整G-buffer RTV + 同一主DSV
+```
+
+`3 RTV`绑定到clear之间、clear到单RTV、单RTV到五MRT之间均没有draw。因此这里不是独立depth prepass，而是主opaque pass开始时的附件初始化/切换；当前证据不支持在它里面增加一轮插件depth draw。
+
+下一追踪点改为五张G-buffer的首次SRV消费。新增 `PSSetShaderResources` 与 `CSSetShaderResources` hook，通过view底层resource identity将SRV映射回G0..G4，汇总记录：
+
+```text
+candidate内：candidate ordinal + candidate draw
+candidate外：距离最近candidate exit的draw数
+shader stage、SRV slot和G-buffer slot映射
+```
+
+日志只输出一次 `G-buffer SRV consumers: ...`。若首次消费发生在当前注入边界之前，说明candidate识别范围包含了G-buffer producer之后的阶段，应把注入点移动到首次consumer之前；若首次消费严格发生在exit之后，则继续追踪该consumer依赖的光照辅助资源生成时点。
+
+### G-buffer consumer 实机结果与写后回读
+
+首次consumer严格发生在candidate exit之后：
+
+```text
+exit + 0 draw：CS t1读取G3
+exit + 1 draw：PS t0读取G0
+exit + 32 draw：PS读取G0/G1/G2/G4
+exit + 34 draw：PS读取完整G0/G1/G2/G3/G4
+```
+
+后续大量PS pass以不同slot组合持续读取G-buffer。没有任何G-buffer SRV消费发生在candidate内部。这证明当前exit注入在producer/consumer顺序上是成立的：插件command list执行完后，游戏才开始第一轮G-buffer消费。“lighting辅助数据已在注入前由G-buffer构建完成”不再是主要解释。
+
+下一步改为验证插件draw的实际写后内容。Donor模式在已有snapshot后的下一次有效exit只绘制一个完整donor三角形；`ExecuteCommandList`返回后、游戏提交下一条命令之前，计算三角形内部的投影像素，并从原G0..G4和DSV各复制该1x1像素到staging texture后立即回读：
+
+```text
+G-buffer injected pixel readback at (x,y): G0=...,G1=...,G2=...,G3=...,G4=...,DS[...]=...,stencil=...
+```
+
+该验证只执行一次。若G0..G4与donor raw一致且stencil/depth也已改变，便可确认五MRT写入本身正确，下一调查目标转为G-buffer之外的独立lighting输入；若不一致，则先修正插件MRT绑定、pixel shader输出或采样点，而不再扩展pass追踪。
+
+### 首轮写后回读、崩溃原因与安全修正
+
+崩溃前实际已取得两次写后回读。示例：
+
+```text
+donor:   G0=83FF7880,G1=00D7D900,G2=10222FFF,G3=FF7B00000000003C,G4=7FFF7F00,DS=70FD0410
+injected:G0=AC940A00,G1=00000000,G2=00000000,G3=0000000000000000,G4=00000000,DS=00000000
+```
+
+第二次也同样只有G0为另一非donor值，其余MRT和DS为零。这更像采样到了未被三角形覆盖的远平面/天空像素，而不是读到了插件输出；原验证仍混有CPU世界投影采样点和`GreaterEqual` depth是否通过两个变量，因此结果不足以判定MRT写入失败。
+
+崩溃dump明确给出：
+
+```text
+SharpDX.Direct3D11.DeviceContext.UnmapSubresource
+→ GBufferProbeController.LogDonorReadbackOnce
+→ TryIssueProbe
+→ OMSetRenderTargetsDetour
+```
+
+时间线上probe先被关闭，随后快速重新启用；渲染线程创建并Map新的donor snapshot时，配置更新线程执行状态重置并释放snapshot，最终在`UnmapSubresource`触发未处理异常。修正为：配置重置和完整probe提交/readback通过同一个 `probeStateLock`串行化，禁止snapshot在Map/Unmap期间被释放。
+
+写后验证同时改为固定clip-space三角形：
+
+```text
+clip vertices = (-0.12,0.10), (0.12,0.10), (0,0.34)
+sample        = (0.50W,0.41H)
+depth         = Always + WriteAll
+stencil       = donor reference + Replace
+```
+
+它继续完整输出donor G0..G4，但不再依赖世界矩阵、相机运动、场景遮挡或CPU投影。验证仍只执行一次。
+
+固定clip-space + `Depth Always` 后，首次回读仍为：
+
+```text
+G0=E2842F00,G1=00000000,G2=00000000,G3=0000000000000000,G4=00000000,DS=00000000
+```
+
+由于几何覆盖与depth已从变量中排除，复查发现该回读没有复用已经成功的donor复制链。donor MRT读取采用：
+
+```text
+全尺寸source的1x1区域 → 1x1 Default texture → 1x1 Staging texture → Map
+```
+
+而写后读取直接执行“全尺寸source区域 → 1x1 Staging”，DSV也从全尺寸直接复制子区域到1x1 staging。返回的随机G0和其余零值可能是无效/未执行copy后的staging内容，不能作为MRT未写入的证据。
+
+写后MRT回读现已改为与donor相同的Default中转路径；DSV则恢复为整张 `CopyResource` 到同尺寸staging，再按row pitch和 `(x,y)` 读取。下一次结果才可用于判断draw是否真正写入。
+
+### 根因：WorldConstants 未绑定到 pixel shader
+
+校准后的固定clip-space回读：
+
+```text
+G0=E482CE00
+G1=00000000
+G2=00000000
+G3=0000000000000000
+G4=00000000
+DS=00008010
+stencil=0x10
+```
+
+`R24G8` raw中的24-bit depth为 `0x800000`，正好对应固定clip-space `z=0.5`；stencil也正确写为donor值 `0x10`。这证明固定三角形确实覆盖了采样点，draw、depth和stencil提交均成立。
+
+MRT形态则精确对应world pixel shader的非donor分支：G0写编码法线且alpha为0，G1/G3/G4清零，G2读取零值Albedo后也是零。复查绑定发现：
+
+```csharp
+VertexShader.SetConstantBuffer(0, worldConstantsBuffer);
+PixelShader.Set(worldPixelShader);
+// 缺少 PixelShader.SetConstantBuffer(0, worldConstantsBuffer)
+```
+
+同一个 `WorldConstants` cbuffer同时被VS和PS使用，但此前只绑定到VS。结果是：
+
+- VS能读取ViewProjection与Diagnostic.x，所以世界投影和固定clip-space几何均可正常工作；
+- PS的 `Diagnostic.y` 始终为0，永远不进入donor采样分支；
+- PS的 `Albedo` 始终为0，所以WorldTriangle的G2红/绿/蓝/白/黑全部变成黑色；
+- PS仍能读取插值法线，因此G0非零，恰好与写后raw一致。
+
+这一个绑定遗漏完整解释了此前所有world/donor材质异常。已在常规world probe和保留的candidate内donor提交路径中补上：
+
+```csharp
+PixelShader.SetConstantBuffer(0, worldConstantsBuffer);
+```
+
+因此此前基于“完整donor仍黑”推出的材质tuple、stencil、注入时点、UAV或独立lighting输入假设不能继续视为有效负面证据；这些实验的PS从未实际输出预期donor tuple。矩阵、rasterized depth、stencil、producer/consumer顺序和G0/G2 screen-space独立探针结论仍然有效。
+
+### 修复后的完整 tuple 写入确认
+
+同一帧的donor与写后回读：
+
+```text
+donor:
+G0=83FF7F80,G1=00D8F300,G2=232A34FF,G3=FF7B00000000003C,G4=7FFF7F00
+DS=2FDE0410,stencil=0x10
+
+injected:
+G0=83FF7F80,G1=00D8F300,G2=232A34FF,G3=FF7B00000000003C,G4=7FFF7F00
+DS=00008010,stencil=0x10
+```
+
+五张MRT逐字节完全相同；stencil同为 `0x10`。注入depth的24-bit值为 `0x800000`，与固定clip-space `z=0.5`完全一致。至此确认：
+
+```text
+donor snapshot SRV
+→ world pixel shader完整五MRT输出
+→ command list执行
+→ 原G0..G4 + 主depth/stencil
+```
+
+整条写入链成立。固定clip-space校准draw与写后readback现已移除，Donor模式恢复为每帧在candidate exit绘制真实世界空间三角形，使用 `GreaterEqual + WriteAll`、完整donor G0..G4与donor stencil。ImGui世界箭头恢复，标签为 `Donor opaque tuple`。下一实机结果将首次有效验证完整原生opaque tuple的lighting表现。
+
+### 首次有效 lighting 与 normal 对照
+
+修复PS constant buffer后，世界donor三角形首次出现颜色并对场景光源产生响应，但高光/反射方向难以解释。这是当前输入的预期限制：为了验证完整tuple逐字节复制，三角形仍保留地板donor的G0 RGB，即接近世界 `+Y` 的法线；三角形自身则是面向相机附近的另一几何平面。lighting使用“新世界位置 + 地板法线 + 地板材质”，反射和局部灯响应不会与可见三角形平面一致。
+
+Donor模式改为并排绘制两个材质完全相同的世界三角形：
+
+```text
+Donor floor normal    ：完整保留donor G0..G4
+Donor triangle normal ：只用真实几何平面法线替换G0 RGB
+```
+
+两者继续使用各自真实rasterized depth和同一个donor stencil；其他所有MRT字段相同。若triangle-normal版本的光照方向明显合理，便可确认当前异常完全来自法线/几何不一致；若仍有无法解释的高光，再开始从donor tuple中隔离roughness/specular/reflection相关字段。

@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Numerics;
+using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Chat;
 using Dalamud.Game.Command;
 using Dalamud.Interface.ImGuiNotification;
@@ -395,6 +397,8 @@ public sealed class Plugin : IDalamudPlugin
 
     private void DrawGBufferProbeWorldArrow()
     {
+        DrawGBufferDonorSampleMarker();
+
         var localPlayer = ObjectTable.LocalPlayer;
         if (localPlayer == null || !GBufferProbeController.TryGetWorldTriangleMarkers(out var markers))
         {
@@ -405,6 +409,23 @@ public sealed class Plugin : IDalamudPlugin
         {
             PlayerPreviewWorldArrowRenderer.Draw(localPlayer.Position, marker.Center, GameGui, marker.Color, marker.Label);
         }
+    }
+
+    private void DrawGBufferDonorSampleMarker()
+    {
+        if (!Configuration.EnableGBufferProbe || Configuration.GBufferProbeMode != GBufferProbeMode.DonorOpaqueTuple)
+        {
+            return;
+        }
+
+        var displaySize = ImGui.GetIO().DisplaySize;
+        var position = displaySize * GBufferProbeController.DonorSampleNormalized;
+        var color = ImGui.GetColorU32(new Vector4(1f, 0.75f, 0.1f, 1f));
+        var drawList = ImGui.GetBackgroundDrawList();
+        drawList.AddCircle(position, 9f, color, 24, 2f);
+        drawList.AddLine(position - new Vector2(14f, 0f), position + new Vector2(14f, 0f), color, 2f);
+        drawList.AddLine(position - new Vector2(0f, 14f), position + new Vector2(0f, 14f), color, 2f);
+        drawList.AddText(position + new Vector2(12f, 10f), color, "Donor sample");
     }
 
     private static PctContext? InitializePictomancy()

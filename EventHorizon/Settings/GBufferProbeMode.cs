@@ -7,4 +7,5 @@ internal enum GBufferProbeMode
     Target0Rgb,
     Target2Rgb,
     WorldTriangle,
+    DonorOpaqueTuple,
 }

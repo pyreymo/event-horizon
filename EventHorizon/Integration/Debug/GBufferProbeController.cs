@@ -31,7 +31,9 @@ internal sealed unsafe class GBufferProbeController : IDisposable
 {
     private const int ProbeSize = 1024;
     private const int MinimumMatchedGBuffers = 3;
-    private const int DetailedExitLogLimit = 16;
+    private const int DetailedExitLogLimit = 1;
+    private static readonly int[] DonorSweepDrawOrdinals = [306, 307, 378, 379, 433, 434];
+    internal static readonly System.Numerics.Vector2 DonorSampleNormalized = new(0.25f, 0.75f);
 
     private readonly EventHorizonConfiguration configuration;
     private readonly IPluginLog log;
@@ -55,12 +57,18 @@ internal sealed unsafe class GBufferProbeController : IDisposable
     private readonly BlendState target0RgbBlendState;
     private readonly BlendState target2RgbBlendState;
     private readonly BlendState worldTriangleBlendState;
+    private readonly BlendState fullGBufferBlendState;
     private readonly DepthStencilState depthWriteState;
     private readonly DepthStencilState worldDepthWriteState;
+    private readonly DepthStencilState donorStencilWriteState;
     private readonly DepthStencilState noDepthWriteState;
+    private readonly object probeStateLock = new();
 
     private readonly Hook<OMSetRenderTargetsDelegate> omSetRenderTargetsHook;
     private readonly Hook<OMSetRenderTargetsAndUnorderedAccessViewsDelegate> omSetRenderTargetsAndUavsHook;
+    private readonly Hook<OMSetDepthStencilStateDelegate> omSetDepthStencilStateHook;
+    private readonly Hook<SetShaderResourcesDelegate> psSetShaderResourcesHook;
+    private readonly Hook<SetShaderResourcesDelegate> csSetShaderResourcesHook;
     private readonly Hook<DrawIndexedDelegate> drawIndexedHook;
     private readonly Hook<DrawDelegate> drawHook;
     private readonly Hook<DrawIndexedInstancedDelegate> drawIndexedInstancedHook;
@@ -80,6 +88,17 @@ internal sealed unsafe class GBufferProbeController : IDisposable
     private uint candidateHeight;
     private long candidateStartTimestamp;
     private string candidateViewport = "unavailable";
+    private string lastDepthStencilState = "unobserved";
+    private string candidateDepthStencilState = "unobserved";
+    private readonly List<string> candidateDepthStencilTransitions = [];
+    private readonly List<string> candidateUavTransitions = [];
+    private readonly Queue<string> targetBindingHistory = new();
+    private readonly nint[] trackedGBufferResources = new nint[5];
+    private readonly List<string> gBufferConsumerTransitions = [];
+    private int drawsSinceTargetBinding;
+    private long immediateDrawSerial;
+    private long lastCandidateExitDrawSerial;
+    private int gBufferConsumerSummaryLogCount;
     private bool probeIssuedSinceDepthClear;
     private bool detouring;
     private bool lastEnabled;
@@ -89,10 +108,14 @@ internal sealed unsafe class GBufferProbeController : IDisposable
     private int candidateExitLogCount;
     private int frameSummaryLogCount;
     private int injectionCount;
+    private int donorSweepNextIndex;
+    private int donorSweepInjectionLogCount;
     private bool disposed;
     private readonly long controllerStartTimestamp = Stopwatch.GetTimestamp();
     private WorldVertex[]? worldTriangleVertices;
     private GBufferWorldTriangleMarker[]? worldTriangleMarkers;
+    private DonorSnapshot? donorSnapshot;
+    private byte donorStencilReference = 0x80;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct ProbeConstants
@@ -129,6 +152,8 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         public double EndMilliseconds { get; }
         public string Viewport { get; }
         public string NextTargets { get; }
+        public string NativeDepthStencilState { get; }
+        public string NativeDepthStencilTransitions { get; }
 
         public PendingProbe(
             nint[] renderTargetPointers,
@@ -141,7 +166,9 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             double startMilliseconds,
             double endMilliseconds,
             string viewport,
-            string nextTargets
+            string nextTargets,
+            string nativeDepthStencilState,
+            string nativeDepthStencilTransitions
         )
         {
             var retainedTargets = new List<RenderTargetView?>(renderTargetPointers.Length);
@@ -184,6 +211,8 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             EndMilliseconds = endMilliseconds;
             Viewport = viewport;
             NextTargets = nextTargets;
+            NativeDepthStencilState = nativeDepthStencilState;
+            NativeDepthStencilTransitions = nativeDepthStencilTransitions;
         }
 
         public void Dispose()
@@ -193,6 +222,66 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             {
                 target?.Dispose();
             }
+        }
+    }
+
+    private sealed class DonorSnapshot : IDisposable
+    {
+        public Texture2D[] Textures { get; }
+        public ShaderResourceView[] Views { get; }
+        public Texture2D[] StagingTextures { get; }
+        public int[] BytesPerPixel { get; }
+        public Texture2D DepthStencilStagingTexture { get; }
+        public int DepthStencilBytesPerPixel { get; }
+        public int SampleX { get; }
+        public int SampleY { get; }
+        public string DepthStencilFormat { get; }
+        public string Formats { get; }
+        public bool ReadbackPending { get; set; } = true;
+
+        public DonorSnapshot(
+            Texture2D[] textures,
+            ShaderResourceView[] views,
+            Texture2D[] stagingTextures,
+            int[] bytesPerPixel,
+            Texture2D depthStencilStagingTexture,
+            int depthStencilBytesPerPixel,
+            int sampleX,
+            int sampleY,
+            string depthStencilFormat,
+            string formats
+        )
+        {
+            Textures = textures;
+            Views = views;
+            StagingTextures = stagingTextures;
+            BytesPerPixel = bytesPerPixel;
+            DepthStencilStagingTexture = depthStencilStagingTexture;
+            DepthStencilBytesPerPixel = depthStencilBytesPerPixel;
+            SampleX = sampleX;
+            SampleY = sampleY;
+            DepthStencilFormat = depthStencilFormat;
+            Formats = formats;
+        }
+
+        public void Dispose()
+        {
+            foreach (var view in Views)
+            {
+                view.Dispose();
+            }
+
+            foreach (var texture in Textures)
+            {
+                texture.Dispose();
+            }
+
+            foreach (var texture in StagingTextures)
+            {
+                texture.Dispose();
+            }
+
+            DepthStencilStagingTexture.Dispose();
         }
     }
 
@@ -210,6 +299,12 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         nint* unorderedAccessViews,
         uint* unorderedAccessViewInitialCounts
     );
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate void OMSetDepthStencilStateDelegate(nint context, nint depthStencilState, uint stencilReference);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate void SetShaderResourcesDelegate(nint context, uint startSlot, uint numViews, nint* shaderResourceViews);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate void DrawIndexedDelegate(nint context, uint indexCount, uint startIndexLocation, int baseVertexLocation);
@@ -332,6 +427,12 @@ internal sealed unsafe class GBufferProbeController : IDisposable
                 float4 Diagnostic;
             };
 
+            Texture2D<float4> DonorG0 : register(t0);
+            Texture2D<float4> DonorG1 : register(t1);
+            Texture2D<float4> DonorG2 : register(t2);
+            Texture2D<float4> DonorG3 : register(t3);
+            Texture2D<float4> DonorG4 : register(t4);
+
             struct VertexInput
             {
                 float3 Position : POSITION;
@@ -378,6 +479,20 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             GBufferOutput PS(PixelInput input)
             {
                 GBufferOutput output;
+                if (Diagnostic.y > 0.5)
+                {
+                    output.Target0 = DonorG0.Load(int3(0, 0, 0));
+                    output.Target1 = DonorG1.Load(int3(0, 0, 0));
+                    output.Target2 = DonorG2.Load(int3(0, 0, 0));
+                    output.Target3 = DonorG3.Load(int3(0, 0, 0));
+                    output.Target4 = DonorG4.Load(int3(0, 0, 0));
+                    if (Diagnostic.z < 0.5)
+                    {
+                        output.Target0.rgb = normalize(input.WorldNormal) * 0.5 + 0.5;
+                    }
+                    return output;
+                }
+
                 output.Target0 = float4(normalize(input.WorldNormal) * 0.5 + 0.5, 0.0);
                 output.Target1 = 0.0;
                 output.Target2 = float4(Albedo.rgb, 0.0);
@@ -429,6 +544,7 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         target0RgbBlendState = CreateWriteMaskBlendState(0);
         target2RgbBlendState = CreateWriteMaskBlendState(2);
         worldTriangleBlendState = CreateWriteMaskBlendState(0, 2);
+        fullGBufferBlendState = CreateFullWriteBlendState();
 
         var depthDescription = DepthStencilStateDescription.Default();
         depthDescription.IsDepthEnabled = true;
@@ -440,7 +556,18 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         depthDescription.DepthComparison = Comparison.GreaterEqual;
         worldDepthWriteState = new DepthStencilState(device, depthDescription);
 
+        depthDescription.IsStencilEnabled = true;
+        depthDescription.StencilReadMask = 0xFF;
+        depthDescription.StencilWriteMask = 0xFF;
+        depthDescription.FrontFace.Comparison = Comparison.Always;
+        depthDescription.FrontFace.FailOperation = StencilOperation.Keep;
+        depthDescription.FrontFace.DepthFailOperation = StencilOperation.Keep;
+        depthDescription.FrontFace.PassOperation = StencilOperation.Replace;
+        depthDescription.BackFace = depthDescription.FrontFace;
+        donorStencilWriteState = new DepthStencilState(device, depthDescription);
+
         depthDescription.IsDepthEnabled = false;
+        depthDescription.IsStencilEnabled = false;
         depthDescription.DepthWriteMask = DepthWriteMask.Zero;
         noDepthWriteState = new DepthStencilState(device, depthDescription);
 
@@ -450,6 +577,12 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             vtable[34],
             OMSetRenderTargetsAndUavsDetour
         );
+        omSetDepthStencilStateHook = gameInteropProvider.HookFromAddress<OMSetDepthStencilStateDelegate>(
+            vtable[36],
+            OMSetDepthStencilStateDetour
+        );
+        psSetShaderResourcesHook = gameInteropProvider.HookFromAddress<SetShaderResourcesDelegate>(vtable[8], PSSetShaderResourcesDetour);
+        csSetShaderResourcesHook = gameInteropProvider.HookFromAddress<SetShaderResourcesDelegate>(vtable[67], CSSetShaderResourcesDetour);
         drawIndexedHook = gameInteropProvider.HookFromAddress<DrawIndexedDelegate>(vtable[12], DrawIndexedDetour);
         drawHook = gameInteropProvider.HookFromAddress<DrawDelegate>(vtable[13], DrawDetour);
         drawIndexedInstancedHook = gameInteropProvider.HookFromAddress<DrawIndexedInstancedDelegate>(
@@ -485,10 +618,25 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         return new BlendState(device, description);
     }
 
+    private BlendState CreateFullWriteBlendState()
+    {
+        var description = BlendStateDescription.Default();
+        description.IndependentBlendEnable = true;
+        for (var index = 0; index < 5; index++)
+        {
+            description.RenderTarget[index].RenderTargetWriteMask = ColorWriteMaskFlags.All;
+        }
+
+        return new BlendState(device, description);
+    }
+
     public void Enable()
     {
         omSetRenderTargetsHook.Enable();
         omSetRenderTargetsAndUavsHook.Enable();
+        omSetDepthStencilStateHook.Enable();
+        psSetShaderResourcesHook.Enable();
+        csSetShaderResourcesHook.Enable();
         drawIndexedHook.Enable();
         drawHook.Enable();
         drawIndexedInstancedHook.Enable();
@@ -508,28 +656,43 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             return;
         }
 
-        lastEnabled = configuration.EnableGBufferProbe;
-        lastMode = configuration.GBufferProbeMode;
-        lastConfiguredOrdinal = configuration.GBufferProbeCandidateExitOrdinal;
-        ResetCandidate();
-        probeIssuedSinceDepthClear = false;
-        nextCandidateOrdinal = 0;
-        completedCandidateExits = 0;
-        candidateLogCount = 0;
-        candidateExitLogCount = 0;
-        frameSummaryLogCount = 0;
-        injectionCount = 0;
-        worldTriangleVertices = null;
-        worldTriangleMarkers = null;
-        log.Information(
-            $"G-buffer probe {(lastEnabled ? "enabled" : "disabled")}: mode={lastMode}, candidateExitOrdinal={lastConfiguredOrdinal}."
-        );
+        lock (probeStateLock)
+        {
+            lastEnabled = configuration.EnableGBufferProbe;
+            lastMode = configuration.GBufferProbeMode;
+            lastConfiguredOrdinal = configuration.GBufferProbeCandidateExitOrdinal;
+            ResetCandidate();
+            probeIssuedSinceDepthClear = false;
+            nextCandidateOrdinal = 0;
+            completedCandidateExits = 0;
+            candidateLogCount = 0;
+            candidateExitLogCount = 0;
+            frameSummaryLogCount = 0;
+            injectionCount = 0;
+            donorSweepNextIndex = 0;
+            donorSweepInjectionLogCount = 0;
+            Array.Clear(trackedGBufferResources);
+            gBufferConsumerTransitions.Clear();
+            gBufferConsumerSummaryLogCount = 0;
+            lastCandidateExitDrawSerial = 0;
+            worldTriangleVertices = null;
+            worldTriangleMarkers = null;
+            donorSnapshot?.Dispose();
+            donorSnapshot = null;
+            donorStencilReference = 0x80;
+            log.Information(
+                $"G-buffer probe {(lastEnabled ? "enabled" : "disabled")}: mode={lastMode}, candidateExitOrdinal={lastConfiguredOrdinal}."
+            );
+        }
     }
 
     public bool TryGetWorldTriangleMarkers(out GBufferWorldTriangleMarker[] markers)
     {
         markers = [];
-        if (!configuration.EnableGBufferProbe || configuration.GBufferProbeMode != GBufferProbeMode.WorldTriangle)
+        if (
+            !configuration.EnableGBufferProbe
+            || configuration.GBufferProbeMode is not (GBufferProbeMode.WorldTriangle or GBufferProbeMode.DonorOpaqueTuple)
+        )
         {
             return false;
         }
@@ -540,7 +703,22 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             return false;
         }
 
-        markers = snapshot;
+        markers =
+            configuration.GBufferProbeMode == GBufferProbeMode.DonorOpaqueTuple
+                ?
+                [
+                    new GBufferWorldTriangleMarker(
+                        "Donor floor normal",
+                        snapshot[0].Center,
+                        new System.Numerics.Vector4(1f, 0.55f, 0.1f, 1f)
+                    ),
+                    new GBufferWorldTriangleMarker(
+                        "Donor triangle normal",
+                        snapshot[1].Center,
+                        new System.Numerics.Vector4(1f, 0.1f, 1f, 1f)
+                    ),
+                ]
+                : snapshot.Take(5).ToArray();
         return true;
     }
 
@@ -558,12 +736,18 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         drawIndexedInstancedHook.Dispose();
         drawHook.Dispose();
         drawIndexedHook.Dispose();
+        csSetShaderResourcesHook.Dispose();
+        psSetShaderResourcesHook.Dispose();
+        omSetDepthStencilStateHook.Dispose();
         omSetRenderTargetsAndUavsHook.Dispose();
         omSetRenderTargetsHook.Dispose();
 
         noDepthWriteState.Dispose();
+        donorStencilWriteState.Dispose();
         worldDepthWriteState.Dispose();
         depthWriteState.Dispose();
+        donorSnapshot?.Dispose();
+        fullGBufferBlendState.Dispose();
         worldTriangleBlendState.Dispose();
         target2RgbBlendState.Dispose();
         target0RgbBlendState.Dispose();
@@ -591,6 +775,7 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         {
             if (!detouring && context == immediateContextPointer)
             {
+                RecordTargetBinding("OMSetRT", numViews, renderTargetViews, depthStencilView);
                 pendingProbe = TrackTargetChange(numViews, renderTargetViews, depthStencilView);
             }
         }
@@ -629,7 +814,9 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         {
             if (!detouring && context == immediateContextPointer)
             {
+                RecordTargetBinding("OMSetRT+UAV", numRenderTargetViews, renderTargetViews, depthStencilView);
                 pendingProbe = TrackTargetChange(numRenderTargetViews, renderTargetViews, depthStencilView);
+                TrackUavBinding(unorderedAccessViewStartSlot, numUnorderedAccessViews, unorderedAccessViews);
             }
         }
         catch (Exception exception)
@@ -694,8 +881,13 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             candidateOrdinal = nextCandidateOrdinal++;
             candidateStartTimestamp = Stopwatch.GetTimestamp();
             candidateViewport = CaptureViewport();
+            candidateDepthStencilState = lastDepthStencilState;
+            candidateDepthStencilTransitions.Clear();
+            candidateDepthStencilTransitions.Add($"draw=0(initial):{lastDepthStencilState}");
+            candidateUavTransitions.Clear();
             candidateDrawCount = 0;
             candidateIndexedDrawCount = 0;
+            donorSweepNextIndex = 0;
         }
 
         candidateDepthStencil = depthStencilView;
@@ -706,15 +898,206 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         {
             candidateRenderTargets[index] = renderTargetViews[index];
         }
+        TrackGBufferResources(numViews, renderTargetViews);
 
-        if (candidateLogCount++ < 5)
+        if (candidateLogCount++ < 1)
         {
             log.Information(
                 $"G-buffer candidate begin: ordinal={candidateOrdinal}, matched={match.MatchedCount}, views={numViews}, size={match.Width}x{match.Height}, viewport={candidateViewport}, dsv=0x{depthStencilView:X}."
             );
+            log.Information($"G-buffer pre-candidate OM history: {string.Join(" || ", targetBindingHistory)}.");
         }
 
         return pendingProbe;
+    }
+
+    private void RecordTargetBinding(string source, uint numViews, nint* renderTargetViews, nint depthStencilView)
+    {
+        var targets = new List<string>();
+        if (numViews != uint.MaxValue && renderTargetViews != null)
+        {
+            for (var index = 0; index < Math.Min(numViews, 8); index++)
+            {
+                targets.Add($"0x{renderTargetViews[index]:X}");
+            }
+        }
+
+        var count = numViews == uint.MaxValue ? "KEEP" : numViews.ToString();
+        targetBindingHistory.Enqueue(
+            $"serial={immediateDrawSerial},previousDraws={drawsSinceTargetBinding},{source}:rtvCount={count},"
+                + $"rtvs=[{string.Join(",", targets)}],dsv=0x{depthStencilView:X}"
+        );
+        while (targetBindingHistory.Count > 32)
+        {
+            targetBindingHistory.Dequeue();
+        }
+
+        drawsSinceTargetBinding = 0;
+    }
+
+    private void TrackGBufferResources(uint numViews, nint* renderTargetViews)
+    {
+        if (renderTargetViews == null)
+        {
+            return;
+        }
+
+        var count = Math.Min(Math.Min((int)numViews, trackedGBufferResources.Length), candidateRenderTargets.Length);
+        for (var index = 0; index < count; index++)
+        {
+            if (renderTargetViews[index] == 0)
+            {
+                continue;
+            }
+
+            var resource = GetViewResource(renderTargetViews[index]);
+            if (resource == 0)
+            {
+                continue;
+            }
+
+            trackedGBufferResources[index] = resource;
+            Marshal.Release(resource);
+        }
+    }
+
+    private void PSSetShaderResourcesDetour(nint context, uint startSlot, uint numViews, nint* shaderResourceViews)
+    {
+        try
+        {
+            TrackGBufferConsumers("PS", context, startSlot, numViews, shaderResourceViews);
+        }
+        catch (Exception exception)
+        {
+            log.Warning(exception, "G-buffer probe failed while tracking PS shader resources.");
+        }
+        finally
+        {
+            psSetShaderResourcesHook.Original(context, startSlot, numViews, shaderResourceViews);
+        }
+    }
+
+    private void CSSetShaderResourcesDetour(nint context, uint startSlot, uint numViews, nint* shaderResourceViews)
+    {
+        try
+        {
+            TrackGBufferConsumers("CS", context, startSlot, numViews, shaderResourceViews);
+        }
+        catch (Exception exception)
+        {
+            log.Warning(exception, "G-buffer probe failed while tracking CS shader resources.");
+        }
+        finally
+        {
+            csSetShaderResourcesHook.Original(context, startSlot, numViews, shaderResourceViews);
+        }
+    }
+
+    private void TrackGBufferConsumers(string stage, nint context, uint startSlot, uint numViews, nint* shaderResourceViews)
+    {
+        if (
+            detouring
+            || context != immediateContextPointer
+            || !configuration.EnableGBufferProbe
+            || shaderResourceViews == null
+            || numViews == 0
+            || gBufferConsumerSummaryLogCount > 0
+            || gBufferConsumerTransitions.Count >= 64
+            || trackedGBufferResources.All(resource => resource == 0)
+        )
+        {
+            return;
+        }
+
+        var matches = new List<string>();
+        for (var viewIndex = 0; viewIndex < numViews; viewIndex++)
+        {
+            var view = shaderResourceViews[viewIndex];
+            if (view == 0)
+            {
+                continue;
+            }
+
+            var resource = GetViewResource(view);
+            if (resource == 0)
+            {
+                continue;
+            }
+
+            for (var gBufferIndex = 0; gBufferIndex < trackedGBufferResources.Length; gBufferIndex++)
+            {
+                if (resource == trackedGBufferResources[gBufferIndex])
+                {
+                    matches.Add($"t{startSlot + viewIndex}->G{gBufferIndex}");
+                }
+            }
+
+            Marshal.Release(resource);
+        }
+
+        if (matches.Count == 0)
+        {
+            return;
+        }
+
+        var phase = candidateActive
+            ? $"candidate={candidateOrdinal},candidateDraw={candidateDrawCount}"
+            : $"outsideCandidate,drawsAfterExit={immediateDrawSerial - lastCandidateExitDrawSerial}";
+        var transition = $"serial={immediateDrawSerial},{phase},{stage}:[{string.Join(",", matches)}]";
+        if (gBufferConsumerTransitions.Count == 0 || gBufferConsumerTransitions[^1] != transition)
+        {
+            gBufferConsumerTransitions.Add(transition);
+        }
+    }
+
+    private static nint GetViewResource(nint view)
+    {
+        if (view == 0)
+        {
+            return 0;
+        }
+
+        nint resource = 0;
+        var vtable = *(nint**)view;
+        var getResource = (delegate* unmanaged[Stdcall]<nint, nint*, void>)vtable[7];
+        getResource(view, &resource);
+        return resource;
+    }
+
+    private void TrackUavBinding(uint startSlot, uint count, nint* unorderedAccessViews)
+    {
+        if (!candidateActive || candidateUavTransitions.Count >= 32)
+        {
+            return;
+        }
+
+        string binding;
+        if (count == uint.MaxValue)
+        {
+            binding = $"draw={candidateDrawCount}:start={startSlot},count=KEEP";
+        }
+        else if (count == 0)
+        {
+            binding = $"draw={candidateDrawCount}:start={startSlot},count=0";
+        }
+        else
+        {
+            var pointers = new List<string>((int)Math.Min(count, 16));
+            if (unorderedAccessViews != null)
+            {
+                for (var index = 0; index < Math.Min(count, 16); index++)
+                {
+                    pointers.Add($"0x{unorderedAccessViews[index]:X}");
+                }
+            }
+
+            binding = $"draw={candidateDrawCount}:start={startSlot},count={count},uavs=[{string.Join(",", pointers)}]";
+        }
+
+        if (candidateUavTransitions.Count == 0 || candidateUavTransitions[^1] != binding)
+        {
+            candidateUavTransitions.Add(binding);
+        }
     }
 
     private static (int MatchedCount, uint Width, uint Height) MatchGBuffers(uint numViews, nint* renderTargetViews)
@@ -761,6 +1144,7 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         var startMilliseconds = GetRelativeMilliseconds(candidateStartTimestamp);
         var endMilliseconds = GetRelativeMilliseconds(endTimestamp);
         var selected = candidateOrdinal == configuration.GBufferProbeCandidateExitOrdinal;
+        lastCandidateExitDrawSerial = immediateDrawSerial;
 
         if (candidateExitLogCount++ < DetailedExitLogLimit)
         {
@@ -768,7 +1152,16 @@ internal sealed unsafe class GBufferProbeController : IDisposable
                 $"G-buffer candidate exit: ordinal={candidateOrdinal}, draws={candidateDrawCount}, indexedDraws={candidateIndexedDrawCount}, "
                     + $"rtvs=[{string.Join(",", candidateRenderTargets.Select(pointer => $"0x{pointer:X}"))}], dsv=0x{candidateDepthStencil:X}, "
                     + $"viewport={candidateViewport}, startMs={startMilliseconds:F3}, endMs={endMilliseconds:F3}, "
-                    + $"durationMs={endMilliseconds - startMilliseconds:F3}, next={nextTargets}, selected={selected}."
+                    + $"durationMs={endMilliseconds - startMilliseconds:F3}, nativeOM={candidateDepthStencilState}, "
+                    + $"next={nextTargets}, selected={selected}."
+            );
+            log.Information(
+                $"G-buffer OM transitions: ordinal={candidateOrdinal}, {string.Join(" || ", candidateDepthStencilTransitions)}."
+            );
+            log.Information(
+                $"G-buffer UAV transitions: ordinal={candidateOrdinal}, "
+                    + (candidateUavTransitions.Count == 0 ? "none" : string.Join(" || ", candidateUavTransitions))
+                    + "."
             );
         }
 
@@ -788,7 +1181,9 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             startMilliseconds,
             endMilliseconds,
             candidateViewport,
-            nextTargets
+            nextTargets,
+            candidateDepthStencilState,
+            string.Join(" || ", candidateDepthStencilTransitions)
         );
     }
 
@@ -845,7 +1240,15 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         }
     }
 
-    private void TryIssueProbe(PendingProbe probe)
+    private void TryIssueProbe(PendingProbe probe, bool earlyDonorInjection = false)
+    {
+        lock (probeStateLock)
+        {
+            TryIssueProbeLocked(probe, earlyDonorInjection);
+        }
+    }
+
+    private void TryIssueProbeLocked(PendingProbe probe, bool earlyDonorInjection)
     {
         if (probeIssuedSinceDepthClear)
         {
@@ -862,10 +1265,20 @@ internal sealed unsafe class GBufferProbeController : IDisposable
 
         if (probe.DrawCount == 0 || probe.RenderTargets.Length == 0 || probe.Width == 0 || probe.Height == 0)
         {
-            LogProbeResult(probe, "draw skipped because the candidate was incomplete");
-            return;
+            if (!earlyDonorInjection)
+            {
+                LogProbeResult(probe, "draw skipped because the candidate was incomplete");
+                return;
+            }
+
+            if (probe.RenderTargets.Length == 0 || probe.Width == 0 || probe.Height == 0)
+            {
+                LogProbeResult(probe, "early donor draw skipped because the candidate was incomplete");
+                return;
+            }
         }
 
+        var donorCaptureNeeded = configuration.GBufferProbeMode == GBufferProbeMode.DonorOpaqueTuple && donorSnapshot == null;
         try
         {
             var (blendState, depthState) = configuration.GBufferProbeMode switch
@@ -874,10 +1287,12 @@ internal sealed unsafe class GBufferProbeController : IDisposable
                 GBufferProbeMode.Target0Rgb => (target0RgbBlendState, noDepthWriteState),
                 GBufferProbeMode.Target2Rgb => (target2RgbBlendState, noDepthWriteState),
                 GBufferProbeMode.WorldTriangle => (worldTriangleBlendState, worldDepthWriteState),
+                GBufferProbeMode.DonorOpaqueTuple => (fullGBufferBlendState, worldDepthWriteState),
                 _ => throw new InvalidOperationException($"Unsupported G-buffer probe mode: {configuration.GBufferProbeMode}"),
             };
 
-            var isWorldTriangle = configuration.GBufferProbeMode == GBufferProbeMode.WorldTriangle;
+            var isWorldTriangle = configuration.GBufferProbeMode is GBufferProbeMode.WorldTriangle or GBufferProbeMode.DonorOpaqueTuple;
+            var isDonorTuple = configuration.GBufferProbeMode == GBufferProbeMode.DonorOpaqueTuple;
             Matrix controlViewProjection = default;
             Matrix sceneViewProjection = default;
             if (
@@ -891,6 +1306,23 @@ internal sealed unsafe class GBufferProbeController : IDisposable
 
             detouring = true;
             deferredContext.ClearState();
+            if (isDonorTuple && !TryCaptureDonorSnapshot(probe))
+            {
+                LogProbeResult(probe, "donor tuple skipped because snapshot capture failed");
+                return;
+            }
+
+            if (donorCaptureNeeded)
+            {
+                using var captureCommandList = deferredContext.FinishCommandList(false);
+                immediateContext.ExecuteCommandList(captureCommandList, true);
+                LogDonorReadbackOnce();
+                probeIssuedSinceDepthClear = true;
+                injectionCount++;
+                LogProbeResult(probe, "donor captured; world draw deferred until next frame's first candidate draw");
+                return;
+            }
+
             deferredContext.OutputMerger.SetTargets(probe.DepthStencil, [.. probe.RenderTargets.Select(target => target!)]);
             deferredContext.OutputMerger.SetBlendState(blendState);
             deferredContext.OutputMerger.SetDepthStencilState(depthState);
@@ -911,7 +1343,16 @@ internal sealed unsafe class GBufferProbeController : IDisposable
                 deferredContext.VertexShader.Set(worldVertexShader);
                 deferredContext.VertexShader.SetConstantBuffer(0, worldConstantsBuffer);
                 deferredContext.PixelShader.Set(worldPixelShader);
-                DrawWorldTriangleDiagnostics(controlViewProjection, sceneViewProjection);
+                deferredContext.PixelShader.SetConstantBuffer(0, worldConstantsBuffer);
+                if (isDonorTuple)
+                {
+                    DrawDonorOpaqueTuple(controlViewProjection, 0);
+                    DrawDonorOpaqueTuple(controlViewProjection, 1);
+                }
+                else
+                {
+                    DrawWorldTriangleDiagnostics(controlViewProjection);
+                }
             }
             else
             {
@@ -931,9 +1372,18 @@ internal sealed unsafe class GBufferProbeController : IDisposable
 
             using var commandList = deferredContext.FinishCommandList(false);
             immediateContext.ExecuteCommandList(commandList, true);
+            if (isDonorTuple)
+            {
+                LogDonorReadbackOnce();
+            }
+
             probeIssuedSinceDepthClear = true;
             injectionCount++;
-            var geometry = isWorldTriangle ? "world triangle" : $"{ProbeSize}x{ProbeSize}";
+            var geometry = isWorldTriangle
+                ? earlyDonorInjection
+                    ? "world triangle at candidate begin"
+                    : "world triangle"
+                : $"{ProbeSize}x{ProbeSize}";
             LogProbeResult(probe, $"draw #{injectionCount} issued, geometry={geometry}, targets={probe.RenderTargets.Length}");
         }
         finally
@@ -943,13 +1393,209 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         }
     }
 
+    private bool TryCaptureDonorSnapshot(PendingProbe probe)
+    {
+        if (donorSnapshot != null)
+        {
+            return true;
+        }
+
+        if (probe.RenderTargets.Length < 5 || probe.RenderTargets.Take(5).Any(target => target == null))
+        {
+            return false;
+        }
+
+        var textures = new List<Texture2D>(5);
+        var views = new List<ShaderResourceView>(5);
+        var stagingTextures = new List<Texture2D>(5);
+        var bytesPerPixel = new List<int>(5);
+        var formats = new List<string>(5);
+        Texture2D? depthStencilStagingTexture = null;
+        try
+        {
+            var sourceX = Math.Clamp((int)(probe.Width * DonorSampleNormalized.X), 0, (int)probe.Width - 1);
+            var sourceY = Math.Clamp((int)(probe.Height * DonorSampleNormalized.Y), 0, (int)probe.Height - 1);
+            var sourceRegion = new ResourceRegion(sourceX, sourceY, 0, sourceX + 1, sourceY + 1, 1);
+            for (var index = 0; index < 5; index++)
+            {
+                var renderTarget = probe.RenderTargets[index]!;
+                using var source = renderTarget.ResourceAs<Texture2D>();
+                var sourceDescription = source.Description;
+                var viewDescription = renderTarget.Description;
+                if (sourceDescription.SampleDescription.Count != 1)
+                {
+                    throw new NotSupportedException($"G{index} is MSAA x{sourceDescription.SampleDescription.Count}.");
+                }
+
+                var donorDescription = sourceDescription;
+                donorDescription.Width = 1;
+                donorDescription.Height = 1;
+                donorDescription.MipLevels = 1;
+                donorDescription.ArraySize = 1;
+                donorDescription.Usage = ResourceUsage.Default;
+                donorDescription.BindFlags = BindFlags.ShaderResource;
+                donorDescription.CpuAccessFlags = CpuAccessFlags.None;
+                donorDescription.OptionFlags = ResourceOptionFlags.None;
+
+                var texture = new Texture2D(device, donorDescription);
+                textures.Add(texture);
+                var srvDescription = new ShaderResourceViewDescription
+                {
+                    Format = viewDescription.Format,
+                    Dimension = ShaderResourceViewDimension.Texture2D,
+                    Texture2D = { MostDetailedMip = 0, MipLevels = 1 },
+                };
+                var view = new ShaderResourceView(device, texture, srvDescription);
+                views.Add(view);
+
+                var stagingDescription = donorDescription;
+                stagingDescription.Usage = ResourceUsage.Staging;
+                stagingDescription.BindFlags = BindFlags.None;
+                stagingDescription.CpuAccessFlags = CpuAccessFlags.Read;
+                var stagingTexture = new Texture2D(device, stagingDescription);
+                stagingTextures.Add(stagingTexture);
+                bytesPerPixel.Add(GetFormatBytesPerPixel(viewDescription.Format));
+                formats.Add($"G{index}:resource={sourceDescription.Format},rtv={viewDescription.Format}");
+                deferredContext.CopySubresourceRegion(source, 0, sourceRegion, texture, 0, 0, 0, 0);
+                deferredContext.CopyResource(texture, stagingTexture);
+            }
+
+            using var depthStencilSource = probe.DepthStencil.ResourceAs<Texture2D>();
+            var depthStencilDescription = depthStencilSource.Description;
+            var depthStencilStagingDescription = depthStencilDescription;
+            depthStencilStagingDescription.Usage = ResourceUsage.Staging;
+            depthStencilStagingDescription.BindFlags = BindFlags.None;
+            depthStencilStagingDescription.CpuAccessFlags = CpuAccessFlags.Read;
+            depthStencilStagingDescription.OptionFlags = ResourceOptionFlags.None;
+            depthStencilStagingTexture = new Texture2D(device, depthStencilStagingDescription);
+            deferredContext.CopyResource(depthStencilSource, depthStencilStagingTexture);
+            var depthStencilBytesPerPixel = GetDepthStencilFormatBytesPerPixel(depthStencilDescription.Format);
+
+            donorSnapshot = new DonorSnapshot(
+                [.. textures],
+                [.. views],
+                [.. stagingTextures],
+                [.. bytesPerPixel],
+                depthStencilStagingTexture,
+                depthStencilBytesPerPixel,
+                sourceX,
+                sourceY,
+                depthStencilDescription.Format.ToString(),
+                string.Join(";", formats)
+            );
+            log.Information($"G-buffer donor tuple captured once at ({probe.Width / 2},{probe.Height / 2}): {donorSnapshot.Formats}.");
+            return true;
+        }
+        catch (Exception exception)
+        {
+            foreach (var view in views)
+            {
+                view.Dispose();
+            }
+
+            foreach (var texture in textures)
+            {
+                texture.Dispose();
+            }
+
+            foreach (var texture in stagingTextures)
+            {
+                texture.Dispose();
+            }
+
+            depthStencilStagingTexture?.Dispose();
+
+            log.Error(exception, "Failed to capture G-buffer donor tuple.");
+            return false;
+        }
+    }
+
+    private void LogDonorReadbackOnce()
+    {
+        if (donorSnapshot is not { ReadbackPending: true } snapshot)
+        {
+            return;
+        }
+
+        var values = new List<string>(snapshot.StagingTextures.Length);
+        try
+        {
+            for (var index = 0; index < snapshot.StagingTextures.Length; index++)
+            {
+                var data = immediateContext.MapSubresource(snapshot.StagingTextures[index], 0, MapMode.Read, MapFlags.None);
+                try
+                {
+                    var bytes = new byte[snapshot.BytesPerPixel[index]];
+                    Marshal.Copy(data.DataPointer, bytes, 0, bytes.Length);
+                    values.Add($"G{index}={Convert.ToHexString(bytes)}");
+                }
+                finally
+                {
+                    immediateContext.UnmapSubresource(snapshot.StagingTextures[index], 0);
+                }
+            }
+
+            var depthStencilData = immediateContext.MapSubresource(snapshot.DepthStencilStagingTexture, 0, MapMode.Read, MapFlags.None);
+            try
+            {
+                var depthStencilBytes = new byte[snapshot.DepthStencilBytesPerPixel];
+                var pixelAddress =
+                    depthStencilData.DataPointer
+                    + snapshot.SampleY * depthStencilData.RowPitch
+                    + snapshot.SampleX * snapshot.DepthStencilBytesPerPixel;
+                Marshal.Copy(pixelAddress, depthStencilBytes, 0, depthStencilBytes.Length);
+                donorStencilReference = GetStencilByte(depthStencilBytes);
+                values.Add(
+                    $"DS[{snapshot.DepthStencilFormat}]={Convert.ToHexString(depthStencilBytes)},stencil=0x{donorStencilReference:X2}"
+                );
+            }
+            finally
+            {
+                immediateContext.UnmapSubresource(snapshot.DepthStencilStagingTexture, 0);
+            }
+
+            snapshot.ReadbackPending = false;
+            log.Information($"G-buffer donor raw readback: {string.Join(",", values)}.");
+        }
+        catch (Exception exception)
+        {
+            snapshot.ReadbackPending = false;
+            log.Error(exception, "Failed to read back G-buffer donor tuple.");
+        }
+    }
+
+    private static int GetFormatBytesPerPixel(SharpDX.DXGI.Format format) =>
+        format switch
+        {
+            SharpDX.DXGI.Format.B8G8R8A8_UNorm => 4,
+            SharpDX.DXGI.Format.R16G16B16A16_Float => 8,
+            _ => 16,
+        };
+
+    private static int GetDepthStencilFormatBytesPerPixel(SharpDX.DXGI.Format format) =>
+        format switch
+        {
+            SharpDX.DXGI.Format.R24G8_Typeless or SharpDX.DXGI.Format.D24_UNorm_S8_UInt => 4,
+            SharpDX.DXGI.Format.R32G8X24_Typeless or SharpDX.DXGI.Format.D32_Float_S8X24_UInt => 8,
+            _ => throw new NotSupportedException($"Unsupported depth-stencil format for donor readback: {format}."),
+        };
+
+    private static byte GetStencilByte(byte[] depthStencilBytes) =>
+        depthStencilBytes.Length switch
+        {
+            4 => depthStencilBytes[3],
+            8 => depthStencilBytes[4],
+            _ => 0,
+        };
+
     private void LogProbeResult(PendingProbe probe, string result)
     {
-        if (injectionCount <= 5 || injectionCount % 300 == 0)
+        if (injectionCount <= 2 || injectionCount % 1800 == 0)
         {
             log.Information(
                 $"G-buffer probe: ordinal={probe.Ordinal}, mode={configuration.GBufferProbeMode}, draws={probe.DrawCount}, "
-                    + $"indexedDraws={probe.IndexedDrawCount}, viewport={probe.Viewport}, next={probe.NextTargets}, result={result}."
+                    + $"indexedDraws={probe.IndexedDrawCount}, viewport={probe.Viewport}, nativeOM={probe.NativeDepthStencilState}, "
+                    + $"next={probe.NextTargets}, result={result}."
             );
         }
     }
@@ -985,12 +1631,12 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             );
             var definitions = new (string Label, float ScreenX, float ScreenY, Vector4 Color)[]
             {
-                ("C/NoDepth/T", 0.30f, 0.32f, new Vector4(1f, 0.1f, 0.1f, 1f)),
-                ("S/NoDepth/T", 0.50f, 0.32f, new Vector4(0.1f, 1f, 0.1f, 1f)),
-                ("C/NoDepth/Raw", 0.70f, 0.32f, new Vector4(0.1f, 0.3f, 1f, 1f)),
-                ("C/Always/T", 0.30f, 0.62f, new Vector4(1f, 1f, 0.1f, 1f)),
-                ("C/GreaterEqual/T", 0.50f, 0.62f, new Vector4(1f, 0.1f, 1f, 1f)),
-                ("S/GreaterEqual/T", 0.70f, 0.62f, new Vector4(0.1f, 1f, 1f, 1f)),
+                ("G2 R", 0.30f, 0.32f, new Vector4(1f, 0.1f, 0.1f, 1f)),
+                ("G2 G", 0.50f, 0.32f, new Vector4(0.1f, 1f, 0.1f, 1f)),
+                ("G2 B", 0.70f, 0.32f, new Vector4(0.1f, 0.3f, 1f, 1f)),
+                ("G2 White", 0.30f, 0.62f, new Vector4(1f, 1f, 1f, 1f)),
+                ("G2 Black / donor preserve", 0.50f, 0.62f, new Vector4(0.25f, 0.25f, 0.25f, 1f)),
+                ("Donor write stencil 0x80", 0.70f, 0.62f, new Vector4(1f, 0.1f, 1f, 1f)),
             };
 
             var vertices = new List<WorldVertex>(definitions.Length * 3);
@@ -1037,7 +1683,7 @@ internal sealed unsafe class GBufferProbeController : IDisposable
             log.Information(
                 "World-triangle diagnostics initialized: matrixSources=Control.ViewProjectionMatrix|Scene.Camera.ViewMatrix*Render.Camera.ProjectionMatrix, "
                     + $"camera={FormatVector(cameraPosition)}, matrixMaxDelta={GetMatrixMaxDelta(controlViewProjection, sceneViewProjection):G4}, "
-                    + "placement=Scene.Camera.ScreenPointToRay, variants=C/NoDepth/T,S/NoDepth/T,C/NoDepth/Raw,C/Always/T,C/GreaterEqual/T,S/GreaterEqual/T, cull=None."
+                    + "placement=Scene.Camera.ScreenPointToRay, variants=G2R,G2G,G2B,G2White,G2Black,DonorTuple, cull=None."
             );
         }
 
@@ -1045,48 +1691,52 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         return true;
     }
 
-    private void DrawWorldTriangleDiagnostics(Matrix controlViewProjection, Matrix sceneViewProjection)
+    private void DrawWorldTriangleDiagnostics(Matrix controlViewProjection)
     {
-        var variants = new (Matrix ViewProjection, bool Transpose, DepthStencilState DepthState, BlendState BlendState, Vector4 Albedo)[]
+        var colors = new[]
         {
-            (controlViewProjection, true, noDepthWriteState, target2RgbBlendState, new Vector4(1f, 0.1f, 0.1f, 1f)),
-            (sceneViewProjection, true, noDepthWriteState, target2RgbBlendState, new Vector4(0.1f, 1f, 0.1f, 1f)),
-            (controlViewProjection, false, noDepthWriteState, target2RgbBlendState, new Vector4(0.1f, 0.3f, 1f, 1f)),
-            (controlViewProjection, true, depthWriteState, worldTriangleBlendState, new Vector4(1f, 1f, 0.1f, 1f)),
-            (controlViewProjection, true, worldDepthWriteState, worldTriangleBlendState, new Vector4(1f, 0.1f, 1f, 1f)),
-            (sceneViewProjection, true, worldDepthWriteState, worldTriangleBlendState, new Vector4(0.1f, 1f, 1f, 1f)),
+            new Vector4(1f, 0f, 0f, 1f),
+            new Vector4(0f, 1f, 0f, 1f),
+            new Vector4(0f, 0f, 1f, 1f),
+            new Vector4(1f, 1f, 1f, 1f),
+            new Vector4(0f, 0f, 0f, 1f),
         };
 
-        for (var index = 0; index < variants.Length; index++)
+        controlViewProjection.Transpose();
+        deferredContext.OutputMerger.SetDepthStencilState(noDepthWriteState);
+        deferredContext.OutputMerger.SetBlendState(target2RgbBlendState);
+        for (var index = 0; index < colors.Length; index++)
         {
-            var variant = variants[index];
             var constants = new WorldConstants
             {
-                ViewProjection = variant.ViewProjection,
-                Albedo = variant.Albedo,
+                ViewProjection = controlViewProjection,
+                Albedo = colors[index],
                 Diagnostic = Vector4.Zero,
             };
-            if (variant.Transpose)
-            {
-                constants.ViewProjection.Transpose();
-            }
-
-            deferredContext.OutputMerger.SetDepthStencilState(variant.DepthState);
-            deferredContext.OutputMerger.SetBlendState(variant.BlendState);
             deferredContext.UpdateSubresource(ref constants, worldConstantsBuffer);
             deferredContext.Draw(3, index * 3);
         }
+    }
 
-        var clipControlConstants = new WorldConstants
+    private void DrawDonorOpaqueTuple(Matrix controlViewProjection, int triangleIndex)
+    {
+        if (donorSnapshot == null)
         {
-            ViewProjection = Matrix.Identity,
-            Albedo = new Vector4(1f, 0.35f, 0.05f, 1f),
-            Diagnostic = new Vector4(1f, 0f, 0f, 0f),
+            return;
+        }
+
+        controlViewProjection.Transpose();
+        var constants = new WorldConstants
+        {
+            ViewProjection = controlViewProjection,
+            Albedo = Vector4.Zero,
+            Diagnostic = new Vector4(0f, 1f, triangleIndex % 2 == 0 ? 1f : 0f, 0f),
         };
-        deferredContext.OutputMerger.SetDepthStencilState(noDepthWriteState);
-        deferredContext.OutputMerger.SetBlendState(target2RgbBlendState);
-        deferredContext.UpdateSubresource(ref clipControlConstants, worldConstantsBuffer);
-        deferredContext.Draw(3, 0);
+        deferredContext.OutputMerger.SetBlendState(fullGBufferBlendState);
+        deferredContext.PixelShader.SetShaderResources(0, donorSnapshot.Views);
+        deferredContext.UpdateSubresource(ref constants, worldConstantsBuffer);
+        deferredContext.OutputMerger.SetDepthStencilState(donorStencilWriteState, donorStencilReference);
+        deferredContext.Draw(3, triangleIndex * 3);
     }
 
     private static Vector3 GetScreenRayPoint(
@@ -1116,6 +1766,150 @@ internal sealed unsafe class GBufferProbeController : IDisposable
     }
 
     private static string FormatVector(Vector3 value) => $"({value.X:F3},{value.Y:F3},{value.Z:F3})";
+
+    private void TryIssueScheduledDonorProbe()
+    {
+        if (
+            detouring
+            || !candidateActive
+            || donorSnapshot == null
+            || !configuration.EnableGBufferProbe
+            || configuration.GBufferProbeMode != GBufferProbeMode.DonorOpaqueTuple
+            || candidateOrdinal != configuration.GBufferProbeCandidateExitOrdinal
+            || candidateDepthStencil == 0
+            || donorSweepNextIndex >= DonorSweepDrawOrdinals.Length
+            || candidateDrawCount < DonorSweepDrawOrdinals[donorSweepNextIndex]
+        )
+        {
+            return;
+        }
+
+        try
+        {
+            var now = Stopwatch.GetTimestamp();
+            using var probe = new PendingProbe(
+                [.. candidateRenderTargets],
+                candidateDepthStencil,
+                candidateWidth,
+                candidateHeight,
+                candidateOrdinal,
+                candidateDrawCount,
+                candidateIndexedDrawCount,
+                GetRelativeMilliseconds(candidateStartTimestamp),
+                GetRelativeMilliseconds(now),
+                candidateViewport,
+                $"candidate-active-before-draw-{candidateDrawCount}",
+                candidateDepthStencilState,
+                string.Join(" || ", candidateDepthStencilTransitions)
+            );
+            var triangleIndex = donorSweepNextIndex++;
+            IssueDonorTriangle(probe, triangleIndex);
+            donorSweepInjectionLogCount++;
+            if (donorSweepInjectionLogCount <= DonorSweepDrawOrdinals.Length)
+            {
+                log.Information(
+                    $"G-buffer donor sweep injected triangle {triangleIndex} before candidate draw {candidateDrawCount}, stencil=0x{donorStencilReference:X2}."
+                );
+            }
+        }
+        catch (Exception exception)
+        {
+            log.Error(exception, $"Failed to inject donor tuple before candidate draw {candidateDrawCount}.");
+        }
+    }
+
+    private void IssueDonorTriangle(PendingProbe probe, int triangleIndex)
+    {
+        if (donorSnapshot == null || !TryUpdateWorldTriangleResources(probe.Width, probe.Height, out var controlViewProjection, out _))
+        {
+            return;
+        }
+
+        try
+        {
+            detouring = true;
+            deferredContext.ClearState();
+            deferredContext.OutputMerger.SetTargets(probe.DepthStencil, [.. probe.RenderTargets.Select(target => target!)]);
+            deferredContext.Rasterizer.SetViewport(0, 0, probe.Width, probe.Height, 0, 1);
+            deferredContext.Rasterizer.State = worldRasterizerState;
+            deferredContext.InputAssembler.PrimitiveTopology = PrimitiveTopology.TriangleList;
+            deferredContext.InputAssembler.InputLayout = worldInputLayout;
+            deferredContext.InputAssembler.SetVertexBuffers(
+                0,
+                new VertexBufferBinding(worldVertexBuffer, Utilities.SizeOf<WorldVertex>(), 0)
+            );
+            deferredContext.HullShader.Set(null);
+            deferredContext.DomainShader.Set(null);
+            deferredContext.GeometryShader.Set(null);
+            deferredContext.VertexShader.Set(worldVertexShader);
+            deferredContext.VertexShader.SetConstantBuffer(0, worldConstantsBuffer);
+            deferredContext.PixelShader.Set(worldPixelShader);
+            deferredContext.PixelShader.SetConstantBuffer(0, worldConstantsBuffer);
+            DrawDonorOpaqueTuple(controlViewProjection, triangleIndex);
+
+            using var commandList = deferredContext.FinishCommandList(false);
+            immediateContext.ExecuteCommandList(commandList, true);
+        }
+        finally
+        {
+            detouring = false;
+            deferredContext.ClearState();
+        }
+    }
+
+    private void OMSetDepthStencilStateDetour(nint context, nint depthStencilState, uint stencilReference)
+    {
+        try
+        {
+            if (!detouring)
+            {
+                lastDepthStencilState = DescribeDepthStencilState(depthStencilState, stencilReference);
+                if (candidateActive)
+                {
+                    candidateDepthStencilState = lastDepthStencilState;
+                    var transition = $"draw={candidateDrawCount}:{lastDepthStencilState}";
+                    if (candidateDepthStencilTransitions.Count < 48 && candidateDepthStencilTransitions[^1] != transition)
+                    {
+                        candidateDepthStencilTransitions.Add(transition);
+                    }
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            log.Warning(exception, "G-buffer probe failed while tracking OMSetDepthStencilState.");
+        }
+        finally
+        {
+            omSetDepthStencilStateHook.Original(context, depthStencilState, stencilReference);
+        }
+    }
+
+    private static string DescribeDepthStencilState(nint depthStencilState, uint stencilReference)
+    {
+        if (depthStencilState == 0)
+        {
+            return $"state=null,stencilRef={stencilReference}";
+        }
+
+        var state = new DepthStencilState(depthStencilState);
+        try
+        {
+            var description = state.Description;
+            return $"state=0x{depthStencilState:X},depth={description.IsDepthEnabled}/{description.DepthWriteMask}/{description.DepthComparison},"
+                + $"stencil={description.IsStencilEnabled},read=0x{description.StencilReadMask:X2},write=0x{description.StencilWriteMask:X2},"
+                + $"ref={stencilReference},front={FormatStencilFace(description.FrontFace)},"
+                + $"back={FormatStencilFace(description.BackFace)}";
+        }
+        finally
+        {
+            state.NativePointer = nint.Zero;
+            state.Dispose();
+        }
+    }
+
+    private static string FormatStencilFace(DepthStencilOperationDescription face) =>
+        $"{face.Comparison}/{face.FailOperation}/{face.DepthFailOperation}/{face.PassOperation}";
 
     private void DrawIndexedDetour(nint context, uint indexCount, uint startIndexLocation, int baseVertexLocation)
     {
@@ -1163,7 +1957,14 @@ internal sealed unsafe class GBufferProbeController : IDisposable
 
     private void MarkCandidateDraw(nint context, bool indexed)
     {
-        if (!detouring && context == immediateContextPointer && candidateActive && configuration.EnableGBufferProbe)
+        if (detouring || context != immediateContextPointer)
+        {
+            return;
+        }
+
+        immediateDrawSerial++;
+        drawsSinceTargetBinding++;
+        if (candidateActive && configuration.EnableGBufferProbe)
         {
             candidateDrawCount++;
             if (indexed)
@@ -1202,9 +2003,29 @@ internal sealed unsafe class GBufferProbeController : IDisposable
     {
         try
         {
-            if (!detouring && context == immediateContextPointer && depthStencilView == candidateDepthStencil)
+            if (!detouring && context == immediateContextPointer)
             {
-                if (completedCandidateExits > 0 && frameSummaryLogCount++ < 5)
+                targetBindingHistory.Enqueue(
+                    $"serial={immediateDrawSerial},previousDraws={drawsSinceTargetBinding},ClearDSV:dsv=0x{depthStencilView:X},"
+                        + $"flags=0x{clearFlags:X},depth={depth},stencil={stencil}"
+                );
+                while (targetBindingHistory.Count > 32)
+                {
+                    targetBindingHistory.Dequeue();
+                }
+
+                if (depthStencilView != candidateDepthStencil)
+                {
+                    return;
+                }
+
+                if (gBufferConsumerTransitions.Count > 0 && gBufferConsumerSummaryLogCount++ < 1)
+                {
+                    log.Information($"G-buffer SRV consumers: {string.Join(" || ", gBufferConsumerTransitions)}.");
+                }
+                gBufferConsumerTransitions.Clear();
+
+                if (completedCandidateExits > 0 && frameSummaryLogCount++ < 1)
                 {
                     log.Information($"G-buffer probe frame summary: candidateExits={completedCandidateExits}.");
                 }
@@ -1234,5 +2055,7 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         candidateWidth = 0;
         candidateHeight = 0;
         candidateRenderTargets = [];
+        candidateDepthStencilTransitions.Clear();
+        candidateUavTransitions.Clear();
     }
 }

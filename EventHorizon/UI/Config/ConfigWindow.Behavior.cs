@@ -375,6 +375,7 @@ internal partial class ConfigWindow
             GBufferProbeMode.Target0Rgb => Loc.Text("Config.GBufferProbeMode.Target0Rgb"),
             GBufferProbeMode.Target2Rgb => Loc.Text("Config.GBufferProbeMode.Target2Rgb"),
             GBufferProbeMode.WorldTriangle => Loc.Text("Config.GBufferProbeMode.WorldTriangle"),
+            GBufferProbeMode.DonorOpaqueTuple => Loc.Text("Config.GBufferProbeMode.DonorOpaqueTuple"),
             _ => mode.ToString(),
         };
 
