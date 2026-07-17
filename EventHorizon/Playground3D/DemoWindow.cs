@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Numerics;
+using System.Text;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Windowing;
@@ -31,6 +32,9 @@ internal sealed class DemoWindow : Window, IDisposable
     private GBufferMaterial semitransparentMaterial = GBufferMaterial.Default;
     private bool opaquePublished;
     private bool semitransparentPublished;
+    private Vector2 diagnosticJitterPixels;
+    private bool diagnosticForceOpaqueAlpha = true;
+    private NativeDrawSnapshot? diagnosticSnapshot;
     private IDalamudTextureWrap? icon;
 
     public bool WorldDrawEnabled;
@@ -67,6 +71,9 @@ internal sealed class DemoWindow : Window, IDisposable
             return;
         }
 
+        underpaint.Diagnostics.OpaqueJitterPixels = Vector2.Zero;
+        underpaint.Diagnostics.ForceOpaqueAlpha = false;
+
         if (opaquePublished)
         {
             underpaint.Clear(GBufferTarget.Opaque);
@@ -86,6 +93,10 @@ internal sealed class DemoWindow : Window, IDisposable
         if (underpaint is null)
         {
             ImGui.TextDisabled("Underpaint is unavailable.");
+        }
+        else
+        {
+            DrawDiagnostics();
         }
 
         ImGui.SliderFloat("Height offset (m)", ref heightOffset, -10f, 10f, "%.3f");
@@ -163,6 +174,8 @@ internal sealed class DemoWindow : Window, IDisposable
         }
 
         icon ??= textureProvider.GetFromGameIcon(61241).GetWrapOrEmpty();
+        underpaint.Diagnostics.OpaqueJitterPixels = diagnosticJitterPixels;
+        underpaint.Diagnostics.ForceOpaqueAlpha = diagnosticForceOpaqueAlpha;
         PublishOpaque();
         PublishSemitransparent();
     }
@@ -179,6 +192,131 @@ internal sealed class DemoWindow : Window, IDisposable
 
         ImGui.TextUnformatted($"Render: {current:F2} ms (peak {peak:F2} ms)");
         ImGui.PlotLines("##render_time", renderMillisecondsLinear, PlotSamples, "", 0f, float.MaxValue, new Vector2(0, 60));
+    }
+
+    private void DrawDiagnostics()
+    {
+        if (underpaint == null)
+            return;
+
+        if (underpaint.Diagnostics.TryTakeOpaqueDrawSnapshot(out var snapshot))
+            diagnosticSnapshot = snapshot;
+
+        if (!ImGui.CollapsingHeader("Projection diagnostics"))
+            return;
+
+        ImGui.Checkbox("Force opaque alpha = 1", ref diagnosticForceOpaqueAlpha);
+        ImGui.SliderFloat2("Jitter pixels", ref diagnosticJitterPixels, -1f, 1f, "%.3f");
+        underpaint.Diagnostics.ForceOpaqueAlpha = diagnosticForceOpaqueAlpha;
+        underpaint.Diagnostics.OpaqueJitterPixels = diagnosticJitterPixels;
+
+        if (ImGui.Button("Capture next native opaque draw"))
+            underpaint.Diagnostics.RequestOpaqueDrawSnapshot();
+        ImGui.SameLine();
+        ImGui.TextDisabled("One-shot GPU readback");
+
+        if (diagnosticSnapshot is not { } currentSnapshot)
+            return;
+
+        ImGui.TextUnformatted($"Snapshot #{currentSnapshot.Sequence} at {currentSnapshot.CapturedAt:O}");
+        if (ImGui.Button("Copy snapshot"))
+            ImGui.SetClipboardText(BuildSnapshotText(currentSnapshot));
+
+        if (!ImGui.TreeNode("Snapshot details"))
+            return;
+
+        foreach (var viewport in currentSnapshot.Viewports)
+        {
+            ImGui.TextUnformatted(
+                $"Viewport: ({viewport.X}, {viewport.Y}) {viewport.Width}x{viewport.Height}, depth={viewport.MinDepth}..{viewport.MaxDepth}"
+            );
+        }
+        if (currentSnapshot.Rasterizer is { } rasterizer)
+        {
+            ImGui.TextUnformatted(
+                $"Rasterizer: fill={rasterizer.FillMode}, cull={rasterizer.CullMode}, frontCCW={rasterizer.FrontCounterClockwise}, scissor={rasterizer.Scissor}"
+            );
+        }
+        if (currentSnapshot.DepthStencil is { } depthStencil)
+        {
+            ImGui.TextUnformatted(
+                $"Depth: enabled={depthStencil.DepthEnabled}, write={depthStencil.DepthWriteMask}, compare={depthStencil.DepthComparison}, stencil={depthStencil.StencilEnabled}/0x{depthStencil.StencilReference:X}"
+            );
+        }
+        for (var index = 0; index < currentSnapshot.RenderTargets.Count; index++)
+            ImGui.TextUnformatted($"RT{index}: {currentSnapshot.RenderTargets[index]}");
+        ImGui.TextUnformatted($"DSV: {currentSnapshot.DepthTarget}");
+        ImGui.TextUnformatted($"VS: 0x{currentSnapshot.VertexShader:X}");
+        foreach (var buffer in currentSnapshot.VertexConstantBuffers)
+        {
+            ImGui.TextUnformatted($"VS CB b{buffer.Slot}: 0x{buffer.Pointer:X}, {buffer.ByteWidth} bytes, hash={buffer.ContentHash:X16}");
+        }
+        DrawMatrix("Control VP", currentSnapshot.ControlViewProjection);
+        if (currentSnapshot.SceneViewProjection is { } sceneViewProjection)
+            DrawMatrix("Scene view * render projection", sceneViewProjection);
+        if (currentSnapshot.CameraParameter is { } cameraParameter)
+        {
+            ImGui.TextUnformatted(
+                $"CameraParameter found at VS b{cameraParameter.Slot}+0x{cameraParameter.ByteOffset:X}, error={cameraParameter.MatchError:G6}, transposed={cameraParameter.Transposed}"
+            );
+            DrawMatrix("Native CameraParameter VP", cameraParameter.ViewProjection);
+            DrawMatrix("Native CameraParameter projection", cameraParameter.Projection);
+            DrawMatrix("Native CameraParameter main-view-to-projection", cameraParameter.MainViewToProjection);
+        }
+        else
+        {
+            ImGui.TextDisabled("No CameraParameter-shaped block found in VS b0-b13.");
+        }
+        ImGui.TreePop();
+    }
+
+    private static void DrawMatrix(string label, Matrix4x4 matrix)
+    {
+        ImGui.TextUnformatted(label);
+        ImGui.TextUnformatted($"[{matrix.M11:G7}, {matrix.M12:G7}, {matrix.M13:G7}, {matrix.M14:G7}]");
+        ImGui.TextUnformatted($"[{matrix.M21:G7}, {matrix.M22:G7}, {matrix.M23:G7}, {matrix.M24:G7}]");
+        ImGui.TextUnformatted($"[{matrix.M31:G7}, {matrix.M32:G7}, {matrix.M33:G7}, {matrix.M34:G7}]");
+        ImGui.TextUnformatted($"[{matrix.M41:G7}, {matrix.M42:G7}, {matrix.M43:G7}, {matrix.M44:G7}]");
+    }
+
+    private static string BuildSnapshotText(NativeDrawSnapshot snapshot)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine($"Underpaint native opaque snapshot #{snapshot.Sequence} ({snapshot.CapturedAt:O})");
+        foreach (var viewport in snapshot.Viewports)
+            builder.AppendLine(
+                $"Viewport=({viewport.X},{viewport.Y}) {viewport.Width}x{viewport.Height} depth={viewport.MinDepth}..{viewport.MaxDepth}"
+            );
+        foreach (var scissor in snapshot.Scissors)
+            builder.AppendLine($"Scissor=({scissor.Left},{scissor.Top})..({scissor.Right},{scissor.Bottom})");
+        builder.AppendLine($"Rasterizer={snapshot.Rasterizer}");
+        builder.AppendLine($"DepthStencil={snapshot.DepthStencil}");
+        builder.AppendLine($"VS=0x{snapshot.VertexShader:X}");
+        for (var index = 0; index < snapshot.RenderTargets.Count; index++)
+            builder.AppendLine($"RT{index}={snapshot.RenderTargets[index]}");
+        builder.AppendLine($"DSV={snapshot.DepthTarget}");
+        foreach (var buffer in snapshot.VertexConstantBuffers)
+            builder.AppendLine($"VS.CB{buffer.Slot}=0x{buffer.Pointer:X} bytes={buffer.ByteWidth} hash={buffer.ContentHash:X16}");
+        AppendMatrix(builder, "ControlVP", snapshot.ControlViewProjection);
+        if (snapshot.SceneViewProjection is { } sceneViewProjection)
+            AppendMatrix(builder, "SceneViewProjection", sceneViewProjection);
+        if (snapshot.CameraParameter is { } cameraParameter)
+        {
+            builder.AppendLine(
+                $"CameraParameter=VS.CB{cameraParameter.Slot}+0x{cameraParameter.ByteOffset:X} error={cameraParameter.MatchError:R} transposed={cameraParameter.Transposed}"
+            );
+            AppendMatrix(builder, "NativeVP", cameraParameter.ViewProjection);
+            AppendMatrix(builder, "NativeProjection", cameraParameter.Projection);
+            AppendMatrix(builder, "NativeMainViewToProjection", cameraParameter.MainViewToProjection);
+        }
+        return builder.ToString();
+    }
+
+    private static void AppendMatrix(StringBuilder builder, string name, Matrix4x4 matrix)
+    {
+        builder.AppendLine(
+            $"{name}=[{matrix.M11:R},{matrix.M12:R},{matrix.M13:R},{matrix.M14:R};{matrix.M21:R},{matrix.M22:R},{matrix.M23:R},{matrix.M24:R};{matrix.M31:R},{matrix.M32:R},{matrix.M33:R},{matrix.M34:R};{matrix.M41:R},{matrix.M42:R},{matrix.M43:R},{matrix.M44:R}]"
+        );
     }
 
     private void DrawObjectList(Vector3 playerPosition)
