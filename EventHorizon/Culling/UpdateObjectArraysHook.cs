@@ -1,4 +1,3 @@
-using System;
 using System.Threading;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;

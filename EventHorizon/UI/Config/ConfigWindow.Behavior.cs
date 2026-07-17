@@ -1,11 +1,8 @@
-using System;
-using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.Keys;
 using EventHorizon.Localization;
-using EventHorizon.Settings;
-using Pictomancy;
+using Underpaint;
 
 namespace EventHorizon.UI.Config;
 
@@ -167,7 +164,7 @@ internal partial class ConfigWindow
             ImGui.BeginDisabled();
         }
 
-        var clearButtonWidth = ImGui.CalcTextSize(Loc.Text("Config.Shortcut.Clear")).X + ImGui.GetStyle().FramePadding.X * 2f;
+        var clearButtonWidth = ImGui.CalcTextSize(Loc.Text("Config.Shortcut.Clear")).X + (ImGui.GetStyle().FramePadding.X * 2f);
         ImGui.SetNextItemWidth(-clearButtonWidth - ImGui.GetStyle().ItemSpacing.X);
         var shortcutLabel = capturingTemporaryShowAllPlayersShortcut
             ? BuildShortcutLabel(capturedTemporaryShowAllPlayersKeys, Loc.Text("Config.Shortcut.Recording"))
@@ -424,7 +421,7 @@ internal partial class ConfigWindow
 
         if (changed)
         {
-            plugin.GBufferProbe.MaterialParameters = new PctOpaqueMaterial(g0, g1, g2, g3, g4, (byte)stencil);
+            plugin.GBufferProbe.MaterialParameters = new GBufferMaterial(g0, g1, g2, g3, g4, (byte)stencil);
         }
 
         if (ImGui.Button(Loc.Text("Config.GBufferMaterialParameters.Reset")))

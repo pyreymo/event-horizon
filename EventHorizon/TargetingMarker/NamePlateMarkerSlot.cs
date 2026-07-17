@@ -1,4 +1,3 @@
-using System;
 using EventHorizon.Interop.Atk;
 using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Client.Graphics;

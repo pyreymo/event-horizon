@@ -1,3 +1,3 @@
-[submodule "external/ffxiv_pictomancy"]
-	path = external/ffxiv_pictomancy
-	url = git@github.com:pyreymo/ffxiv_pictomancy.git
+[submodule "libraries/Underpaint"]
+	path = libraries/Underpaint
+	url = git@github.com:pyreymo/ffxiv-underpaint.git

@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using EventHorizon.Settings;
 
 namespace EventHorizon.Culling;

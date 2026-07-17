@@ -5,7 +5,7 @@
     "Command.Help.Disable": "停用玩家隐藏",
     "Command.Help.Toggle": "切换玩家隐藏",
     "Command.Help.Preview": "切换玩家预览浮窗",
-    "Command.Help.3D": "切换 Pictomancy 演示窗口",
+    "Command.Help.3D": "切换 Underpaint 演示窗口",
 
     "Status.Enabled": "已启用",
     "Status.Disabled": "已停用",

@@ -1,4 +1,3 @@
-using System;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Plugin.Services;
 using EventHorizon.Localization;

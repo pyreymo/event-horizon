@@ -1,12 +1,9 @@
-using System;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.Gui.NamePlate;
-using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using EventHorizon.Interop.Vfx;
 using EventHorizon.Settings;

@@ -1,4 +1,3 @@
-using System;
 using Dalamud.Game.Chat;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin.Services;

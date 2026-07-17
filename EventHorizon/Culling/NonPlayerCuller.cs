@@ -1,4 +1,3 @@
-using System;
 using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Client.Game.Event;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;

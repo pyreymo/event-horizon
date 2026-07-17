@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using Dalamud.Game.Gui.Dtr;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Plugin.Services;

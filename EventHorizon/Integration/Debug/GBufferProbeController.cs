@@ -1,12 +1,11 @@
-using EventHorizon.Settings;
+using System.Threading;
 using FFXIVClientStructs.FFXIV.Client.Game.Control;
-using Pictomancy;
 using SharpDX;
 using SharpDX.Direct3D11;
+using Underpaint;
 using D3D11Device = SharpDX.Direct3D11.Device;
 using EventHorizonConfiguration = EventHorizon.Settings.Configuration;
 using KernelDevice = FFXIVClientStructs.FFXIV.Client.Graphics.Kernel.Device;
-using Vector2 = System.Numerics.Vector2;
 using Vector3 = System.Numerics.Vector3;
 using Vector4 = System.Numerics.Vector4;
 
@@ -14,11 +13,12 @@ namespace EventHorizon.Integration.Debug;
 
 internal readonly record struct GBufferWorldMarker(string Label, Vector3 Center, Vector4 Color);
 
-/// <summary>Feeds the EventHorizon test quad into Pictomancy's opaque backend.</summary>
+/// <summary>Feeds the EventHorizon test quad into Underpaint's opaque backend.</summary>
 internal sealed unsafe class GBufferProbeController : IDisposable
 {
     private readonly EventHorizonConfiguration configuration;
-    private readonly object stateLock = new();
+    private readonly UnderpaintRenderer? renderer;
+    private readonly Lock stateLock = new();
     private readonly D3D11Device device;
     private readonly Texture2D testTexture;
     private readonly ShaderResourceView testTextureView;
@@ -28,12 +28,14 @@ internal sealed unsafe class GBufferProbeController : IDisposable
     private bool disposed;
     private OpaqueQuad? quad;
     private GBufferWorldMarker? marker;
+    private GBufferMaterial materialParameters = GBufferMaterial.Default;
 
     private readonly record struct OpaqueQuad(Vector3 Center, Vector3 Right, Vector3 Down);
 
-    public GBufferProbeController(EventHorizonConfiguration configuration)
+    public GBufferProbeController(EventHorizonConfiguration configuration, UnderpaintRenderer? renderer)
     {
         this.configuration = configuration;
+        this.renderer = renderer;
 
         var kernelDevice = KernelDevice.Instance();
         if (kernelDevice == null || kernelDevice->D3D11Forwarder == null)
@@ -45,13 +47,13 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         (testTexture, testTextureView) = CreateTestTexture();
     }
 
-    public PctOpaqueMaterial MaterialParameters
+    public GBufferMaterial MaterialParameters
     {
-        get => PctService.OpaqueMaterial;
-        set => PctService.OpaqueMaterial = value;
+        get => materialParameters;
+        set => materialParameters = value;
     }
 
-    public void ResetMaterialParameters() => MaterialParameters = PctOpaqueMaterial.Default;
+    public void ResetMaterialParameters() => MaterialParameters = GBufferMaterial.Default;
 
     public bool PublishingEnabled
     {
@@ -68,7 +70,7 @@ internal sealed unsafe class GBufferProbeController : IDisposable
 
         lock (stateLock)
         {
-            var enabled = configuration.EnableGBufferProbe && PctService.OpaqueBackendAvailable;
+            var enabled = configuration.EnableGBufferProbe && renderer != null;
             if (lastEnabled != enabled)
             {
                 lastEnabled = enabled;
@@ -76,7 +78,7 @@ internal sealed unsafe class GBufferProbeController : IDisposable
                 marker = null;
                 if (!enabled)
                 {
-                    PctService.ClearOpaque();
+                    renderer?.Clear(GBufferTarget.Opaque);
                 }
             }
 
@@ -87,12 +89,12 @@ internal sealed unsafe class GBufferProbeController : IDisposable
 
             if (!TryEnsureQuad(out var currentQuad))
             {
-                PctService.ClearOpaque();
+                renderer?.Clear(GBufferTarget.Opaque);
                 return;
             }
 
-            using var drawList = PctService.DrawOpaque();
-            drawList?.AddImage(testTextureView.NativePointer, currentQuad.Center, currentQuad.Right, currentQuad.Down);
+            using var drawList = renderer!.DrawOpaque(materialParameters);
+            drawList.AddImage(testTextureView.NativePointer, currentQuad.Center, currentQuad.Right, currentQuad.Down);
         }
     }
 
@@ -119,7 +121,7 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         }
 
         disposed = true;
-        PctService.ClearOpaque();
+        renderer?.Clear(GBufferTarget.Opaque);
         testTextureView.Dispose();
         testTexture.Dispose();
     }
@@ -159,9 +161,9 @@ internal sealed unsafe class GBufferProbeController : IDisposable
                 - GetScreenRayPoint(activeCamera, viewportWidth, viewportHeight, 0.50f, 0.53f)
         );
 
-        currentQuad = new OpaqueQuad(center, screenRight * 2.5f + forward * 1.3f, screenUp * -1.8f);
+        currentQuad = new OpaqueQuad(center, (screenRight * 2.5f) + (forward * 1.3f), screenUp * -1.8f);
         quad = currentQuad;
-        marker = new GBufferWorldMarker("Pictomancy opaque quad", center, new Vector4(1f, 0.1f, 1f, 1f));
+        marker = new GBufferWorldMarker("Underpaint opaque quad", center, new Vector4(1f, 0.1f, 1f, 1f));
         return true;
     }
 
@@ -186,7 +188,7 @@ internal sealed unsafe class GBufferProbeController : IDisposable
                 };
                 var grid = x % (size / cells) < 2 || y % (size / cells) < 2;
                 var color = grid ? Vector3.One : tint * brightness;
-                var offset = (y * size + x) * 4;
+                var offset = ((y * size) + x) * 4;
                 pixels[offset] = (byte)(Math.Clamp(color.X, 0f, 1f) * 255f);
                 pixels[offset + 1] = (byte)(Math.Clamp(color.Y, 0f, 1f) * 255f);
                 pixels[offset + 2] = (byte)(Math.Clamp(color.Z, 0f, 1f) * 255f);
@@ -226,6 +228,6 @@ internal sealed unsafe class GBufferProbeController : IDisposable
         var ray = activeCamera->SceneCamera.ScreenPointToRay(screenPoint);
         var origin = new Vector3(ray.Origin.X, ray.Origin.Y, ray.Origin.Z);
         var direction = Vector3.Normalize(new Vector3(ray.Direction.X, ray.Direction.Y, ray.Direction.Z));
-        return origin + direction * 5f;
+        return origin + (direction * 5f);
     }
 }

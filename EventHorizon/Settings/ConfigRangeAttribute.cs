@@ -1,5 +1,3 @@
-using System;
-
 namespace EventHorizon.Settings;
 
 [AttributeUsage(AttributeTargets.Property)]

@@ -119,6 +119,14 @@
           "SharpDX.Direct3D11": "[4.2.0, )",
           "SharpDX.Mathematics": "[4.2.0, )"
         }
+      },
+      "underpaint": {
+        "type": "Project",
+        "dependencies": {
+          "SharpDX.D3DCompiler": "[4.2.0, )",
+          "SharpDX.Direct3D11": "[4.2.0, )",
+          "SharpDX.Mathematics": "[4.2.0, )"
+        }
       }
     }
   }

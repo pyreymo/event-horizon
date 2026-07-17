@@ -1,7 +1,4 @@
-using System;
 using System.IO;
-using System.Numerics;
-using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Chat;
 using Dalamud.Game.Command;
 using Dalamud.Interface.ImGuiNotification;
@@ -14,13 +11,13 @@ using EventHorizon.Dtr;
 using EventHorizon.Integration.Debug;
 using EventHorizon.Interop.Vfx;
 using EventHorizon.Localization;
+using EventHorizon.Playground3D;
 using EventHorizon.Preview;
 using EventHorizon.Settings;
 using EventHorizon.TargetingMarker;
 using EventHorizon.UI.Config;
 using EventHorizon.WorldGraphics;
-using Pictomancy;
-using PictomancyDemo;
+using Underpaint;
 
 namespace EventHorizon;
 
@@ -100,8 +97,8 @@ public sealed class Plugin : IDalamudPlugin
     private readonly WindowSystem windowSystem = new("EventHorizon");
     private ConfigWindow ConfigWindow { get; init; }
     private PlayerPreviewWindow PlayerPreviewWindow { get; init; }
-    private DemoWindow PictomancyDemoWindow { get; init; }
-    private PctContext? PictomancyContext { get; init; }
+    private DemoWindow UnderpaintDemoWindow { get; init; }
+    private UnderpaintRenderer? UnderpaintRenderer { get; init; }
     private CullingController Culling { get; init; }
     private PlayerPreviewHighlighter PlayerPreviewHighlighter { get; init; }
     private ActorVfxController ActorVfxController { get; init; }
@@ -150,8 +147,8 @@ public sealed class Plugin : IDalamudPlugin
             StaticVfxController = new StaticVfxController(GameInteropProvider, SigScanner, Log);
             WorldDotOverlay = new WorldDotOverlay(GameGui, PluginInterface);
             SceneVisibilityController = new SceneVisibilityController(GameInteropProvider, Configuration);
-            PictomancyContext = InitializePictomancy();
-            GBufferProbeController = new GBufferProbeController(Configuration);
+            UnderpaintRenderer = InitializeUnderpaint();
+            GBufferProbeController = new GBufferProbeController(Configuration, UnderpaintRenderer);
             Culling = new CullingController(
                 GameInteropProvider,
                 SigScanner,
@@ -173,7 +170,7 @@ public sealed class Plugin : IDalamudPlugin
             );
             ConfigWindow = new ConfigWindow(this, DataManager, playerPreviewPanel, IsPlayerPreviewWindowOpen, TogglePlayerPreviewWindow);
             PlayerPreviewWindow = new PlayerPreviewWindow(playerPreviewPanel, OpenMainUi);
-            PictomancyDemoWindow = new DemoWindow();
+            UnderpaintDemoWindow = new DemoWindow(UnderpaintRenderer, ObjectTable, TargetManager, TextureProvider);
             DtrStatusBar = new DtrBar(DtrBar, Configuration, Culling.GetStatus, SetPlayerHidingEnabled, ToggleConfigUi);
             DtrBackground = new DtrBackground(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
             TargetingMarkerController = new TargetingMarkerController(
@@ -193,7 +190,7 @@ public sealed class Plugin : IDalamudPlugin
 
             windowSystem.AddWindow(ConfigWindow);
             windowSystem.AddWindow(PlayerPreviewWindow);
-            windowSystem.AddWindow(PictomancyDemoWindow);
+            windowSystem.AddWindow(UnderpaintDemoWindow);
 
             CommandManager.AddHandler(
                 PrimaryCommandName,
@@ -278,10 +275,10 @@ public sealed class Plugin : IDalamudPlugin
         CommandManager.RemoveHandler(ShortCommandName);
 
         windowSystem.RemoveAllWindows();
-        PictomancyDemoWindow?.Dispose();
+        UnderpaintDemoWindow?.Dispose();
         SceneVisibilityController?.Dispose();
         GBufferProbeController?.Dispose();
-        PictomancyContext?.Dispose();
+        UnderpaintRenderer?.Dispose();
         TargetingMarkerController?.Dispose();
         DtrBackground?.Dispose();
         DtrStatusBar?.Dispose();
@@ -316,7 +313,7 @@ public sealed class Plugin : IDalamudPlugin
                 TogglePlayerPreviewWindow();
                 break;
             case "3d":
-                PictomancyDemoWindow.Toggle();
+                UnderpaintDemoWindow.Toggle();
                 break;
             case "debugtarget":
                 PlayerAdmissionDebugTrace.DumpCurrentTarget();
@@ -378,25 +375,25 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         var demoOwnsOpaqueBackend =
-            PictomancyDemoWindow.IsOpen && PictomancyDemoWindow.WorldDrawEnabled && PictomancyDemoWindow.UsesOpaqueBackend;
+            UnderpaintDemoWindow.IsOpen && UnderpaintDemoWindow.WorldDrawEnabled && UnderpaintDemoWindow.UsesOpaqueBackend;
         GBufferProbeController.PublishingEnabled = !demoOwnsOpaqueBackend;
 
         DrawGBufferProbeWorldArrow();
 
-        if (PictomancyContext is null || !PictomancyDemoWindow.IsOpen || !PictomancyDemoWindow.WorldDrawEnabled)
+        if (UnderpaintRenderer is null || !UnderpaintDemoWindow.IsOpen || !UnderpaintDemoWindow.WorldDrawEnabled)
         {
-            PictomancyDemoWindow.StopWorldDraw();
+            UnderpaintDemoWindow.StopWorldDraw();
             return;
         }
 
         try
         {
-            PictomancyDemoWindow.DrawWorld();
+            UnderpaintDemoWindow.DrawWorld();
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "Pictomancy demo DrawWorld threw.");
-            PictomancyDemoWindow.WorldDrawEnabled = false;
+            Log.Error(ex, "Underpaint demo DrawWorld threw.");
+            UnderpaintDemoWindow.WorldDrawEnabled = false;
         }
     }
 
@@ -411,15 +408,15 @@ public sealed class Plugin : IDalamudPlugin
         PlayerPreviewWorldArrowRenderer.Draw(localPlayer.Position, marker.Center, GameGui, marker.Color, marker.Label);
     }
 
-    private static PctContext? InitializePictomancy()
+    private static UnderpaintRenderer? InitializeUnderpaint()
     {
         try
         {
-            return PctService.Initialize(PluginInterface, new PctOptions { EnableKtkOutput = true, EnableOpaqueGBufferBackend = true });
+            return new UnderpaintRenderer(GameInteropProvider, Log);
         }
         catch (Exception exception)
         {
-            Log.Error(exception, "Pictomancy initialization failed; the 3D demo will run without world drawing.");
+            Log.Error(exception, "Underpaint initialization failed; G-buffer drawing is unavailable.");
             return null;
         }
     }

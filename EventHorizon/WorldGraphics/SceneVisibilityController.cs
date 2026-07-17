@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using EventHorizon.Settings;

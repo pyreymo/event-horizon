@@ -22,12 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\external\ffxiv_pictomancy\Pictomancy\Pictomancy.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Include="..\external\ffxiv_pictomancy\PictomancyDemo\DemoWindow.cs" Link="Playground3D\DemoWindow.cs" />
-    <Compile Include="..\external\ffxiv_pictomancy\PictomancyDemo\VfxTab.cs" Link="Playground3D\VfxTab.cs" />
+    <ProjectReference Include="..\libraries\Underpaint\Underpaint.csproj" />
   </ItemGroup>
 
   <ItemGroup>
