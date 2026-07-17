@@ -23,18 +23,18 @@ internal sealed class DemoWindow : Window, IDisposable
 
     private int nextId = 1;
     private int renderSampleIndex;
-    private int targetIndex;
     private float heightOffset = 0.03f;
     private float semitransparentAmbient = SemitransparentLighting.Default.Ambient;
     private float semitransparentDiffuse = SemitransparentLighting.Default.Diffuse;
     private float semitransparentSpecular = SemitransparentLighting.Default.Specular;
-    private GBufferTarget? publishedTarget;
+    private GBufferMaterial opaqueMaterial = GBufferMaterial.Default;
+    private GBufferMaterial semitransparentMaterial = GBufferMaterial.Default;
+    private bool opaquePublished;
+    private bool semitransparentPublished;
     private IDalamudTextureWrap? icon;
 
     public bool WorldDrawEnabled;
-    public bool UsesOpaqueBackend => SelectedTarget == GBufferTarget.Opaque;
-
-    private GBufferTarget SelectedTarget => targetIndex == 0 ? GBufferTarget.Opaque : GBufferTarget.Semitransparent;
+    public bool UsesOpaqueBackend => opaquePublished || demoObjects.Any(demoObject => demoObject.DrawsTo(GBufferTarget.Opaque));
 
     public DemoWindow(UnderpaintRenderer? underpaint, IObjectTable objects, ITargetManager targetManager, ITextureProvider textureProvider)
         : base("Underpaint Demo")
@@ -62,33 +62,44 @@ internal sealed class DemoWindow : Window, IDisposable
 
     public void StopWorldDraw()
     {
-        if (publishedTarget is not { } target)
+        if (underpaint is null)
         {
             return;
         }
 
-        underpaint?.Clear(target);
-        publishedTarget = null;
+        if (opaquePublished)
+        {
+            underpaint.Clear(GBufferTarget.Opaque);
+            opaquePublished = false;
+        }
+
+        if (semitransparentPublished)
+        {
+            underpaint.Clear(GBufferTarget.Semitransparent);
+            semitransparentPublished = false;
+        }
     }
 
     public override void Draw()
     {
         ImGui.Checkbox("Draw enabled", ref WorldDrawEnabled);
-        string[] targets = ["Opaque G-buffer", "Semitransparent G-buffer"];
-        ImGui.Combo("Target", ref targetIndex, targets, targets.Length);
-
         if (underpaint is null)
         {
             ImGui.TextDisabled("Underpaint is unavailable.");
         }
 
-        ImGui.SliderFloat("Height offset (m)", ref heightOffset, 0f, 1f, "%.3f");
-        if (SelectedTarget == GBufferTarget.Semitransparent)
+        ImGui.SliderFloat("Height offset (m)", ref heightOffset, -10f, 10f, "%.3f");
+        if (ImGui.CollapsingHeader("Semitransparent lighting"))
         {
             ImGui.SliderFloat("Ambient", ref semitransparentAmbient, 0f, 2f, "%.2f");
             ImGui.SliderFloat("Diffuse", ref semitransparentDiffuse, 0f, 8f, "%.2f");
             ImGui.SliderFloat("Specular", ref semitransparentSpecular, 0f, 8f, "%.2f");
         }
+
+        if (ImGui.CollapsingHeader("Opaque material"))
+            DrawMaterialEditor("opaque", ref opaqueMaterial);
+        if (ImGui.CollapsingHeader("Semitransparent material"))
+            DrawMaterialEditor("semitransparent", ref semitransparentMaterial);
 
         DrawTimingPlot();
         ImGui.Separator();
@@ -108,6 +119,9 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.SameLine();
         if (ImGui.Button("Triangle"))
             Spawn(new TriangleObject { Position = position, Rotation = rotation });
+        ImGui.SameLine();
+        if (ImGui.Button("Quad"))
+            Spawn(new QuadObject { Position = position, Rotation = rotation });
         ImGui.SameLine();
         if (ImGui.Button("Line to target"))
             Spawn(new LineObject(targetManager) { Position = position });
@@ -149,25 +163,8 @@ internal sealed class DemoWindow : Window, IDisposable
         }
 
         icon ??= textureProvider.GetFromGameIcon(61241).GetWrapOrEmpty();
-        var target = SelectedTarget;
-        if (publishedTarget is { } previousTarget && previousTarget != target)
-        {
-            underpaint.Clear(previousTarget);
-        }
-
-        using var draw =
-            target == GBufferTarget.Semitransparent
-                ? underpaint.DrawSemitransparent(
-                    lighting: new SemitransparentLighting(semitransparentAmbient, semitransparentDiffuse, semitransparentSpecular)
-                )
-                : underpaint.DrawOpaque();
-
-        foreach (var demoObject in demoObjects)
-        {
-            demoObject.Draw(draw, heightOffset);
-        }
-
-        publishedTarget = target;
+        PublishOpaque();
+        PublishSemitransparent();
     }
 
     private void DrawTimingPlot()
@@ -195,6 +192,7 @@ internal sealed class DemoWindow : Window, IDisposable
                 $"#{demoObject.Id} {demoObject.TypeName} @ ({demoObject.Position.X:F1}, {demoObject.Position.Y:F1}, {demoObject.Position.Z:F1})###object{demoObject.Id}";
             if (ImGui.CollapsingHeader(header))
             {
+                demoObject.DrawTargetUi();
                 demoObject.DrawUi();
                 if (ImGui.Button("Move to player"))
                     demoObject.Position = playerPosition;
@@ -217,13 +215,100 @@ internal sealed class DemoWindow : Window, IDisposable
         demoObjects.Add(demoObject);
     }
 
+    private void PublishOpaque()
+    {
+        var hasObjects = demoObjects.Any(demoObject => demoObject.DrawsTo(GBufferTarget.Opaque));
+        if (!hasObjects)
+        {
+            if (opaquePublished)
+            {
+                underpaint!.Clear(GBufferTarget.Opaque);
+                opaquePublished = false;
+            }
+            return;
+        }
+
+        using var draw = underpaint!.DrawOpaque(opaqueMaterial);
+        foreach (var demoObject in demoObjects)
+        {
+            if (demoObject.DrawsTo(GBufferTarget.Opaque))
+                demoObject.Draw(draw, heightOffset);
+        }
+        opaquePublished = true;
+    }
+
+    private void PublishSemitransparent()
+    {
+        var hasObjects = demoObjects.Any(demoObject => demoObject.DrawsTo(GBufferTarget.Semitransparent));
+        if (!hasObjects)
+        {
+            if (semitransparentPublished)
+            {
+                underpaint!.Clear(GBufferTarget.Semitransparent);
+                semitransparentPublished = false;
+            }
+            return;
+        }
+
+        using var draw = underpaint!.DrawSemitransparent(
+            semitransparentMaterial,
+            new SemitransparentLighting(semitransparentAmbient, semitransparentDiffuse, semitransparentSpecular)
+        );
+        foreach (var demoObject in demoObjects)
+        {
+            if (demoObject.DrawsTo(GBufferTarget.Semitransparent))
+                demoObject.Draw(draw, heightOffset);
+        }
+        semitransparentPublished = true;
+    }
+
+    private static void DrawMaterialEditor(string id, ref GBufferMaterial material)
+    {
+        ImGui.PushID(id);
+        var g0 = material.G0;
+        var g1 = material.G1;
+        var g2 = material.G2;
+        var g3 = material.G3;
+        var g4 = material.G4;
+        var stencil = (int)material.Stencil;
+        var changed = ImGui.InputFloat4("G0", ref g0);
+        changed |= ImGui.InputFloat4("G1", ref g1);
+        changed |= ImGui.InputFloat4("G2", ref g2);
+        changed |= ImGui.InputFloat4("G3", ref g3);
+        changed |= ImGui.InputFloat4("G4", ref g4);
+        if (ImGui.InputInt("Stencil", ref stencil))
+        {
+            stencil = Math.Clamp(stencil, byte.MinValue, byte.MaxValue);
+            changed = true;
+        }
+
+        if (changed)
+            material = new GBufferMaterial(g0, g1, g2, g3, g4, (byte)stencil);
+        if (ImGui.Button("Reset"))
+            material = GBufferMaterial.Default;
+        ImGui.PopID();
+    }
+
     private static uint ToU32(Vector4 color) => ImGui.ColorConvertFloat4ToU32(color);
 
     private abstract class DemoObject
     {
         public int Id;
         public Vector3 Position;
+        private int targetIndex;
         public abstract string TypeName { get; }
+
+        public bool DrawsTo(GBufferTarget target) =>
+            targetIndex == 2
+            || (targetIndex == 0 && target == GBufferTarget.Opaque)
+            || (targetIndex == 1 && target == GBufferTarget.Semitransparent);
+
+        public void DrawTargetUi()
+        {
+            string[] targets = ["Opaque", "Semitransparent", "Both"];
+            ImGui.Combo("Target", ref targetIndex, targets, targets.Length);
+        }
+
         public abstract void DrawUi();
         public abstract void Draw(GBufferDrawList draw, float heightOffset);
     }
@@ -298,6 +383,41 @@ internal sealed class DemoWindow : Window, IDisposable
         }
     }
 
+    private sealed class QuadObject : DemoObject
+    {
+        public float Rotation;
+        public float Width = 4f;
+        public float Depth = 4f;
+        public Vector4 Color = new(0.5f, 1f, 0.4f, 0.6f);
+        public override string TypeName => "Quad";
+
+        public override void DrawUi()
+        {
+            ImGui.SliderFloat("Width", ref Width, 0.1f, 30f);
+            ImGui.SliderFloat("Depth", ref Depth, 0.1f, 30f);
+            ImGui.SliderAngle("Rotation", ref Rotation);
+            ImGui.ColorEdit4("Color", ref Color);
+        }
+
+        public override void Draw(GBufferDrawList draw, float heightOffset)
+        {
+            var center = Position + Vector3.UnitY * heightOffset;
+            var forward = new Vector3(MathF.Sin(Rotation), 0f, MathF.Cos(Rotation)) * (Depth * 0.5f);
+            var right = Vector3.Cross(forward, Vector3.UnitY);
+            if (right.LengthSquared() < 1e-8f)
+                return;
+
+            right = Vector3.Normalize(right) * (Width * 0.5f);
+            draw.AddQuadFilled(
+                center - forward - right,
+                center - forward + right,
+                center + forward + right,
+                center + forward - right,
+                ToU32(Color)
+            );
+        }
+    }
+
     private sealed class LineObject(ITargetManager targetManager) : DemoObject
     {
         public float HalfWidth = 0.5f;
@@ -332,19 +452,29 @@ internal sealed class DemoWindow : Window, IDisposable
     {
         public float Radius = 2f;
         public float SphereHeightOffset = 1f;
+        public int LatitudeSegments = 8;
+        public int LongitudeSegments = 16;
         public Vector4 Color = new(0.4f, 0.7f, 1f, 0.5f);
         public override string TypeName => "Sphere";
 
         public override void DrawUi()
         {
             ImGui.SliderFloat("Radius (m)", ref Radius, 0.1f, 30f);
-            ImGui.SliderFloat("Height offset (m)", ref SphereHeightOffset, 0f, 10f);
+            ImGui.SliderFloat("Height offset (m)", ref SphereHeightOffset, -10f, 10f);
+            ImGui.SliderInt("Latitude segments", ref LatitudeSegments, 3, (int)GBufferDrawList.MaxSphereLatitudeSegments);
+            ImGui.SliderInt("Longitude segments", ref LongitudeSegments, 3, (int)GBufferDrawList.MaxSphereLongitudeSegments);
             ImGui.ColorEdit4("Color", ref Color);
         }
 
         public override void Draw(GBufferDrawList draw, float heightOffset)
         {
-            draw.AddSphere(Position + (Vector3.UnitY * (SphereHeightOffset + heightOffset)), Radius, ToU32(Color));
+            draw.AddSphere(
+                Position + (Vector3.UnitY * (SphereHeightOffset + heightOffset)),
+                Radius,
+                ToU32(Color),
+                (uint)LatitudeSegments,
+                (uint)LongitudeSegments
+            );
         }
     }
 
