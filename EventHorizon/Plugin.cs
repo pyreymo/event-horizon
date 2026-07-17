@@ -107,6 +107,9 @@ public sealed class Plugin : IDalamudPlugin
     private WorldDotOverlay WorldDotOverlay { get; init; }
     private SceneVisibilityController SceneVisibilityController { get; init; }
     private GBufferProbeController GBufferProbeController { get; init; }
+#if DEBUG
+    private TransparentDrawCorrelationTracer TransparentDrawCorrelationTracer { get; init; }
+#endif
     private DtrBar DtrStatusBar { get; init; }
     private DtrBackground DtrBackground { get; init; }
     private TargetingMarkerController TargetingMarkerController { get; init; }
@@ -148,6 +151,9 @@ public sealed class Plugin : IDalamudPlugin
             WorldDotOverlay = new WorldDotOverlay(GameGui, PluginInterface);
             SceneVisibilityController = new SceneVisibilityController(GameInteropProvider, Configuration);
             UnderpaintRenderer = InitializeUnderpaint();
+#if DEBUG
+            TransparentDrawCorrelationTracer = new TransparentDrawCorrelationTracer(GameInteropProvider, TargetManager, UnderpaintRenderer);
+#endif
             GBufferProbeController = new GBufferProbeController(Configuration, UnderpaintRenderer);
             Culling = new CullingController(
                 GameInteropProvider,
@@ -171,6 +177,9 @@ public sealed class Plugin : IDalamudPlugin
             ConfigWindow = new ConfigWindow(this, DataManager, playerPreviewPanel, IsPlayerPreviewWindowOpen, TogglePlayerPreviewWindow);
             PlayerPreviewWindow = new PlayerPreviewWindow(playerPreviewPanel, OpenMainUi);
             UnderpaintDemoWindow = new DemoWindow(UnderpaintRenderer, ObjectTable, TargetManager, TextureProvider);
+#if DEBUG
+            UnderpaintDemoWindow.AttachTransparentDrawTracer(TransparentDrawCorrelationTracer);
+#endif
             DtrStatusBar = new DtrBar(DtrBar, Configuration, Culling.GetStatus, SetPlayerHidingEnabled, ToggleConfigUi);
             DtrBackground = new DtrBackground(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
             TargetingMarkerController = new TargetingMarkerController(
@@ -276,6 +285,9 @@ public sealed class Plugin : IDalamudPlugin
 
         windowSystem.RemoveAllWindows();
         UnderpaintDemoWindow?.Dispose();
+#if DEBUG
+        TransparentDrawCorrelationTracer?.Dispose();
+#endif
         SceneVisibilityController?.Dispose();
         GBufferProbeController?.Dispose();
         UnderpaintRenderer?.Dispose();
@@ -431,6 +443,9 @@ public sealed class Plugin : IDalamudPlugin
 
         SceneVisibilityController.Update();
         GBufferProbeController.Update();
+#if DEBUG
+        TransparentDrawCorrelationTracer.Update();
+#endif
         DtrStatusBar.Update();
         PlayerPreviewHighlighter.Update();
 

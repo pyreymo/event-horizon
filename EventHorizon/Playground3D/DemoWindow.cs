@@ -5,6 +5,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
+using EventHorizon.Integration.Debug;
 using Underpaint;
 
 namespace EventHorizon.Playground3D;
@@ -36,6 +37,9 @@ internal sealed class DemoWindow : Window, IDisposable
     private int diagnosticOpaqueDepthBias;
     private bool diagnosticForceOpaqueAlpha = true;
     private NativeDrawSnapshot? diagnosticSnapshot;
+#if DEBUG
+    private TransparentDrawCorrelationTracer? transparentDrawTracer;
+#endif
     private bool boundaryStabilityTestEnabled;
     private Vector3 boundaryStabilityTestPosition;
     private float boundaryStabilityTestRotation;
@@ -68,6 +72,10 @@ internal sealed class DemoWindow : Window, IDisposable
         icon?.Dispose();
         icon = null;
     }
+
+#if DEBUG
+    public void AttachTransparentDrawTracer(TransparentDrawCorrelationTracer tracer) => transparentDrawTracer = tracer;
+#endif
 
     public void StopWorldDraw()
     {
@@ -103,6 +111,9 @@ internal sealed class DemoWindow : Window, IDisposable
         else
         {
             DrawDiagnostics();
+#if DEBUG
+            DrawTransparentCorrelationUi();
+#endif
         }
 
         ImGui.SliderFloat("Height offset (m)", ref heightOffset, -10f, 10f, "%.3f");
@@ -156,6 +167,27 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.TextUnformatted($"Spawned objects ({demoObjects.Count}):");
         DrawObjectList(position);
     }
+
+#if DEBUG
+    private void DrawTransparentCorrelationUi()
+    {
+        if (transparentDrawTracer == null || !ImGui.CollapsingHeader("Transparent draw correlation"))
+            return;
+
+        ImGui.TextWrapped(transparentDrawTracer.DonorSummary);
+        ImGui.TextDisabled(transparentDrawTracer.State);
+        if (!transparentDrawTracer.IsCapturing)
+        {
+            if (ImGui.Button("Arm transparent capture"))
+                transparentDrawTracer.Arm();
+        }
+        else if (ImGui.Button("Cancel transparent capture"))
+        {
+            transparentDrawTracer.Cancel();
+        }
+        ImGui.TextDisabled("Targets the currently selected PC; capture stops automatically.");
+    }
+#endif
 
     public void DrawWorld()
     {

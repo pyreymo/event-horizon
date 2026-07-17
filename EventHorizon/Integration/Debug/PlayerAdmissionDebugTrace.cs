@@ -34,6 +34,8 @@ internal static unsafe class PlayerAdmissionDebugTrace
     private static bool? LastPlayerLoaded;
     private static string? LastCullingMode;
 
+    internal static event Action<nint, nint>? RenderModelObserved;
+
     private delegate void OnRenderModelDelegate(CharacterBase* characterBase, Model* model);
 #endif
 
@@ -432,6 +434,7 @@ internal static unsafe class PlayerAdmissionDebugTrace
     {
         try
         {
+            RenderModelObserved?.Invoke((nint)characterBase, (nint)model);
             if (characterBase != null && RenderStates.TryGetValue((nint)characterBase, out var state))
             {
                 var total = Interlocked.Increment(ref state.CallbackCount);
@@ -589,6 +592,7 @@ internal static unsafe class PlayerAdmissionDebugTrace
         CreatingCharacterBase = null;
         CreatedCharacterBase = null;
         OnRenderModelHook = null;
+        RenderModelObserved = null;
     }
 
     private sealed class TrackedPlayerState

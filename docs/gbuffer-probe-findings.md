@@ -2,6 +2,8 @@
 
 日期：2026-07-16
 
+> 状态：已冻结。本文记录的手写 Stage A/C 近似后端只保留为实验对照；除重复执行、矩阵错位、资源生命周期或 pass 误识别等会污染结论的问题外，不再扩展材质、排序、motion vector 或时域补偿能力。后续主线见 [native-transparent-submission-plan.md](native-transparent-submission-plan.md)。
+
 ## 探针方法
 
 探针通过 hook 以下 `ID3D11DeviceContext` 调用跟踪渲染区段：
