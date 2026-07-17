@@ -36,10 +36,14 @@ internal sealed class DemoWindow : Window, IDisposable
     private int diagnosticOpaqueDepthBias;
     private bool diagnosticForceOpaqueAlpha = true;
     private NativeDrawSnapshot? diagnosticSnapshot;
+    private bool boundaryStabilityTestEnabled;
+    private Vector3 boundaryStabilityTestPosition;
+    private float boundaryStabilityTestRotation;
     private IDalamudTextureWrap? icon;
 
     public bool WorldDrawEnabled;
-    public bool UsesOpaqueBackend => opaquePublished || demoObjects.Any(demoObject => demoObject.DrawsTo(GBufferTarget.Opaque));
+    public bool UsesOpaqueBackend =>
+        opaquePublished || boundaryStabilityTestEnabled || demoObjects.Any(demoObject => demoObject.DrawsTo(GBufferTarget.Opaque));
 
     public DemoWindow(UnderpaintRenderer? underpaint, IObjectTable objects, ITargetManager targetManager, ITextureProvider textureProvider)
         : base("Underpaint Demo")
@@ -102,6 +106,7 @@ internal sealed class DemoWindow : Window, IDisposable
         }
 
         ImGui.SliderFloat("Height offset (m)", ref heightOffset, -10f, 10f, "%.3f");
+        DrawBoundaryStabilityTestUi();
         if (ImGui.CollapsingHeader("Semitransparent lighting"))
         {
             ImGui.SliderFloat("Ambient", ref semitransparentAmbient, 0f, 2f, "%.2f");
@@ -176,11 +181,35 @@ internal sealed class DemoWindow : Window, IDisposable
         }
 
         icon ??= textureProvider.GetFromGameIcon(61241).GetWrapOrEmpty();
-        underpaint.Diagnostics.OpaqueJitterPixels = diagnosticJitterPixels;
-        underpaint.Diagnostics.OpaqueDepthBias = diagnosticOpaqueDepthBias;
-        underpaint.Diagnostics.ForceOpaqueAlpha = diagnosticForceOpaqueAlpha;
+        underpaint.Diagnostics.OpaqueJitterPixels = boundaryStabilityTestEnabled ? Vector2.Zero : diagnosticJitterPixels;
+        underpaint.Diagnostics.OpaqueDepthBias = boundaryStabilityTestEnabled ? 0 : diagnosticOpaqueDepthBias;
+        underpaint.Diagnostics.ForceOpaqueAlpha = boundaryStabilityTestEnabled || diagnosticForceOpaqueAlpha;
         PublishOpaque();
         PublishSemitransparent();
+    }
+
+    private void DrawBoundaryStabilityTestUi()
+    {
+        var wasEnabled = boundaryStabilityTestEnabled;
+        if (ImGui.Checkbox("Opaque boundary A/B test", ref boundaryStabilityTestEnabled))
+        {
+            if (!wasEnabled && boundaryStabilityTestEnabled && objects.LocalPlayer is { } player)
+            {
+                boundaryStabilityTestPosition = player.Position;
+                boundaryStabilityTestRotation = player.Rotation;
+            }
+        }
+
+        if (!boundaryStabilityTestEnabled)
+            return;
+
+        ImGui.TextDisabled("A: vertical quad intersecting native ground (depth edge)");
+        ImGui.TextDisabled("B: elevated coplanar quads (hard color edge)");
+        if (ImGui.Button("Move A/B test to player") && objects.LocalPlayer is { } currentPlayer)
+        {
+            boundaryStabilityTestPosition = currentPlayer.Position;
+            boundaryStabilityTestRotation = currentPlayer.Rotation;
+        }
     }
 
     private void DrawTimingPlot()
@@ -360,7 +389,7 @@ internal sealed class DemoWindow : Window, IDisposable
 
     private void PublishOpaque()
     {
-        var hasObjects = demoObjects.Any(demoObject => demoObject.DrawsTo(GBufferTarget.Opaque));
+        var hasObjects = boundaryStabilityTestEnabled || demoObjects.Any(demoObject => demoObject.DrawsTo(GBufferTarget.Opaque));
         if (!hasObjects)
         {
             if (opaquePublished)
@@ -377,7 +406,51 @@ internal sealed class DemoWindow : Window, IDisposable
             if (demoObject.DrawsTo(GBufferTarget.Opaque))
                 demoObject.Draw(draw, heightOffset);
         }
+        if (boundaryStabilityTestEnabled)
+            DrawBoundaryStabilityTest(draw);
         opaquePublished = true;
+    }
+
+    private void DrawBoundaryStabilityTest(GBufferDrawList draw)
+    {
+        const float distance = 5f;
+        const float sideOffset = 2.5f;
+        const float halfSize = 1.5f;
+        const float elevatedHeight = 1f;
+
+        var up = Vector3.UnitY;
+        var forward = new Vector3(MathF.Sin(boundaryStabilityTestRotation), 0f, MathF.Cos(boundaryStabilityTestRotation));
+        var right = Vector3.Normalize(Vector3.Cross(forward, up));
+        var origin = boundaryStabilityTestPosition + forward * distance;
+
+        // A: one vertical quad crossing the player's ground height. Its lower boundary is owned
+        // by the native depth buffer rather than by custom color or clip logic.
+        var depthCenter = origin - right * sideOffset;
+        draw.AddQuadFilled(
+            depthCenter - right * halfSize - up * halfSize,
+            depthCenter + right * halfSize - up * halfSize,
+            depthCenter + right * halfSize + up * halfSize,
+            depthCenter - right * halfSize + up * halfSize,
+            0xFF40D0FF
+        );
+
+        // B: two adjacent horizontal quads at exactly the same elevated world height. Their
+        // shared edge is a pure color discontinuity and never competes with native scene depth.
+        var colorCenter = origin + right * sideOffset + up * elevatedHeight;
+        draw.AddQuadFilled(
+            colorCenter - right * halfSize - forward * halfSize,
+            colorCenter - forward * halfSize,
+            colorCenter + forward * halfSize,
+            colorCenter - right * halfSize + forward * halfSize,
+            0xFFFF5050
+        );
+        draw.AddQuadFilled(
+            colorCenter - forward * halfSize,
+            colorCenter + right * halfSize - forward * halfSize,
+            colorCenter + right * halfSize + forward * halfSize,
+            colorCenter + forward * halfSize,
+            0xFF50A0FF
+        );
     }
 
     private void PublishSemitransparent()
