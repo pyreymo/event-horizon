@@ -33,6 +33,7 @@ internal sealed class DemoWindow : Window, IDisposable
     private bool opaquePublished;
     private bool semitransparentPublished;
     private Vector2 diagnosticJitterPixels;
+    private int diagnosticOpaqueDepthBias;
     private bool diagnosticForceOpaqueAlpha = true;
     private NativeDrawSnapshot? diagnosticSnapshot;
     private IDalamudTextureWrap? icon;
@@ -72,6 +73,7 @@ internal sealed class DemoWindow : Window, IDisposable
         }
 
         underpaint.Diagnostics.OpaqueJitterPixels = Vector2.Zero;
+        underpaint.Diagnostics.OpaqueDepthBias = 0;
         underpaint.Diagnostics.ForceOpaqueAlpha = false;
 
         if (opaquePublished)
@@ -175,6 +177,7 @@ internal sealed class DemoWindow : Window, IDisposable
 
         icon ??= textureProvider.GetFromGameIcon(61241).GetWrapOrEmpty();
         underpaint.Diagnostics.OpaqueJitterPixels = diagnosticJitterPixels;
+        underpaint.Diagnostics.OpaqueDepthBias = diagnosticOpaqueDepthBias;
         underpaint.Diagnostics.ForceOpaqueAlpha = diagnosticForceOpaqueAlpha;
         PublishOpaque();
         PublishSemitransparent();
@@ -207,8 +210,10 @@ internal sealed class DemoWindow : Window, IDisposable
 
         ImGui.Checkbox("Force opaque alpha = 1", ref diagnosticForceOpaqueAlpha);
         ImGui.SliderFloat2("Jitter pixels", ref diagnosticJitterPixels, -1f, 1f, "%.3f");
+        ImGui.SliderInt("Opaque depth bias", ref diagnosticOpaqueDepthBias, 0, 64);
         underpaint.Diagnostics.ForceOpaqueAlpha = diagnosticForceOpaqueAlpha;
         underpaint.Diagnostics.OpaqueJitterPixels = diagnosticJitterPixels;
+        underpaint.Diagnostics.OpaqueDepthBias = diagnosticOpaqueDepthBias;
 
         if (ImGui.Button("Capture next native opaque draw"))
             underpaint.Diagnostics.RequestOpaqueDrawSnapshot();
