@@ -168,25 +168,29 @@ builder 有两个互斥分支：
 
 下一轮静态分析优先从已经发现的非 skinned 创建路径、`Model+0x38` transform object 和 geometry resource ownership开始；不再扩展衣服的 Skeleton/BoneList分析，不恢复通用 tracer，不 patch command packet，也不跨帧保存临时 native pointer。
 
-### 非蒙皮 Model 工厂与 geometry 边界
+### Render::Model wrapper、BgObject 分流与失败探针纠正
 
-FFCS 给出 `Model.ModelDrawInit` 后，IDA 已将非蒙皮创建路径收敛到两个原生入口：
+FFCS 给出 `Model.ModelDrawInit` 后，IDA 确认以下底层行为：
 
-- `ffxiv_dx11.exe+0x2B86F0` 分配 0x180-byte `Model`，调用构造函数和 `ModelDrawInit`；初始化失败时走原生析构/引用计数路径。
+- `ffxiv_dx11.exe+0x2B86F0` 分配 0x180-byte `Model`，调用构造函数和 `ModelDrawInit`，然后接管调用者提供的 `Model+0x38` owner；初始化失败时走析构/引用计数路径。
 - `ModelDrawInit`（`ffxiv_dx11.exe+0x273CE0`）对 `ModelResourceHandle` 增加引用，建立 Materials 数组，并从 mdl data 初始化 `Model+0x88` 的 per-geometry draw-count表及其他模型状态。
-- 工厂随后对调用者传入的 transform/history对象增加引用，释放旧 `Model+0x38` owner，再把新对象挂到 `Model+0x38`。因此 Model外壳和 transform owner都有可复用的原生构造/释放协议，不需要浅复制长期对象。
+- `ffxiv_dx11.exe+0x2B8320` 才是 0xB0-byte transform/history owner 的创建函数；它初始化 position/rotation/scale、previous/history缓存并创建 128-byte constant buffer。
 
-builder 对 geometry 的最终读取同时跨越三处：0x24-byte geometry entry提供 material、palette、start/base等字段；`Model+0x88`表提供当前geometry的 draw count；`ModelResourceHandle+0x190`表提供 per-geometry原生 binding对象。后者被直接写入 graphics context，说明 Underpaint 的裸 `ID3D11Buffer*` 不能直接替代它。当前唯一未确认的是该 binding对象如何拥有/引用 vertex buffer、index buffer、layout和stride，以及游戏是否已有可调用的创建函数。
+但 `0x2B86F0` 没有任何已确认的代码调用者、虚表或函数表引用，IDA只见 PE unwind/CFG元数据。它只能称为 `Render::Model` 初始化 wrapper，不能称为安全公共工厂，也不能据此判断 Scene对象类别。
 
-为避免继续静态猜 offset，Debug UI新增一次性 `Capture native static carrier`：显式 arm后只选择首个 `Model+0x38 != 0`、`Skeleton == null`、`BoneList == null` 的 builder输入，并在原hook内同步复制：
+BgObject 路线已经单独闭环：其实际 `UpdateRender`（`ffxiv_dx11.exe+0x452E50`）读取 `BgObject+0x90` 的 `ModelResourceHandle`，并调用 `Manager.BGInstancingRenderer` 的虚函数创建实例及其他 BG专用render object。它不创建这里讨论的 `Render::Model`，也不经过 `0x281DD0`。因此旅馆、城市中的建筑和摆件不会帮助原 ModelRenderer探针命中 `Model+0x38`。
 
-- transform owner、world constant buffer、current/previous/history数据hash和qword；
-- draw-count表、当前geometry count；
-- geometry binding表、当前binding地址和有限hash；
-- geometry entry的index count、material、palette和base vertex字段；
-- builder生成的command、排序后consumer和executor状态。
+builder 对 geometry 的最终读取同时跨越三处：0x24-byte geometry entry提供 material、palette、start/base等字段；`Model+0x88`表提供当前geometry的 draw count；`ModelResourceHandle+0x190`表提供 per-geometry原生 binding对象。后者被直接写入 graphics context，说明 Underpaint 的裸 `ID3D11Buffer*` 不能直接替代它。该 binding对象如何拥有/引用 vertex buffer、index buffer、layout和stride仍未确认。
 
-捕获一秒后自动结束；不修改原生对象，不重复提交，不保存供下一帧异步解引用的model/transform/resource指针。下一次实机日志的唯一任务是确认一个真实非蒙皮载体的这些字段能否形成稳定、完整的创建模板。
+先前一次性 `Capture native static carrier` 同时犯了两个错误：把 BgObject静态场景当作 ModelRenderer输入来源；并在 builder只检查 `Model+0x38` 的情况下，额外要求 `Skeleton == null && BoneList == null`。两次旅馆/海都实测均得到 `no-static-carrier-found`，且旧日志没有记录总调用数和拒绝原因，不能区分“没有进入builder”和“被额外条件过滤”。该探针已删除。
+
+替代探针 `Profile ModelRenderer inputs` 显式 arm后只运行两秒并无条件完成。它不选择场景对象、不捕获command，也不改变提交，只统计所有真实 `0x281DD0` 输入的：
+
+- builder调用总数和唯一 Model数；
+- `Model+0x38`、Skeleton、BoneList八种组合的命中数；
+- 最多16个 `Model+0x38 != 0` 候选的 Model/resource/geometry/slot、world CB和同步复制的transform数据。
+
+该结果会直接裁决 `Model+0x38` 是否为当前运行时的真实 ModelRenderer分支。若两秒内有大量 builder调用但 transform组合始终为零，就不再以该分支作为 Underpaint载体依据；若存在候选，再对其实际对象类别和生命周期做一次定点追踪。
 
 ## 新运行时探针
 
@@ -210,7 +214,7 @@ builder 对 geometry 的最终读取同时跨越三处：0x24-byte geometry entr
 5. `/eh 3d` 打开 Underpaint Demo，展开 `Transparent draw correlation`。
 6. 选中 donor，确认摘要显示 `slot 1` 且 material/texture 数量合理；如需只读基线，先点 `Clear EventHorizon logs`，再点 `Arm transparent capture`。
 7. `Arm one native duplicate` 会执行一次真实的额外原生提交，只用于复现实验，不应在普通游戏期间启用。
-8. 当前透明衣服重复提交验证已经完成，不再点击 duplicate。点击一次 `Capture native static carrier`，保持普通场景一至两秒；状态显示 Complete 后提供日志。无需选择衣服 donor；若 15 秒内显示 `no-static-carrier-found`，换到有场景摆件或其他静态模型的区域再试一次。
+8. 当前透明衣服重复提交验证已经完成，不再点击 duplicate。点击一次 `Profile ModelRenderer inputs`，等待两秒显示 Complete 后提供日志。无需选择 donor、换地图或寻找静态摆件。
 
 下文按采集轮次保留了当时的待验证问题；最新结论和下一步见文末。
 
@@ -331,4 +335,4 @@ Underpaint-owned geometry buffers / draw range
 安全的同帧 resource lifetime 与释放边界
 ```
 
-下一步不是继续向上追当前衣服的 render job。Model工厂和独立 transform owner的静态边界已经找到；当前只等待一次 `Capture native static carrier` 实机结果，确认 `ModelResourceHandle+0x190` geometry binding对象的真实形状和executor绑定结果。拿到日志后优先定位该 binding的原生创建/释放函数，再做“原生 Model/transform/material + Underpaint geometry”的一次性提交。只有当 binding无法独立拥有插件geometry，或其创建必须篡改共享资源时，才考虑终止整个原生后端。仍然不能用 command packet patching、临时改共享对象后恢复、或跨帧持有当前 hook 临时指针绕过所有权问题。
+下一步不是继续寻找 BgObject donor。当前只等待一次 `Profile ModelRenderer inputs` 结果：先确认 `Model+0x38` 是否为真实在用分支，再决定是否追其 owner并构造 ModelRenderer载体。若该分支在实际输入中不存在，则回到 Underpaint主要需求，比较 BGInstancingRenderer和更低层 geometry submission中哪个真正允许独立 geometry ownership；不再围绕一个无调用证据的 wrapper设计后端。仍然不能用 command packet patching、临时改共享对象后恢复、或跨帧持有当前 hook临时指针绕过所有权问题。

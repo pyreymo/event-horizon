@@ -24,7 +24,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
     private long captureStarted;
     private string state = "Idle";
     private bool capturing;
-    private bool capturingStaticCarrier;
+    private bool capturingModelInputProfile;
     private bool disposed;
 
     public TransparentDrawCorrelationTracer(
@@ -75,18 +75,18 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         Arm(true);
     }
 
-    public void ArmStaticCarrier()
+    public void ArmModelInputProfile()
     {
         lock (stateLock)
         {
             donor = null;
             captureStarted = Stopwatch.GetTimestamp();
-            state = "Capturing one native non-skinned carrier";
+            state = "Profiling ModelRenderer inputs for two seconds";
             capturing = true;
-            capturingStaticCarrier = true;
+            capturingModelInputProfile = true;
         }
-        submissionProbe.ArmStaticCarrier();
-        DebugFileLog.Information(LogSource, "Static carrier capture armed");
+        submissionProbe.ArmModelInputProfile();
+        DebugFileLog.Information(LogSource, "Model input profile armed");
     }
 
     private void Arm(bool duplicateMainSubmission)
@@ -112,7 +112,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
                 ? "Capturing one native duplicate (Slot 1 / Material 2 / charactertransparency)"
                 : "Capturing material submission (Slot 1 / Material 2 / charactertransparency)";
             capturing = true;
-            capturingStaticCarrier = false;
+            capturingModelInputProfile = false;
         }
         submissionProbe.Arm(snapshot.Model.Model, duplicateMainSubmission);
         underpaint.Diagnostics.BeginTransparentDrawCapture(128, 4);
@@ -127,7 +127,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             if (!capturing)
                 return;
             capturing = false;
-            capturingStaticCarrier = false;
+            capturingModelInputProfile = false;
             state = $"Cancelled: {reason}";
         }
         underpaint?.Diagnostics.CancelTransparentDrawCapture(reason);
@@ -139,23 +139,21 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
     {
         DonorSnapshot? currentDonor;
         long started;
-        bool staticCarrier;
+        bool modelInputProfile;
         lock (stateLock)
         {
             if (!capturing)
                 return;
             currentDonor = donor;
             started = captureStarted;
-            staticCarrier = capturingStaticCarrier;
+            modelInputProfile = capturingModelInputProfile;
         }
 
-        if (staticCarrier)
+        if (modelInputProfile)
         {
             var elapsed = Stopwatch.GetElapsedTime(started);
-            if (submissionProbe.HasStaticCarrierCandidate && elapsed >= TimeSpan.FromSeconds(1))
-                CompleteStaticCarrier();
-            else if (elapsed >= CaptureTimeout)
-                Cancel("no-static-carrier-found");
+            if (elapsed >= TimeSpan.FromSeconds(2))
+                CompleteModelInputProfile();
             return;
         }
 
@@ -191,7 +189,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         {
             currentDonor = donor;
             capturing = false;
-            capturingStaticCarrier = false;
+            capturingModelInputProfile = false;
             state =
                 $"Complete: {capture.Draws.Count} draws, {submissionEvents.Count} builds, {submissionCapture.Executions.Count} executed commands ({capture.Reason})";
         }
@@ -240,29 +238,45 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         }
     }
 
-    private void CompleteStaticCarrier()
+    private void CompleteModelInputProfile()
     {
-        var submissionCapture = submissionProbe.StopAndTake();
+        var profile = submissionProbe.StopAndTakeModelInputProfile();
         lock (stateLock)
         {
             capturing = false;
-            capturingStaticCarrier = false;
-            state = $"Complete: {submissionCapture.Builds.Count} carrier builds, {submissionCapture.Executions.Count} executed commands";
+            capturingModelInputProfile = false;
+            state = $"Complete: {profile.Calls} calls, {profile.UniqueModels} models, {profile.Candidates.Count} with Model+0x38";
         }
 
-        foreach (var submissionEvent in submissionCapture.Builds)
-            LogSubmission(submissionEvent);
-        foreach (var consumption in submissionCapture.Consumptions)
-            LogCommandConsumption(consumption);
-        foreach (var execution in submissionCapture.Executions)
-            LogCommandExecution(execution);
         DebugFileLog.Information(
             LogSource,
-            "Static carrier capture complete Builds={Builds} CommandsConsumed={CommandsConsumed} CommandsExecuted={CommandsExecuted}",
-            submissionCapture.Builds.Count,
-            submissionCapture.Consumptions.Count,
-            submissionCapture.Executions.Count
+            "ModelInputProfile Calls={Calls} UniqueModels={UniqueModels} Combinations={Combinations} TransformCandidates={TransformCandidates}",
+            profile.Calls,
+            profile.UniqueModels,
+            string.Join(
+                ',',
+                profile.Combinations.Select((count, flags) => $"T{flags & 1}/S{(flags >> 1) & 1}/B{(flags >> 2) & 1}:{count}")
+            ),
+            profile.Candidates.Count
         );
+        foreach (var candidate in profile.Candidates)
+        {
+            DebugFileLog.Debug(
+                LogSource,
+                "ModelInputCandidate Thread={Thread} Model=0x{Model:X} ModelResource=0x{ModelResource:X} GeometryIndex={GeometryIndex} Slot={Slot} Transform=0x{Transform:X} WorldCB=0x{WorldCB:X} Skeleton=0x{Skeleton:X} BoneList=0x{BoneList:X} TransformHash=0x{TransformHash:X16} TransformData={TransformData}",
+                candidate.ThreadId,
+                candidate.Model.ToInt64(),
+                candidate.ModelResource.ToInt64(),
+                candidate.GeometryIndex,
+                candidate.SlotIndex,
+                candidate.Transform.ToInt64(),
+                candidate.WorldConstantBuffer.ToInt64(),
+                candidate.Skeleton.ToInt64(),
+                candidate.BoneList.ToInt64(),
+                candidate.TransformHash,
+                candidate.TransformQwords
+            );
+        }
     }
 
     private DonorSnapshot? TryCaptureDonor()
@@ -446,27 +460,6 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             item.Before.SortKey,
             item.After.SortKey
         );
-        if (item.StaticCarrier is { } carrier)
-        {
-            DebugFileLog.Debug(
-                LogSource,
-                "StaticCarrier Cycle={Cycle} Transform=0x{Transform:X} WorldCB=0x{WorldCB:X} TransformHash=0x{TransformHash:X16} TransformData={TransformData} DrawCountTable=0x{DrawCountTable:X} DrawCount={DrawCount} GeometryBindingTable=0x{GeometryBindingTable:X} GeometryBinding=0x{GeometryBinding:X} GeometryBindingHash=0x{GeometryBindingHash:X16} EntryIndexCount={EntryIndexCount} EntryMaterialIndex={EntryMaterialIndex} EntryPaletteIndex={EntryPaletteIndex} EntryBaseVertex={EntryBaseVertex}",
-                item.BuildCycle,
-                carrier.Transform.ToInt64(),
-                carrier.WorldConstantBuffer.ToInt64(),
-                carrier.TransformHash ?? 0,
-                carrier.TransformQwords,
-                carrier.DrawCountTable.ToInt64(),
-                carrier.DrawCount,
-                carrier.GeometryBindingTable.ToInt64(),
-                carrier.GeometryBinding.ToInt64(),
-                carrier.GeometryBindingHash ?? 0,
-                carrier.EntryIndexCount,
-                carrier.EntryMaterialIndex,
-                carrier.EntryPaletteIndex,
-                carrier.EntryBaseVertex
-            );
-        }
         DebugFileLog.Debug(
             LogSource,
             "SubmissionArena Cycle={Cycle} CommandBase=0x{CommandBaseBefore:X}->0x{CommandBaseAfter:X} CommandUsed={CommandUsedBefore}->{CommandUsedAfter} NewCommands=0x{CommandAddress:X}/{CommandSize}/0x{CommandHash:X16}/{CommandStatus} PayloadBase=0x{PayloadBaseBefore:X}->0x{PayloadBaseAfter:X} PayloadUsed={PayloadUsedBefore}->{PayloadUsedAfter} NewPayload=0x{PayloadAddress:X}/{PayloadSize}/0x{PayloadHash:X16}/{PayloadStatus} Allocations={Allocations}",

@@ -184,8 +184,8 @@ internal sealed class DemoWindow : Window, IDisposable
             ImGui.SameLine();
             if (ImGui.Button("Arm one native duplicate"))
                 transparentDrawTracer.ArmNativeDuplicate();
-            if (ImGui.Button("Capture native static carrier"))
-                transparentDrawTracer.ArmStaticCarrier();
+            if (ImGui.Button("Profile ModelRenderer inputs"))
+                transparentDrawTracer.ArmModelInputProfile();
         }
         else if (ImGui.Button("Cancel transparent capture"))
         {
@@ -198,7 +198,7 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.EndDisabled();
         if (clearDebugLogState.Length != 0)
             ImGui.TextDisabled(clearDebugLogState);
-        ImGui.TextDisabled("Transparent probes target slot 1/material 2; static carrier captures the first independent non-skinned Model.");
+        ImGui.TextDisabled("Input profile runs for two seconds and records Model+0x38/Skeleton/BoneList combinations.");
     }
 #endif
 

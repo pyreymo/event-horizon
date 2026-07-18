@@ -46,10 +46,13 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
     private readonly List<CommandConsumptionSnapshot> consumptionEvents = [];
     private readonly List<CommandExecutionSnapshot> executionEvents = [];
     private readonly ConcurrentDictionary<nint, ProducedCommandIdentity> producedCommands = new();
+    private readonly ConcurrentDictionary<nint, byte> profiledModels = new();
+    private readonly ConcurrentDictionary<nint, ModelInputProfileCandidate> profileCandidates = new();
+    private readonly long[] modelInputCombinations = new long[8];
     private nint targetModel;
     private int duplicateMainSubmissionArmed;
-    private int staticCarrierArmed;
-    private int staticCarrierCaptured;
+    private int modelInputProfileArmed;
+    private long modelInputCount;
     private long nextBuildCycle;
     private bool disposed;
 
@@ -123,13 +126,12 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             executionEvents.Clear();
         }
         producedCommands.Clear();
-        Interlocked.Exchange(ref staticCarrierArmed, 0);
-        Interlocked.Exchange(ref staticCarrierCaptured, 0);
+        Interlocked.Exchange(ref modelInputProfileArmed, 0);
         Interlocked.Exchange(ref duplicateMainSubmissionArmed, duplicateMainSubmission ? 1 : 0);
         Interlocked.Exchange(ref targetModel, model);
     }
 
-    public void ArmStaticCarrier()
+    public void ArmModelInputProfile()
     {
         lock (stateLock)
         {
@@ -138,20 +140,35 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             executionEvents.Clear();
         }
         producedCommands.Clear();
+        profiledModels.Clear();
+        profileCandidates.Clear();
+        Array.Clear(modelInputCombinations);
         Interlocked.Exchange(ref duplicateMainSubmissionArmed, 0);
-        Interlocked.Exchange(ref staticCarrierCaptured, 0);
+        Interlocked.Exchange(ref modelInputCount, 0);
         Interlocked.Exchange(ref targetModel, 0);
-        Interlocked.Exchange(ref staticCarrierArmed, 1);
+        Interlocked.Exchange(ref modelInputProfileArmed, 1);
     }
 
-    public bool HasStaticCarrierCandidate => Interlocked.CompareExchange(ref staticCarrierCaptured, 0, 0) != 0;
+    public ModelInputProfileSnapshot StopAndTakeModelInputProfile()
+    {
+        Interlocked.Exchange(ref modelInputProfileArmed, 0);
+        return new ModelInputProfileSnapshot(
+            Interlocked.Read(ref modelInputCount),
+            profiledModels.Count,
+            Enumerable
+                .Range(0, modelInputCombinations.Length)
+                .Select(index => Interlocked.Read(ref modelInputCombinations[index]))
+                .ToArray(),
+            profileCandidates.Values.OrderBy(candidate => candidate.Model).ToArray()
+        );
+    }
 
     public MaterialSubmissionProbeCapture StopAndTake()
     {
         lock (stateLock)
         {
             Interlocked.Exchange(ref targetModel, 0);
-            Interlocked.Exchange(ref staticCarrierArmed, 0);
+            Interlocked.Exchange(ref modelInputProfileArmed, 0);
             var result = new MaterialSubmissionProbeCapture(events.ToArray(), consumptionEvents.ToArray(), executionEvents.ToArray());
             events.Clear();
             consumptionEvents.Clear();
@@ -164,7 +181,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
     public void Stop()
     {
         Interlocked.Exchange(ref duplicateMainSubmissionArmed, 0);
-        Interlocked.Exchange(ref staticCarrierArmed, 0);
+        Interlocked.Exchange(ref modelInputProfileArmed, 0);
         Interlocked.Exchange(ref targetModel, 0);
     }
 
@@ -194,8 +211,8 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
         if (model == null || modelResource == null)
             return materialBuilderHook.Original(modelRenderer, param, modelResource, geometryIndex, flags);
 
-        var staticCarrierCapture = TrySelectStaticCarrier(model);
-        if (!staticCarrierCapture && !IsTargetModel(model))
+        ObserveModelInput(model, modelResource, geometryIndex);
+        if (!IsTargetModel(model))
             return materialBuilderHook.Original(modelRenderer, param, modelResource, geometryIndex, flags);
 
         var geometryEntries = *(byte**)((byte*)modelResource + 0xE8);
@@ -210,7 +227,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
         }
 
         var material = model->Materials[materialIndex];
-        if (material == null || (!staticCarrierCapture && (materialIndex != TargetMaterialIndex || !IsCharacterTransparency(material))))
+        if (material == null || materialIndex != TargetMaterialIndex || !IsCharacterTransparency(material))
             return materialBuilderHook.Original(modelRenderer, param, modelResource, geometryIndex, flags);
 
         var threadLocals = ThreadLocals.ThreadLocalInstance();
@@ -229,8 +246,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             materialIndex,
             context,
             CaptureContext(context),
-            ComputeFnv1A64(new ReadOnlySpan<byte>(geometryEntry, GeometryEntrySize)),
-            staticCarrierCapture ? CaptureStaticCarrier(model, modelResource, geometryIndex, geometryEntry) : null
+            ComputeFnv1A64(new ReadOnlySpan<byte>(geometryEntry, GeometryEntrySize))
         );
 
         var previousScope = activeScope;
@@ -486,7 +502,6 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             (nint)scope.Material->MaterialResourceHandle,
             scope.MaterialIndex,
             GetShpkName(scope.Material),
-            scope.StaticCarrier,
             (nint)scope.Context,
             scope.Before,
             after,
@@ -506,54 +521,44 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
         lock (stateLock)
         {
             if (Interlocked.CompareExchange(ref targetModel, 0, 0) == (nint)scope.Model && events.Count < MaxEvents)
-            {
                 events.Add(probeEvent);
-                if (scope.StaticCarrier != null)
-                    Interlocked.Exchange(ref staticCarrierCaptured, 1);
-            }
         }
     }
 
     private bool IsTargetModel(Model* model) => Interlocked.CompareExchange(ref targetModel, 0, 0) == (nint)model;
 
-    private bool TrySelectStaticCarrier(Model* model)
+    private void ObserveModelInput(Model* model, ModelResourceHandle* modelResource, uint geometryIndex)
     {
-        if (Interlocked.CompareExchange(ref staticCarrierArmed, 0, 0) == 0)
-            return false;
+        if (Interlocked.CompareExchange(ref modelInputProfileArmed, 0, 0) == 0)
+            return;
 
         var transform = *(nint*)((byte*)model + 0x38);
-        if (transform == 0 || model->Skeleton != null || model->BoneList != null)
-            return false;
+        var hasSkeleton = model->Skeleton != null;
+        var hasBoneList = model->BoneList != null;
+        var combination = (transform != 0 ? 1 : 0) | (hasSkeleton ? 2 : 0) | (hasBoneList ? 4 : 0);
+        Interlocked.Increment(ref modelInputCount);
+        Interlocked.Increment(ref modelInputCombinations[combination]);
+        profiledModels.TryAdd((nint)model, 0);
 
-        var selected = Interlocked.CompareExchange(ref targetModel, (nint)model, 0);
-        return selected == 0 || selected == (nint)model;
-    }
+        if (transform == 0 || profileCandidates.Count >= 16)
+            return;
 
-    private static StaticCarrierSnapshot CaptureStaticCarrier(
-        Model* model,
-        ModelResourceHandle* modelResource,
-        uint geometryIndex,
-        byte* geometryEntry
-    )
-    {
-        var transform = *(byte**)((byte*)model + 0x38);
-        var drawCounts = *(int**)((byte*)model + 0x88);
-        var geometryBindings = *(nint**)((byte*)modelResource + 0x190);
-        var geometryBinding = geometryBindings == null ? 0 : geometryBindings[geometryIndex];
-        return new StaticCarrierSnapshot(
-            (nint)transform,
-            transform == null ? 0 : *(nint*)(transform + 0x20),
-            transform == null ? null : ComputeFnv1A64(new ReadOnlySpan<byte>(transform + 0x30, 0x70)),
-            transform == null ? "none" : FormatQwords(new ReadOnlySpan<byte>(transform + 0x30, 0x70).ToArray()),
-            (nint)drawCounts,
-            drawCounts == null ? 0 : drawCounts[geometryIndex],
-            (nint)geometryBindings,
-            geometryBinding,
-            geometryBinding == 0 ? null : HashRange((void*)geometryBinding, 0x40),
-            *(ushort*)geometryEntry,
-            *(ushort*)(geometryEntry + 8),
-            *(ushort*)(geometryEntry + 14),
-            *(int*)(geometryEntry + 16)
+        var transformBytes = new ReadOnlySpan<byte>((void*)(transform + 0x30), 0x70);
+        profileCandidates.TryAdd(
+            (nint)model,
+            new ModelInputProfileCandidate(
+                (nint)model,
+                (nint)modelResource,
+                geometryIndex,
+                model->SlotIndex,
+                transform,
+                *(nint*)(transform + 0x20),
+                (nint)model->Skeleton,
+                (nint)model->BoneList,
+                Environment.CurrentManagedThreadId,
+                ComputeFnv1A64(transformBytes),
+                FormatQwords(transformBytes.ToArray())
+            )
         );
     }
 
@@ -668,8 +673,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
         uint materialIndex,
         Context* context,
         ContextSnapshot before,
-        ulong geometryHash,
-        StaticCarrierSnapshot? staticCarrier
+        ulong geometryHash
     )
     {
         public long BuildCycle { get; } = buildCycle;
@@ -686,7 +690,6 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
         public Context* Context { get; } = context;
         public ContextSnapshot Before { get; } = before;
         public ulong GeometryHash { get; } = geometryHash;
-        public StaticCarrierSnapshot? StaticCarrier { get; } = staticCarrier;
         public List<PendingAllocation> Allocations { get; } = [];
         public List<ProducedCommandIdentity> PushedCommands { get; } = [];
         public MaterialObservation? MaterialObservation { get; set; }
@@ -723,7 +726,6 @@ internal sealed record MaterialSubmissionProbeEvent(
     nint MaterialResource,
     uint MaterialIndex,
     string ShpkName,
-    StaticCarrierSnapshot? StaticCarrier,
     nint Context,
     ContextSnapshot Before,
     ContextSnapshot After,
@@ -817,19 +819,24 @@ internal sealed record MaterialObservation(
     string AfterQwords
 );
 
-internal sealed record StaticCarrierSnapshot(
+internal sealed record ModelInputProfileSnapshot(
+    long Calls,
+    int UniqueModels,
+    IReadOnlyList<long> Combinations,
+    IReadOnlyList<ModelInputProfileCandidate> Candidates
+);
+
+internal sealed record ModelInputProfileCandidate(
+    nint Model,
+    nint ModelResource,
+    uint GeometryIndex,
+    uint SlotIndex,
     nint Transform,
     nint WorldConstantBuffer,
-    ulong? TransformHash,
-    string TransformQwords,
-    nint DrawCountTable,
-    int DrawCount,
-    nint GeometryBindingTable,
-    nint GeometryBinding,
-    ulong? GeometryBindingHash,
-    ushort EntryIndexCount,
-    ushort EntryMaterialIndex,
-    ushort EntryPaletteIndex,
-    int EntryBaseVertex
+    nint Skeleton,
+    nint BoneList,
+    int ThreadId,
+    ulong TransformHash,
+    string TransformQwords
 );
 #endif
