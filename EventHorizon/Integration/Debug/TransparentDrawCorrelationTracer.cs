@@ -1,7 +1,6 @@
 #if DEBUG
 using System.Diagnostics;
 using System.Threading;
-using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Render;
@@ -15,20 +14,17 @@ namespace EventHorizon.Integration.Debug;
 internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
 {
     private const string LogSource = "TransparentDrawCorrelation";
-    private const int MaxCallbackEvents = 1024;
+    private const int DonorSlot = 1;
     private static readonly TimeSpan CaptureTimeout = TimeSpan.FromSeconds(15);
     private readonly ITargetManager targetManager;
     private readonly UnderpaintRenderer? underpaint;
-    private readonly Hook<OnRenderMaterialDelegate> onRenderMaterialHook;
+    private readonly MaterialSubmissionContainerProbe submissionProbe;
     private readonly Lock stateLock = new();
-    private readonly List<RenderCallbackEvent> callbackEvents = [];
     private DonorSnapshot? donor;
     private long captureStarted;
     private string state = "Idle";
     private bool capturing;
     private bool disposed;
-
-    private delegate void OnRenderMaterialDelegate(CharacterBase* characterBase, ModelRenderer.OnRenderMaterialParams* param);
 
     public TransparentDrawCorrelationTracer(
         IGameInteropProvider gameInteropProvider,
@@ -38,12 +34,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
     {
         this.targetManager = targetManager;
         this.underpaint = underpaint;
-        onRenderMaterialHook = gameInteropProvider.HookFromAddress<OnRenderMaterialDelegate>(
-            (nint)CharacterBase.StaticVirtualTablePointer->OnRenderMaterial,
-            OnRenderMaterialDetour
-        );
-        onRenderMaterialHook.Enable();
-        PlayerAdmissionDebugTrace.RenderModelObserved += OnRenderModelObserved;
+        submissionProbe = new MaterialSubmissionContainerProbe(gameInteropProvider);
     }
 
     public string State
@@ -91,11 +82,11 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         lock (stateLock)
         {
             donor = snapshot;
-            callbackEvents.Clear();
             captureStarted = Stopwatch.GetTimestamp();
-            state = "Capturing (bounded to 4 Stage A frames / 128 draws / 15s)";
+            state = "Capturing material submission (Slot 1 / Material 2 / charactertransparency)";
             capturing = true;
         }
+        submissionProbe.Arm(snapshot.Model.Model);
         underpaint.Diagnostics.BeginTransparentDrawCapture(128, 4);
         LogDonor(snapshot);
         DebugFileLog.Information(LogSource, "Capture armed");
@@ -111,6 +102,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             state = $"Cancelled: {reason}";
         }
         underpaint?.Diagnostics.CancelTransparentDrawCapture(reason);
+        submissionProbe.Stop();
         DebugFileLog.Information(LogSource, "Capture cancelled: {Reason}", reason);
     }
 
@@ -146,40 +138,26 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             return;
         disposed = true;
         Cancel("dispose");
-        PlayerAdmissionDebugTrace.RenderModelObserved -= OnRenderModelObserved;
-        onRenderMaterialHook.Dispose();
+        submissionProbe.Dispose();
     }
 
     private void Complete(TransparentDrawCapture capture)
     {
         DonorSnapshot? currentDonor;
-        RenderCallbackEvent[] events;
+        MaterialSubmissionProbeEvent[] submissionEvents;
+        submissionEvents = submissionProbe.StopAndTake();
         lock (stateLock)
         {
             currentDonor = donor;
-            events = callbackEvents.ToArray();
             capturing = false;
-            state = $"Complete: {capture.Draws.Count} draws, {events.Length} callbacks ({capture.Reason})";
+            state = $"Complete: {capture.Draws.Count} draws, {submissionEvents.Length} submission builds ({capture.Reason})";
         }
 
         if (currentDonor == null)
             return;
 
-        foreach (var callbackEvent in events)
-        {
-            DebugFileLog.Debug(
-                LogSource,
-                "Callback Kind={Kind} Timestamp={Timestamp} Thread={Thread} Model=0x{Model:X} Slot={Slot} Material=0x{Material:X} MaterialIndex={MaterialIndex} MaterialResource=0x{MaterialResource:X}",
-                callbackEvent.Kind,
-                callbackEvent.Timestamp,
-                callbackEvent.ThreadId,
-                callbackEvent.Model.ToInt64(),
-                callbackEvent.Slot,
-                callbackEvent.Material.ToInt64(),
-                callbackEvent.MaterialIndex,
-                callbackEvent.MaterialResource.ToInt64()
-            );
-        }
+        foreach (var submissionEvent in submissionEvents)
+            LogSubmission(submissionEvent);
 
         foreach (var draw in capture.Draws)
             LogDraw(draw);
@@ -190,12 +168,12 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         );
         DebugFileLog.Information(
             LogSource,
-            "Capture complete Reason={Reason} StartedAt={StartedAt} CompletedAt={CompletedAt} Draws={Draws} Callbacks={Callbacks} Match={Match} Unique={Unique} Candidates={Candidates}",
+            "Capture complete Reason={Reason} StartedAt={StartedAt} CompletedAt={CompletedAt} Draws={Draws} SubmissionBuilds={SubmissionBuilds} Match={Match} Unique={Unique} Candidates={Candidates}",
             capture.Reason,
             capture.StartedAt,
             capture.CompletedAt,
             capture.Draws.Count,
-            events.Length,
+            submissionEvents.Length,
             match.Conclusion,
             match.IsUnique,
             match.Candidates.Count
@@ -213,79 +191,6 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         }
     }
 
-    private void OnRenderModelObserved(nint characterBaseAddress, nint modelAddress)
-    {
-        try
-        {
-            var characterBase = (CharacterBase*)characterBaseAddress;
-            var model = (RenderModel*)modelAddress;
-            if (IsCurrentDonor(characterBase))
-                AddCallback("OnRenderModel", characterBase, model, null, -1);
-        }
-        catch (Exception exception)
-        {
-            DebugFileLog.Error(LogSource, exception, "OnRenderModel observation failed");
-        }
-    }
-
-    private void OnRenderMaterialDetour(CharacterBase* characterBase, ModelRenderer.OnRenderMaterialParams* param)
-    {
-        try
-        {
-            if (IsCurrentDonor(characterBase) && param != null)
-            {
-                var model = param->Model;
-                var materialIndex = checked((int)param->MaterialIndex);
-                var material =
-                    model != null && materialIndex >= 0 && materialIndex < model->MaterialCount ? model->Materials[materialIndex] : null;
-                AddCallback("OnRenderMaterial", characterBase, model, material, materialIndex);
-            }
-        }
-        catch (Exception exception)
-        {
-            DebugFileLog.Error(LogSource, exception, "OnRenderMaterial observation failed");
-        }
-        finally
-        {
-            onRenderMaterialHook.Original(characterBase, param);
-        }
-    }
-
-    private bool IsCurrentDonor(CharacterBase* characterBase)
-    {
-        lock (stateLock)
-            return capturing && donor?.CharacterBase == (nint)characterBase;
-    }
-
-    private void AddCallback(string kind, CharacterBase* characterBase, RenderModel* model, RenderMaterial* material, int materialIndex)
-    {
-        lock (stateLock)
-        {
-            if (!capturing || donor?.CharacterBase != (nint)characterBase)
-                return;
-            if (callbackEvents.Count >= MaxCallbackEvents)
-            {
-                capturing = false;
-                state = "Cancelled: callback-event-limit";
-                underpaint?.Diagnostics.CancelTransparentDrawCapture("callback-event-limit");
-                return;
-            }
-
-            callbackEvents.Add(
-                new RenderCallbackEvent(
-                    kind,
-                    Stopwatch.GetTimestamp(),
-                    Environment.CurrentManagedThreadId,
-                    (nint)model,
-                    FindModelSlot(characterBase, model),
-                    (nint)material,
-                    materialIndex,
-                    material == null ? 0 : (nint)material->MaterialResourceHandle
-                )
-            );
-        }
-    }
-
     private DonorSnapshot? TryCaptureDonor()
     {
         var target = targetManager.Target;
@@ -296,45 +201,42 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             return null;
 
         var characterBase = (CharacterBase*)gameObject->DrawObject;
-        if (characterBase->Models == null || characterBase->SlotCount is <= 0 or > 64)
+        if (characterBase->Models == null || characterBase->SlotCount <= DonorSlot || characterBase->SlotCount > 64)
             return null;
 
-        var models = new List<DonorModelSnapshot>();
-        var textureResources = new HashSet<nint>();
-        for (var slot = 0; slot < characterBase->SlotCount; slot++)
-        {
-            var model = characterBase->Models[slot];
-            if (model == null || model->MaterialCount is < 0 or > 64 || model->Materials == null)
-                continue;
+        var model = characterBase->Models[DonorSlot];
+        if (model == null || model->MaterialCount is < 0 or > 64 || model->Materials == null)
+            return null;
 
-            var materials = new List<DonorMaterialSnapshot>();
-            for (var materialIndex = 0; materialIndex < model->MaterialCount; materialIndex++)
+        var materials = new List<DonorMaterialSnapshot>();
+        var textureResources = new HashSet<nint>();
+        for (var materialIndex = 0; materialIndex < model->MaterialCount; materialIndex++)
+        {
+            var material = model->Materials[materialIndex];
+            if (material == null || material->TextureCount > 64)
+                continue;
+            var textures = new List<nint>();
+            foreach (var textureEntry in material->TexturesSpan)
             {
-                var material = model->Materials[materialIndex];
-                if (material == null || material->TextureCount > 64)
+                var resource = textureEntry.Texture == null ? null : textureEntry.Texture->Texture;
+                var pointer = resource == null ? 0 : (nint)resource->D3D11Texture2D;
+                if (pointer == 0)
                     continue;
-                var textures = new List<nint>();
-                foreach (var textureEntry in material->TexturesSpan)
-                {
-                    var resource = textureEntry.Texture == null ? null : textureEntry.Texture->Texture;
-                    var pointer = resource == null ? 0 : (nint)resource->D3D11Texture2D;
-                    if (pointer == 0)
-                        continue;
-                    textures.Add(pointer);
-                    textureResources.Add(pointer);
-                }
-                materials.Add(
-                    new DonorMaterialSnapshot(
-                        (nint)material,
-                        (nint)material->MaterialResourceHandle,
-                        material->ShaderFlags,
-                        material->ShaderKeyCount is >= 0 and <= 64 ? material->ShaderKeyValuesSpan.ToArray() : [],
-                        (nint)material->MaterialParameterCBuffer,
-                        textures.ToArray()
-                    )
-                );
+                textures.Add(pointer);
+                textureResources.Add(pointer);
             }
-            models.Add(new DonorModelSnapshot((nint)model, slot, (nint)model->ModelResourceHandle, materials.ToArray()));
+            materials.Add(
+                new DonorMaterialSnapshot(
+                    (nint)material,
+                    (nint)material->MaterialResourceHandle,
+                    material->ShaderFlags,
+                    material->ShaderKeyCount is >= 0 and <= 64 ? material->ShaderKeyValuesSpan.ToArray() : [],
+                    (nint)material->MaterialParameterCBuffer,
+                    textures.ToArray(),
+                    GetShpkName(material),
+                    material->MaterialResourceHandle == null ? 0 : (nint)material->MaterialResourceHandle->ShaderPackageResourceHandle
+                )
+            );
         }
 
         return new DonorSnapshot(
@@ -343,7 +245,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             gameObject->ObjectIndex,
             (nint)characterBase,
             target.Name.TextValue,
-            models.ToArray(),
+            new DonorModelSnapshot((nint)model, DonorSlot, (nint)model->ModelResourceHandle, materials.ToArray()),
             textureResources
         );
     }
@@ -357,16 +259,10 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         return gameObject->EntityId == snapshot.EntityId && (nint)gameObject->DrawObject == snapshot.CharacterBase;
     }
 
-    private static int FindModelSlot(CharacterBase* characterBase, RenderModel* model)
+    private static string GetShpkName(RenderMaterial* material)
     {
-        if (characterBase == null || model == null || characterBase->Models == null)
-            return -1;
-        for (var slot = 0; slot < characterBase->SlotCount; slot++)
-        {
-            if (characterBase->Models[slot] == model)
-                return slot;
-        }
-        return -1;
+        var resource = material == null ? null : material->MaterialResourceHandle;
+        return resource == null ? "" : resource->ShpkName.ToString();
     }
 
     private static CorrelationDrawEvidence ToEvidence(TransparentNativeDrawSnapshot draw) =>
@@ -389,33 +285,34 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
     {
         DebugFileLog.Information(
             LogSource,
-            "Donor Name={Name} ObjectIndex={ObjectIndex} GameObject=0x{GameObject:X} EntityId=0x{EntityId:X} CharacterBase=0x{CharacterBase:X} Models={Models} TextureResources={Textures}",
+            "Donor Name={Name} ObjectIndex={ObjectIndex} GameObject=0x{GameObject:X} EntityId=0x{EntityId:X} CharacterBase=0x{CharacterBase:X} Slot={Slot} Model=0x{Model:X} TextureResources={Textures}",
             snapshot.Name,
             snapshot.ObjectIndex,
             snapshot.GameObject.ToInt64(),
             snapshot.EntityId,
             snapshot.CharacterBase.ToInt64(),
-            snapshot.Models.Count,
+            snapshot.Model.Slot,
+            snapshot.Model.Model.ToInt64(),
             snapshot.TextureResources.Count
         );
-        foreach (var model in snapshot.Models)
+        var model = snapshot.Model;
+        foreach (var material in model.Materials)
         {
-            foreach (var material in model.Materials)
-            {
-                DebugFileLog.Debug(
-                    LogSource,
-                    "DonorMaterial Model=0x{Model:X} Slot={Slot} ModelResource=0x{ModelResource:X} Material=0x{Material:X} MaterialResource=0x{MaterialResource:X} ShaderFlags=0x{ShaderFlags:X} ShaderKeys={ShaderKeys} MaterialCBuffer=0x{MaterialCBuffer:X} Textures={Textures}",
-                    model.Model.ToInt64(),
-                    model.Slot,
-                    model.ModelResource.ToInt64(),
-                    material.Material.ToInt64(),
-                    material.MaterialResource.ToInt64(),
-                    material.ShaderFlags,
-                    string.Join(',', material.ShaderKeys.Select(value => $"0x{value:X}")),
-                    material.MaterialCBuffer.ToInt64(),
-                    string.Join(',', material.TextureResources.Select(value => $"0x{value:X}"))
-                );
-            }
+            DebugFileLog.Debug(
+                LogSource,
+                "DonorMaterial Model=0x{Model:X} Slot={Slot} ModelResource=0x{ModelResource:X} Material=0x{Material:X} MaterialResource=0x{MaterialResource:X} Shpk={Shpk} ShaderPackage=0x{ShaderPackage:X} ShaderFlags=0x{ShaderFlags:X} ShaderKeys={ShaderKeys} MaterialCBuffer=0x{MaterialCBuffer:X} Textures={Textures}",
+                model.Model.ToInt64(),
+                model.Slot,
+                model.ModelResource.ToInt64(),
+                material.Material.ToInt64(),
+                material.MaterialResource.ToInt64(),
+                material.ShpkName,
+                material.ShaderPackage.ToInt64(),
+                material.ShaderFlags,
+                string.Join(',', material.ShaderKeys.Select(value => $"0x{value:X}")),
+                material.MaterialCBuffer.ToInt64(),
+                string.Join(',', material.TextureResources.Select(value => $"0x{value:X}"))
+            );
         }
     }
 
@@ -447,6 +344,73 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         );
     }
 
+    private static void LogSubmission(MaterialSubmissionProbeEvent item)
+    {
+        DebugFileLog.Debug(
+            LogSource,
+            "SubmissionBuild Cycle={Cycle} Timestamp={Timestamp} Caller={Caller} Thread={Thread} ModelRenderer=0x{ModelRenderer:X} ModelParams=0x{ModelParams:X} Model=0x{Model:X} ModelResource=0x{ModelResource:X} GeometryIndex={GeometryIndex} GeometryEntry=0x{GeometryEntry:X} GeometryHash={GeometryHash:X16} Material=0x{Material:X} MaterialIndex=2 MaterialResource=0x{MaterialResource:X} Shpk=charactertransparency.shpk Context=0x{Context:X} View={ViewBefore}->{ViewAfter} SubView={SubViewBefore}->{SubViewAfter} SortKey=0x{SortKeyBefore:X}->0x{SortKeyAfter:X}",
+            item.BuildCycle,
+            item.Timestamp,
+            item.NativeCaller,
+            item.ThreadId,
+            item.ModelRenderer.ToInt64(),
+            item.ModelParams.ToInt64(),
+            item.Model.ToInt64(),
+            item.ModelResource.ToInt64(),
+            item.GeometryIndex,
+            item.GeometryEntry.ToInt64(),
+            item.GeometryHash,
+            item.Material.ToInt64(),
+            item.MaterialResource.ToInt64(),
+            item.Context.ToInt64(),
+            item.Before.ViewIndex,
+            item.After.ViewIndex,
+            item.Before.SubViewIndex,
+            item.After.SubViewIndex,
+            item.Before.SortKey,
+            item.After.SortKey
+        );
+        DebugFileLog.Debug(
+            LogSource,
+            "SubmissionArena Cycle={Cycle} CommandBase=0x{CommandBaseBefore:X}->0x{CommandBaseAfter:X} CommandUsed={CommandUsedBefore}->{CommandUsedAfter} NewCommands=0x{CommandAddress:X}/{CommandSize}/0x{CommandHash:X16}/{CommandStatus} PayloadBase=0x{PayloadBaseBefore:X}->0x{PayloadBaseAfter:X} PayloadUsed={PayloadUsedBefore}->{PayloadUsedAfter} NewPayload=0x{PayloadAddress:X}/{PayloadSize}/0x{PayloadHash:X16}/{PayloadStatus} Allocations={Allocations}",
+            item.BuildCycle,
+            item.Before.CommandAllocationBase.ToInt64(),
+            item.After.CommandAllocationBase.ToInt64(),
+            item.Before.CommandAllocationUsedSize,
+            item.After.CommandAllocationUsedSize,
+            item.CommandDelta.Address.ToInt64(),
+            item.CommandDelta.Size,
+            item.CommandDelta.Hash,
+            item.CommandDelta.Status,
+            item.Before.AllocationBase,
+            item.After.AllocationBase,
+            item.Before.AllocationUsedSize,
+            item.After.AllocationUsedSize,
+            item.PayloadDelta.Address.ToInt64(),
+            item.PayloadDelta.Size,
+            item.PayloadDelta.Hash,
+            item.PayloadDelta.Status,
+            string.Join(
+                ',',
+                item.CommandAllocations.Select(allocation => $"0x{allocation.Address:X}/{allocation.Size}/0x{allocation.Hash:X16}")
+            )
+        );
+        var material = item.MaterialObservation;
+        DebugFileLog.Debug(
+            LogSource,
+            "SubmissionMaterial Cycle={Cycle} Observed={Observed} Params=0x{Params:X} Return=0x{Return:X} BeforeHash=0x{BeforeHash:X16} AfterHash=0x{AfterHash:X16} Changed={Changed} Before={Before} After={After}",
+            item.BuildCycle,
+            material != null,
+            material?.Params.ToInt64() ?? 0,
+            material?.ReturnValue.ToInt64() ?? 0,
+            material?.BeforeHash ?? 0,
+            material?.AfterHash ?? 0,
+            material?.ChangedOffsets ?? "none",
+            material?.BeforeQwords ?? "none",
+            material?.AfterQwords ?? "none"
+        );
+    }
+
     private static string FormatConstants(IReadOnlyList<TransparentConstantBufferSnapshot> buffers) =>
         string.Join(
             ',',
@@ -467,11 +431,12 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         int ObjectIndex,
         nint CharacterBase,
         string Name,
-        IReadOnlyList<DonorModelSnapshot> Models,
+        DonorModelSnapshot Model,
         IReadOnlySet<nint> TextureResources
     )
     {
-        public string Summary => $"{Name} | object #{ObjectIndex} | {Models.Count} models | {TextureResources.Count} textures";
+        public string Summary =>
+            $"{Name} | object #{ObjectIndex} | slot {Model.Slot} | {Model.Materials.Count} materials | {TextureResources.Count} textures";
     }
 
     private sealed record DonorModelSnapshot(nint Model, int Slot, nint ModelResource, IReadOnlyList<DonorMaterialSnapshot> Materials);
@@ -482,18 +447,9 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         uint ShaderFlags,
         IReadOnlyList<uint> ShaderKeys,
         nint MaterialCBuffer,
-        IReadOnlyList<nint> TextureResources
-    );
-
-    private sealed record RenderCallbackEvent(
-        string Kind,
-        long Timestamp,
-        int ThreadId,
-        nint Model,
-        int Slot,
-        nint Material,
-        int MaterialIndex,
-        nint MaterialResource
+        IReadOnlyList<nint> TextureResources,
+        string ShpkName,
+        nint ShaderPackage
     );
 }
 #endif

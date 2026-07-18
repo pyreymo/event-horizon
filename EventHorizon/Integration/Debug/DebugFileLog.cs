@@ -19,6 +19,8 @@ internal static class DebugFileLog
     private static readonly Lock StateLock = new();
     private static readonly ConcurrentDictionary<string, ILogger> SourceLoggers = new();
     private static ILogger? Logger;
+    private static IDalamudPluginInterface? PluginInterface;
+    private static IPluginLog? PluginLog;
 #endif
 
     [Conditional("DEBUG")]
@@ -27,44 +29,53 @@ internal static class DebugFileLog
 #if DEBUG
         lock (StateLock)
         {
+            PluginInterface = pluginInterface;
+            PluginLog = pluginLog;
             if (Logger != null)
             {
                 return;
             }
 
+            CreateLogger(pluginInterface, pluginLog);
+        }
+#endif
+    }
+
+    public static string Clear()
+    {
+#if DEBUG
+        lock (StateLock)
+        {
+            if (PluginInterface == null || PluginLog == null)
+                return "Debug log is not initialized.";
+
+            var directory = Path.Combine(PluginInterface.ConfigDirectory.FullName, "debug-logs");
             try
             {
-                var directory = Path.Combine(pluginInterface.ConfigDirectory.FullName, "debug-logs");
-                Directory.CreateDirectory(directory);
-                var path = Path.Combine(directory, "event-horizon-.log");
-                Logger = new LoggerConfiguration()
-                    .MinimumLevel.Debug()
-                    .Enrich.With<CurrentThreadIdEnricher>()
-                    .WriteTo.File(
-                        path,
-                        restrictedToMinimumLevel: LogEventLevel.Debug,
-                        outputTemplate: "{Timestamp:HH:mm:ss.fff} [{Level:u3}] [T{ThreadId}] [{Source}] {Message:lj}{NewLine}{Exception}",
-                        rollingInterval: RollingInterval.Day,
-                        fileSizeLimitBytes: FileSizeLimitBytes,
-                        rollOnFileSizeLimit: true,
-                        retainedFileCountLimit: 7,
-                        retainedFileTimeLimit: TimeSpan.FromDays(7),
-                        buffered: true,
-                        flushToDiskInterval: TimeSpan.FromSeconds(1)
-                    )
-                    .CreateLogger();
+                DisposeLogger();
+                var deleted = 0;
+                if (Directory.Exists(directory))
+                {
+                    foreach (var path in Directory.EnumerateFiles(directory, "event-horizon-*.log"))
+                    {
+                        File.Delete(path);
+                        deleted++;
+                    }
+                }
 
-                GetSourceLogger("DebugFileLog")?.Information("Debug file logging started at {Path}", path);
-                pluginLog.Information("Debug file log: {Path}", path);
+                CreateLogger(PluginInterface, PluginLog);
+                return $"Cleared {deleted} EventHorizon debug log file(s).";
             }
             catch (Exception exception)
             {
-                (Logger as IDisposable)?.Dispose();
-                Logger = null;
-                SourceLoggers.Clear();
-                pluginLog.Warning(exception, "Failed to initialize the debug file log.");
+                PluginLog.Warning(exception, "Failed to clear the debug file log.");
+                if (Logger == null)
+                    CreateLogger(PluginInterface, PluginLog);
+                return $"Clear failed: {exception.Message}";
             }
         }
+#else
+        return "Debug logging is unavailable in Release builds.";
 #endif
     }
 
@@ -112,14 +123,55 @@ internal static class DebugFileLog
             }
 
             GetSourceLogger("DebugFileLog")?.Information("Debug file logging stopped");
-            (Logger as IDisposable)?.Dispose();
-            Logger = null;
-            SourceLoggers.Clear();
+            DisposeLogger();
+            PluginInterface = null;
+            PluginLog = null;
         }
 #endif
     }
 
 #if DEBUG
+    private static void CreateLogger(IDalamudPluginInterface pluginInterface, IPluginLog pluginLog)
+    {
+        try
+        {
+            var directory = Path.Combine(pluginInterface.ConfigDirectory.FullName, "debug-logs");
+            Directory.CreateDirectory(directory);
+            var path = Path.Combine(directory, "event-horizon-.log");
+            Logger = new LoggerConfiguration()
+                .MinimumLevel.Debug()
+                .Enrich.With<CurrentThreadIdEnricher>()
+                .WriteTo.File(
+                    path,
+                    restrictedToMinimumLevel: LogEventLevel.Debug,
+                    outputTemplate: "{Timestamp:HH:mm:ss.fff} [{Level:u3}] [T{ThreadId}] [{Source}] {Message:lj}{NewLine}{Exception}",
+                    rollingInterval: RollingInterval.Day,
+                    fileSizeLimitBytes: FileSizeLimitBytes,
+                    rollOnFileSizeLimit: true,
+                    retainedFileCountLimit: 7,
+                    retainedFileTimeLimit: TimeSpan.FromDays(7),
+                    buffered: true,
+                    flushToDiskInterval: TimeSpan.FromSeconds(1)
+                )
+                .CreateLogger();
+
+            GetSourceLogger("DebugFileLog")?.Information("Debug file logging started at {Path}", path);
+            pluginLog.Information("Debug file log: {Path}", path);
+        }
+        catch (Exception exception)
+        {
+            DisposeLogger();
+            pluginLog.Warning(exception, "Failed to initialize the debug file log.");
+        }
+    }
+
+    private static void DisposeLogger()
+    {
+        (Logger as IDisposable)?.Dispose();
+        Logger = null;
+        SourceLoggers.Clear();
+    }
+
     private static ILogger? GetSourceLogger(string source)
     {
         var current = Logger;

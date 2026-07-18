@@ -49,12 +49,9 @@ internal sealed unsafe class EnableDrawHook : IDisposable
     {
         if (admissionGate.ShouldSuppressEnableDraw(gameObject))
         {
-            PlayerAdmissionDebugTrace.OnEnableDrawSuppressed(gameObject);
             return;
         }
 
-        PlayerAdmissionDebugTrace.OnEnableDrawOriginalEntering(gameObject);
         hook.Original(gameObject);
-        PlayerAdmissionDebugTrace.OnEnableDrawOriginalReturned(gameObject);
     }
 }

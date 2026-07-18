@@ -39,6 +39,7 @@ internal sealed class DemoWindow : Window, IDisposable
     private NativeDrawSnapshot? diagnosticSnapshot;
 #if DEBUG
     private TransparentDrawCorrelationTracer? transparentDrawTracer;
+    private string clearDebugLogState = "";
 #endif
     private bool boundaryStabilityTestEnabled;
     private Vector3 boundaryStabilityTestPosition;
@@ -185,7 +186,14 @@ internal sealed class DemoWindow : Window, IDisposable
         {
             transparentDrawTracer.Cancel();
         }
-        ImGui.TextDisabled("Targets the currently selected PC; capture stops automatically.");
+        ImGui.SameLine();
+        ImGui.BeginDisabled(transparentDrawTracer.IsCapturing);
+        if (ImGui.Button("Clear EventHorizon logs"))
+            clearDebugLogState = DebugFileLog.Clear();
+        ImGui.EndDisabled();
+        if (clearDebugLogState.Length != 0)
+            ImGui.TextDisabled(clearDebugLogState);
+        ImGui.TextDisabled("Targets slot 1 of the currently selected PC; capture stops automatically.");
     }
 #endif
 
