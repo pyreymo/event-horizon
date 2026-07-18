@@ -149,7 +149,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             state = $"Cancelled: {reason}";
         }
         underpaint?.Diagnostics.CancelTransparentDrawCapture(reason);
-        underpaint?.CancelNativeGeometrySubmission();
+        underpaint?.CancelNativeGeometrySubmission(reason);
         submissionProbe.Stop();
         DebugFileLog.Information(LogSource, "Capture cancelled: {Reason}", reason);
     }
@@ -230,7 +230,9 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
 
         if (currentDonor == null)
         {
-            underpaint?.CancelNativeGeometrySubmission();
+            underpaint?.CancelNativeGeometrySubmission(capture.Reason);
+            if (underpaint?.TryTakeNativeGeometryDrawCapture(out var geometryDrawCapture) == true)
+                LogNativeGeometryDrawCapture(geometryDrawCapture);
             DebugFileLog.Information(
                 LogSource,
                 "Standalone capture complete Reason={Reason} Draws={Draws} SubmissionSeen={SubmissionSeen}",
@@ -277,7 +279,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         var submission = item.Submission;
         DebugFileLog.Information(
             LogSource,
-            "StandaloneNativeSubmission Success={Success} Failure={Failure} ModelRenderer=0x{ModelRenderer:X} MaterialParams=0x{MaterialParams:X} Model=0x{Model:X} View={View} SubView={SubView} SourceVB=0x{SourceVB:X} SourceIB=0x{SourceIB:X} SourceVertexDeclaration=0x{SourceVertexDeclaration:X} SourceStrides={SourceStream0Stride}/{SourceStream1Stride} SourceRange={SourceVertices}/{SourceStart}/{SourceIndices} Context=0x{Context:X} VB=0x{VB:X} VBResource=0x{VBResource:X} IB=0x{IB:X} IBResource=0x{IBResource:X} VertexDeclaration=0x{VertexDeclaration:X} Range={Vertices}/0/{Indices} Result=0x{Result:X}",
+            "StandaloneNativeSubmission BuilderInvoked={BuilderInvoked} Failure={Failure} ModelRenderer=0x{ModelRenderer:X} MaterialParams=0x{MaterialParams:X} Model=0x{Model:X} View={View} SubView={SubView} SourceVB=0x{SourceVB:X} SourceIB=0x{SourceIB:X} SourceVertexDeclaration=0x{SourceVertexDeclaration:X} SourceStrides={SourceStream0Stride}/{SourceStream1Stride} SourceRange={SourceVertices}/{SourceStart}/{SourceIndices} Context=0x{Context:X} VB=0x{VB:X} VBResource=0x{VBResource:X} IB=0x{IB:X} IBResource=0x{IBResource:X} VertexDeclaration=0x{VertexDeclaration:X} Range={Vertices}/0/{Indices} Result=0x{Result:X}",
             item.Succeeded,
             item.Failure ?? "",
             item.ModelRenderer,
@@ -303,6 +305,43 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             submission.IndexCount,
             submission.BuilderResult
         );
+    }
+
+    private static void LogNativeGeometryDrawCapture(NativeGeometryDrawCapture capture)
+    {
+        DebugFileLog.Information(
+            LogSource,
+            "NativeGeometryDrawCapture Reason={Reason} TargetVB=0x{TargetVB:X} TargetIB=0x{TargetIB:X} Matches={Matches}",
+            capture.Reason,
+            capture.TargetVertexBuffer,
+            capture.TargetIndexBuffer,
+            capture.Draws.Count
+        );
+        foreach (var draw in capture.Draws)
+        {
+            DebugFileLog.Information(
+                LogSource,
+                "NativeGeometryDraw Sequence={Sequence} Timestamp={Timestamp} Thread={Thread} Pass={Pass} Type={Type} Count={Count} Instances={Instances} StartIndex={StartIndex} BaseVertex={BaseVertex} StartVertex={StartVertex} StartInstance={StartInstance} VS=0x{VS:X} PS=0x{PS:X} Layout=0x{Layout:X} VB={VB} IB=0x{IB:X}/{IndexFormat}/{IndexOffset}",
+                draw.Sequence,
+                draw.Timestamp,
+                draw.ThreadId,
+                draw.Pass,
+                draw.DrawType,
+                draw.ElementCount,
+                draw.InstanceCount,
+                draw.StartIndex,
+                draw.BaseVertex,
+                draw.StartVertex,
+                draw.StartInstance,
+                draw.VertexShader,
+                draw.PixelShader,
+                draw.InputLayout,
+                string.Join(',', draw.VertexBuffers.Select(item => $"{item.Slot}:0x{item.Buffer:X}/{item.Stride}/{item.Offset}")),
+                draw.IndexBuffer,
+                draw.IndexFormat,
+                draw.IndexOffset
+            );
+        }
     }
 
     private DonorSnapshot? TryCaptureDonor()

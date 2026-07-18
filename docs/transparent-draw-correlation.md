@@ -406,4 +406,6 @@ EventHorizon 只创建测试三角形并 arm
 
 修正后，arm 只在当前 Context 的两个 stream strides 为 `20/24` 时消费。它仍然不检查人物、装备或材质身份。日志 `StandaloneNativeSubmission` 额外记录源 VB/IB、vertex declaration、strides和原 range；若捕获窗口内不存在兼容现场，UI和日志会明确报告 `No compatible 20/24 native submission site`，而不会把一次无命令的调用误报为成功。下一次实机验收只需打开 `/eh 3d` 后点击 `Arm custom native triangle`，不需要选中角色或穿指定衣服。
 
+第二次实测命中了 `SourceStrides=20/24`，源与插件甚至复用了同一个 native VertexDeclaration，但原 Stage A/C 捕获只看到另一组 `20/28、Count=3336` 的透明 draw。这证明透明 pass 分类不能用来判断任意 standalone现场是否消费了插件几何。现已增加一个与 pass分类无关的窄捕获：只在四种 D3D draw入口中匹配本次插件 VB和IB，最多记录32条命中。`NativeGeometryDrawCapture Matches=0` 将直接证明builder调用没有形成消费侧draw；非零时每条 `NativeGeometryDraw` 会给出pass、Count、range、shader、layout及全部VB/IB绑定。`StandaloneNativeSubmission` 中原来的 `Success` 同时改名为 `BuilderInvoked`，避免把“未抛异常”误写成“已生成命令”。
+
 这一步解决的是“谁负责找到可用原生提交现场”：现在由 Underpaint 自己负责。它尚未解决“材质和实例状态完全由插件独立拥有”；当前仍借用命中现场已经准备好的 material/per-instance context。正式公开后端前的剩余主线是把独立加载的 `MaterialResourceHandle/Render::Material` 接到可复制的最小 params 状态，或找到为非 skinned primitive 准备该状态的更高层原生入口。
