@@ -105,7 +105,7 @@ FFCS 和 IDA 随后确认 `Context.PushBackCommand` 会把 `{SortKey, Command*}`
 
 因此已经确认：一次 `ffxiv_dx11.exe+0x281DD0` geometry/material builder 调用，在同一线程的 `Graphics::Kernel::Context` 中自动生成 Stage A、两族 Stage C 和辅助提交；插件不需要分别伪造 A/C packet。
 
-下一步是受控的首次写入 PoC。Debug UI 的 `Arm one native duplicate` 只在目标角色 Slot 1、MaterialIndex 2、`charactertransparency.shpk` 且进入主 View 30.12 时消费一次 arm 状态。它先执行正常 builder，再在原 hook、原线程、原参数和原隐式 context 中额外调用一次原 builder；不修改 Material、transform 或已生成 command。日志额外记录：
+下一步是受控的首次写入 PoC。Debug UI 的 `Arm one native duplicate` 只在目标角色 Slot 1、MaterialIndex 2、`charactertransparency.shpk` 且第一次 builder 调用实际生成主 View 30.12 command 时消费一次 arm 状态。它先执行正常 builder，再在原 hook、原线程、原参数和原隐式 context 中额外调用一次原 builder；不修改 Material、transform 或已生成 command。日志额外记录：
 
 - 是否实际执行重复提交；
 - 第一次调用结束时的 command arena 边界和 push 数量；
@@ -113,3 +113,5 @@ FFCS 和 IDA 随后确认 `Context.PushBackCommand` 会把 `{SortKey, Command*}`
 - 重复调用新增 command 的 push index、地址、sort/view、消费和执行状态。
 
 下一次人工采集只点 `Arm one native duplicate`。要验证的唯一关键证据是：第二次 builder 调用是否在原有六条主 build command 后再生成同形的六条 command，并分别再次进入 Stage A、两族 Stage C 和相同辅助 executor 路径。若形状不一致或出现异常，不继续修改隐式 context；若完整成组复制，才进入自定义 transform 输入的静态分析。
+
+首次 PoC 采集没有执行重复调用：25 个 build 全部为 `Applied=false`，60 条 command 恰好是五帧正常路径的 `5 × 12`。原因是 builder 入口 context 为 View 30 / SubView 11，而生成的主 command 才标记为 View 30 / SubView 12。过滤已改为检查第一次 builder 调用实际产生的 command 集合；不再把入口 SubView 当作输出 pass。

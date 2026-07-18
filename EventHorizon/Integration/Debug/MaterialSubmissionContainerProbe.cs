@@ -211,8 +211,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             var result = materialBuilderHook.Original(modelRenderer, param, modelResource, geometryIndex, flags);
             scope.BuilderResult = result;
             if (
-                scope.Before.ViewIndex == 30
-                && scope.Before.SubViewIndex == 12
+                scope.PushedCommands.Any(command => command.ViewIndex == 30 && command.SubViewIndex == 12)
                 && Interlocked.CompareExchange(ref duplicateMainSubmissionArmed, 0, 1) == 1
             )
             {
