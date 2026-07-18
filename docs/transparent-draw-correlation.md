@@ -408,4 +408,6 @@ EventHorizon 只创建测试三角形并 arm
 
 第二次实测命中了 `SourceStrides=20/24`，源与插件甚至复用了同一个 native VertexDeclaration，但原 Stage A/C 捕获只看到另一组 `20/28、Count=3336` 的透明 draw。这证明透明 pass 分类不能用来判断任意 standalone现场是否消费了插件几何。现已增加一个与 pass分类无关的窄捕获：只在四种 D3D draw入口中匹配本次插件 VB和IB，最多记录32条命中。`NativeGeometryDrawCapture Matches=0` 将直接证明builder调用没有形成消费侧draw；非零时每条 `NativeGeometryDraw` 会给出pass、Count、range、shader、layout及全部VB/IB绑定。`StandaloneNativeSubmission` 中原来的 `Success` 同时改名为 `BuilderInvoked`，避免把“未抛异常”误写成“已生成命令”。
 
+第三次实测得到 `Matches=6`：一条明确的 `Opaque` 和五条辅助 draw全部为 `Count=3`，统一绑定插件自有VB/IB。这已经闭环“无目标、无指定衣服、无材质过滤的兼容原生现场可以自动展开不透明及辅助命令”。当前主线转到实例输入。静态追踪确认 `0x281AE0` 会先调用 `Model.RenderModelCallback`，由回调写入 `OnRenderModelParams+0x10` 并准备 Context常量绑定，然后才进入builder；因此不能只浅拷贝 `OnRenderMaterialParams2`。下一版只为该次standalone提交记录 `OnRenderModelParams+0x10`、Model callback、`WorldViewMatrix/InstancingMatrix/PrevInstancingMatrix` native ConstantBuffer，以及六条最终draw的VS constant buffer和内容hash，用于确定可独立替换的最小transform边界。
+
 这一步解决的是“谁负责找到可用原生提交现场”：现在由 Underpaint 自己负责。它尚未解决“材质和实例状态完全由插件独立拥有”；当前仍借用命中现场已经准备好的 material/per-instance context。正式公开后端前的剩余主线是把独立加载的 `MaterialResourceHandle/Render::Material` 接到可复制的最小 params 状态，或找到为非 skinned primitive 准备该状态的更高层原生入口。

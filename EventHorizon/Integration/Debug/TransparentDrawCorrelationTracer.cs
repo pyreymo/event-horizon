@@ -279,12 +279,23 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         var submission = item.Submission;
         DebugFileLog.Information(
             LogSource,
-            "StandaloneNativeSubmission BuilderInvoked={BuilderInvoked} Failure={Failure} ModelRenderer=0x{ModelRenderer:X} MaterialParams=0x{MaterialParams:X} Model=0x{Model:X} View={View} SubView={SubView} SourceVB=0x{SourceVB:X} SourceIB=0x{SourceIB:X} SourceVertexDeclaration=0x{SourceVertexDeclaration:X} SourceStrides={SourceStream0Stride}/{SourceStream1Stride} SourceRange={SourceVertices}/{SourceStart}/{SourceIndices} Context=0x{Context:X} VB=0x{VB:X} VBResource=0x{VBResource:X} IB=0x{IB:X} IBResource=0x{IBResource:X} VertexDeclaration=0x{VertexDeclaration:X} Range={Vertices}/0/{Indices} Result=0x{Result:X}",
+            "StandaloneNativeSubmission BuilderInvoked={BuilderInvoked} Failure={Failure} ModelRenderer=0x{ModelRenderer:X} MaterialParams=0x{MaterialParams:X} ModelParams=0x{ModelParams:X} Model=0x{Model:X} RenderModelCallback=0x{RenderModelCallback:X}/0x{RenderModelCallbackFunction:X} ModelField38=0x{ModelField38:X} OnRenderModelCB={OnRenderModelCB} WorldCB[{WorldId}]={WorldCB} InstancingCB[{InstancingId}]={InstancingCB} PreviousInstancingCB[{PreviousInstancingId}]={PreviousInstancingCB} View={View} SubView={SubView} SourceVB=0x{SourceVB:X} SourceIB=0x{SourceIB:X} SourceVertexDeclaration=0x{SourceVertexDeclaration:X} SourceStrides={SourceStream0Stride}/{SourceStream1Stride} SourceRange={SourceVertices}/{SourceStart}/{SourceIndices} Context=0x{Context:X} VB=0x{VB:X} VBResource=0x{VBResource:X} IB=0x{IB:X} IBResource=0x{IBResource:X} VertexDeclaration=0x{VertexDeclaration:X} Range={Vertices}/0/{Indices} Result=0x{Result:X}",
             item.Succeeded,
             item.Failure ?? "",
             item.ModelRenderer,
             item.MaterialParameters,
+            item.ModelParams,
             item.Model,
+            item.RenderModelCallback,
+            item.RenderModelCallbackFunction,
+            item.ModelField38,
+            FormatConstantBuffer(item.OnRenderModelConstant),
+            item.WorldConstantId,
+            FormatConstantBuffer(item.WorldConstant),
+            item.InstancingConstantId,
+            FormatConstantBuffer(item.InstancingConstant),
+            item.PreviousInstancingConstantId,
+            FormatConstantBuffer(item.PreviousInstancingConstant),
             item.View,
             item.SubView,
             item.SourceVertexBuffer,
@@ -321,7 +332,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         {
             DebugFileLog.Information(
                 LogSource,
-                "NativeGeometryDraw Sequence={Sequence} Timestamp={Timestamp} Thread={Thread} Pass={Pass} Type={Type} Count={Count} Instances={Instances} StartIndex={StartIndex} BaseVertex={BaseVertex} StartVertex={StartVertex} StartInstance={StartInstance} VS=0x{VS:X} PS=0x{PS:X} Layout=0x{Layout:X} VB={VB} IB=0x{IB:X}/{IndexFormat}/{IndexOffset}",
+                "NativeGeometryDraw Sequence={Sequence} Timestamp={Timestamp} Thread={Thread} Pass={Pass} Type={Type} Count={Count} Instances={Instances} StartIndex={StartIndex} BaseVertex={BaseVertex} StartVertex={StartVertex} StartInstance={StartInstance} VS=0x{VS:X} PS=0x{PS:X} Layout=0x{Layout:X} VB={VB} IB=0x{IB:X}/{IndexFormat}/{IndexOffset} VSConstants={VSConstants}",
                 draw.Sequence,
                 draw.Timestamp,
                 draw.ThreadId,
@@ -339,10 +350,19 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
                 string.Join(',', draw.VertexBuffers.Select(item => $"{item.Slot}:0x{item.Buffer:X}/{item.Stride}/{item.Offset}")),
                 draw.IndexBuffer,
                 draw.IndexFormat,
-                draw.IndexOffset
+                draw.IndexOffset,
+                string.Join(
+                    ',',
+                    draw.VertexConstantBuffers.Select(item =>
+                        $"{item.Slot}:0x{item.Buffer:X}/{item.ByteWidth}/{(item.ContentHash.HasValue ? item.ContentHash.Value.ToString("X16") : "unhashed")}"
+                    )
+                )
             );
         }
     }
+
+    private static string FormatConstantBuffer(NativeConstantBufferProbe item) =>
+        $"0x{item.Buffer:X}/Size={item.ByteSize}/Source=0x{item.SourcePointer:X}/Hash={item.ContentHash:X16}";
 
     private DonorSnapshot? TryCaptureDonor()
     {
