@@ -184,8 +184,6 @@ internal sealed class DemoWindow : Window, IDisposable
             ImGui.SameLine();
             if (ImGui.Button("Arm one native duplicate"))
                 transparentDrawTracer.ArmNativeDuplicate();
-            if (ImGui.Button("Profile ModelRenderer inputs"))
-                transparentDrawTracer.ArmModelInputProfile();
         }
         else if (ImGui.Button("Cancel transparent capture"))
         {
@@ -198,7 +196,7 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.EndDisabled();
         if (clearDebugLogState.Length != 0)
             ImGui.TextDisabled(clearDebugLogState);
-        ImGui.TextDisabled("Input profile runs for two seconds and records Model+0x38/Skeleton/BoneList combinations.");
+        ImGui.TextDisabled("Capture records the target geometry's native index buffer, vertex declaration, and stream bindings.");
     }
 #endif
 

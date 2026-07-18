@@ -180,17 +180,26 @@ FFCS 给出 `Model.ModelDrawInit` 后，IDA 确认以下底层行为：
 
 BgObject 路线已经单独闭环：其实际 `UpdateRender`（`ffxiv_dx11.exe+0x452E50`）读取 `BgObject+0x90` 的 `ModelResourceHandle`，并调用 `Manager.BGInstancingRenderer` 的虚函数创建实例及其他 BG专用render object。它不创建这里讨论的 `Render::Model`，也不经过 `0x281DD0`。因此旅馆、城市中的建筑和摆件不会帮助原 ModelRenderer探针命中 `Model+0x38`。
 
-builder 对 geometry 的最终读取同时跨越三处：0x24-byte geometry entry提供 material、palette、start/base等字段；`Model+0x88`表提供当前geometry的 draw count；`ModelResourceHandle+0x190`表提供 per-geometry原生 binding对象。后者被直接写入 graphics context，说明 Underpaint 的裸 `ID3D11Buffer*` 不能直接替代它。该 binding对象如何拥有/引用 vertex buffer、index buffer、layout和stride仍未确认。
+builder 对 geometry 的最终读取同时跨越三处：0x24-byte geometry entry提供 material、palette、start/base等字段；`Model+0x88`表提供当前geometry的 draw count；`ModelResourceHandle+0x190`表提供 per-geometry vertex declaration。后者被写入 `Context+0x890`，并不是拥有整套 geometry 的单一 binding对象。
 
 先前一次性 `Capture native static carrier` 同时犯了两个错误：把 BgObject静态场景当作 ModelRenderer输入来源；并在 builder只检查 `Model+0x38` 的情况下，额外要求 `Skeleton == null && BoneList == null`。两次旅馆/海都实测均得到 `no-static-carrier-found`，且旧日志没有记录总调用数和拒绝原因，不能区分“没有进入builder”和“被额外条件过滤”。该探针已删除。
 
-替代探针 `Profile ModelRenderer inputs` 显式 arm后只运行两秒并无条件完成。它不选择场景对象、不捕获command，也不改变提交，只统计所有真实 `0x281DD0` 输入的：
+替代探针 `Profile ModelRenderer inputs` 已完成使命并删除。两秒实测统计了所有真实 `0x281DD0` 输入：
 
 - builder调用总数和唯一 Model数；
 - `Model+0x38`、Skeleton、BoneList八种组合的命中数；
 - 最多16个 `Model+0x38 != 0` 候选的 Model/resource/geometry/slot、world CB和同步复制的transform数据。
 
-该结果会直接裁决 `Model+0x38` 是否为当前运行时的真实 ModelRenderer分支。若两秒内有大量 builder调用但 transform组合始终为零，就不再以该分支作为 Underpaint载体依据；若存在候选，再对其实际对象类别和生命周期做一次定点追踪。
+结果为 `Calls=165095 / UniqueModels=313 / T0-S1-B1=165095 / TransformCandidates=0`，其余七种组合均为零。即当前实机全部 ModelRenderer输入都有 Skeleton/BoneList，且 `Model+0x38` 始终为空。自然非 skinned carrier路线据此终止；不再寻找 Model工厂或静态场景 donor。
+
+随后对 `0x281AE0 -> 0x281DD0 -> 0x283320` 的静态追踪把 geometry输入边界拆开了：
+
+- caller `0x281AE0` 在进入 geometry循环前将 `Model` 的一个原生 buffer写入 `Context+0x888`，并将 `ModelResourceHandle` 的同一个原生 buffer写入 stream 0/1（`Context+0x8C0/+0x8D0`）；
+- 每次 `0x281DD0` 调用只把当前 geometry 的 vertex declaration写入 `Context+0x890`；
+- `0x283320` 及其 pass helper接收 material/pass参数和 `count/start/base` 标量，从上述 Context状态生成各 view的命令；
+- 底层 `0x23B920` 会将 vertex declaration和紧随其后的16-byte stream bindings复制进命令分配区。
+
+因此 `0x281DD0` 的 pass展开并不要求一个额外的静态 `Render::Model` carrier。Underpaint当前真正缺少的是：把自有 D3D11 VB/IB安全包装成游戏的 Kernel buffer，并提供匹配的 vertex declaration/stream binding。现有目标捕获增加一条 `SubmissionGeometry`，只同步记录 `Context+0x888/+0x890/+0x8C0` 及两个原生对象的有限qword快照，用于映射 wrapper中的 D3D resource和stride/offset；不增加新的 consumer/executor tracer。
 
 ## 新运行时探针
 
@@ -202,6 +211,7 @@ builder 对 geometry 的最终读取同时跨越三处：0x24-byte geometry entr
 - command arena 与 payload arena 调用前后的 base/used size，以及本次新增范围和有限 hash；
 - builder 范围内每次 `AllocateCommand` 返回的地址、大小和 builder 返回时的有限 hash；
 - `OnRenderMaterial` 返回值，以及完整 0x48-byte `Params2` 调用前后 hash、变化 offset 和 qword 快照。
+- 当前 geometry 的原生 index-buffer wrapper、vertex declaration、四个 stream-binding qword pair及有限对象快照。
 
 这些字段已经依次完成 producer、consumer、executor 和重复提交验证；下文保留各轮证据。
 
@@ -214,7 +224,7 @@ builder 对 geometry 的最终读取同时跨越三处：0x24-byte geometry entr
 5. `/eh 3d` 打开 Underpaint Demo，展开 `Transparent draw correlation`。
 6. 选中 donor，确认摘要显示 `slot 1` 且 material/texture 数量合理；如需只读基线，先点 `Clear EventHorizon logs`，再点 `Arm transparent capture`。
 7. `Arm one native duplicate` 会执行一次真实的额外原生提交，只用于复现实验，不应在普通游戏期间启用。
-8. 当前透明衣服重复提交验证已经完成，不再点击 duplicate。点击一次 `Profile ModelRenderer inputs`，等待两秒显示 Complete 后提供日志。无需选择 donor、换地图或寻找静态摆件。
+8. 当前透明衣服重复提交和 Model input profile均已完成，不再点击 duplicate或寻找静态摆件。下一次只需选择原 donor、清空日志并点一次 `Arm transparent capture`，提供其中的 `SubmissionGeometry` 行。
 
 下文按采集轮次保留了当时的待验证问题；最新结论和下一步见文末。
 
@@ -325,14 +335,14 @@ executor 观察到每一对 command 使用相同的 RT/depth-stencil、VS/PS wra
 
 当前 skinned donor 的 transform 输入分析已经完成，结论见上文。它不能作为简单、独立的 transform carrier，但不影响 `0x281DD0` 继续作为 Underpaint 原生多 pass builder。
 
-正式后端下一阶段要构造或复用一个非 skinned 最小载体，独立拥有：
+正式后端下一阶段不再构造非 skinned `Render::Model` 载体。当前最小输入边界是 caller安装到线程 Context的 geometry状态，加上已验证的 material/pass参数和 draw range：
 
 ```text
-独立 current/previous transform object
-独立 bounds/culling/sort
-独立 object/history identity
-Underpaint-owned geometry buffers / draw range
+Underpaint-owned Kernel VB/IB wrappers
+匹配的 vertex declaration 与 stream stride/offset
+Underpaint-owned geometry draw range
+由 Underpaint现有路径提供的 world/current/previous常量
 安全的同帧 resource lifetime 与释放边界
 ```
 
-下一步不是继续寻找 BgObject donor。当前只等待一次 `Profile ModelRenderer inputs` 结果：先确认 `Model+0x38` 是否为真实在用分支，再决定是否追其 owner并构造 ModelRenderer载体。若该分支在实际输入中不存在，则回到 Underpaint主要需求，比较 BGInstancingRenderer和更低层 geometry submission中哪个真正允许独立 geometry ownership；不再围绕一个无调用证据的 wrapper设计后端。仍然不能用 command packet patching、临时改共享对象后恢复、或跨帧持有当前 hook临时指针绕过所有权问题。
+下一次采集只回答一个问题：`Context+0x888/+0x8C0` 中的 Kernel buffer wrapper如何对应现有 D3D侧 IB/VB，以及16-byte stream binding中哪一项是buffer、offset和stride。若对象快照足够，就直接追其构造/释放函数并实现 Underpaint-owned wrapper；若仍不够，只在同一目标 hook中补一个更窄的字段验证。仍然不能用 command packet patching、临时改共享对象后恢复、或跨帧持有当前 hook临时指针绕过所有权问题。

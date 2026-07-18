@@ -46,13 +46,8 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
     private readonly List<CommandConsumptionSnapshot> consumptionEvents = [];
     private readonly List<CommandExecutionSnapshot> executionEvents = [];
     private readonly ConcurrentDictionary<nint, ProducedCommandIdentity> producedCommands = new();
-    private readonly ConcurrentDictionary<nint, byte> profiledModels = new();
-    private readonly ConcurrentDictionary<nint, ModelInputProfileCandidate> profileCandidates = new();
-    private readonly long[] modelInputCombinations = new long[8];
     private nint targetModel;
     private int duplicateMainSubmissionArmed;
-    private int modelInputProfileArmed;
-    private long modelInputCount;
     private long nextBuildCycle;
     private bool disposed;
 
@@ -126,41 +121,8 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             executionEvents.Clear();
         }
         producedCommands.Clear();
-        Interlocked.Exchange(ref modelInputProfileArmed, 0);
         Interlocked.Exchange(ref duplicateMainSubmissionArmed, duplicateMainSubmission ? 1 : 0);
         Interlocked.Exchange(ref targetModel, model);
-    }
-
-    public void ArmModelInputProfile()
-    {
-        lock (stateLock)
-        {
-            events.Clear();
-            consumptionEvents.Clear();
-            executionEvents.Clear();
-        }
-        producedCommands.Clear();
-        profiledModels.Clear();
-        profileCandidates.Clear();
-        Array.Clear(modelInputCombinations);
-        Interlocked.Exchange(ref duplicateMainSubmissionArmed, 0);
-        Interlocked.Exchange(ref modelInputCount, 0);
-        Interlocked.Exchange(ref targetModel, 0);
-        Interlocked.Exchange(ref modelInputProfileArmed, 1);
-    }
-
-    public ModelInputProfileSnapshot StopAndTakeModelInputProfile()
-    {
-        Interlocked.Exchange(ref modelInputProfileArmed, 0);
-        return new ModelInputProfileSnapshot(
-            Interlocked.Read(ref modelInputCount),
-            profiledModels.Count,
-            Enumerable
-                .Range(0, modelInputCombinations.Length)
-                .Select(index => Interlocked.Read(ref modelInputCombinations[index]))
-                .ToArray(),
-            profileCandidates.Values.OrderBy(candidate => candidate.Model).ToArray()
-        );
     }
 
     public MaterialSubmissionProbeCapture StopAndTake()
@@ -168,7 +130,6 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
         lock (stateLock)
         {
             Interlocked.Exchange(ref targetModel, 0);
-            Interlocked.Exchange(ref modelInputProfileArmed, 0);
             var result = new MaterialSubmissionProbeCapture(events.ToArray(), consumptionEvents.ToArray(), executionEvents.ToArray());
             events.Clear();
             consumptionEvents.Clear();
@@ -181,7 +142,6 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
     public void Stop()
     {
         Interlocked.Exchange(ref duplicateMainSubmissionArmed, 0);
-        Interlocked.Exchange(ref modelInputProfileArmed, 0);
         Interlocked.Exchange(ref targetModel, 0);
     }
 
@@ -211,7 +171,6 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
         if (model == null || modelResource == null)
             return materialBuilderHook.Original(modelRenderer, param, modelResource, geometryIndex, flags);
 
-        ObserveModelInput(model, modelResource, geometryIndex);
         if (!IsTargetModel(model))
             return materialBuilderHook.Original(modelRenderer, param, modelResource, geometryIndex, flags);
 
@@ -505,6 +464,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             (nint)scope.Context,
             scope.Before,
             after,
+            CaptureGeometryState(scope.Context),
             commandDelta,
             payloadDelta,
             allocations,
@@ -526,41 +486,6 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
     }
 
     private bool IsTargetModel(Model* model) => Interlocked.CompareExchange(ref targetModel, 0, 0) == (nint)model;
-
-    private void ObserveModelInput(Model* model, ModelResourceHandle* modelResource, uint geometryIndex)
-    {
-        if (Interlocked.CompareExchange(ref modelInputProfileArmed, 0, 0) == 0)
-            return;
-
-        var transform = *(nint*)((byte*)model + 0x38);
-        var hasSkeleton = model->Skeleton != null;
-        var hasBoneList = model->BoneList != null;
-        var combination = (transform != 0 ? 1 : 0) | (hasSkeleton ? 2 : 0) | (hasBoneList ? 4 : 0);
-        Interlocked.Increment(ref modelInputCount);
-        Interlocked.Increment(ref modelInputCombinations[combination]);
-        profiledModels.TryAdd((nint)model, 0);
-
-        if (transform == 0 || profileCandidates.Count >= 16)
-            return;
-
-        var transformBytes = new ReadOnlySpan<byte>((void*)(transform + 0x30), 0x70);
-        profileCandidates.TryAdd(
-            (nint)model,
-            new ModelInputProfileCandidate(
-                (nint)model,
-                (nint)modelResource,
-                geometryIndex,
-                model->SlotIndex,
-                transform,
-                *(nint*)(transform + 0x20),
-                (nint)model->Skeleton,
-                (nint)model->BoneList,
-                Environment.CurrentManagedThreadId,
-                ComputeFnv1A64(transformBytes),
-                FormatQwords(transformBytes.ToArray())
-            )
-        );
-    }
 
     private static bool IsCharacterTransparency(Material* material)
     {
@@ -586,6 +511,34 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
                 context->ViewIndex,
                 context->CurrentSubViewIndex
             );
+
+    private static GeometryStateSnapshot CaptureGeometryState(Context* context)
+    {
+        if (context == null)
+            return default;
+
+        var bytes = (byte*)context;
+        var indexBuffer = *(nint*)(bytes + 0x888);
+        var vertexDeclaration = *(nint*)(bytes + 0x890);
+        var streams = new ulong[8];
+        for (var index = 0; index < streams.Length; index++)
+            streams[index] = *(ulong*)(bytes + 0x8C0 + index * 8);
+
+        return new GeometryStateSnapshot(
+            indexBuffer,
+            FormatNativeObject(indexBuffer, 14),
+            vertexDeclaration,
+            FormatNativeObject(vertexDeclaration, 8),
+            streams
+        );
+    }
+
+    private static string FormatNativeObject(nint address, int qwordCount)
+    {
+        if (address == 0)
+            return "none";
+        return string.Join(',', Enumerable.Range(0, qwordCount).Select(index => $"+0x{index * 8:X}=0x{((ulong*)address)[index]:X}"));
+    }
 
     private static ArenaDelta CaptureArenaDelta(nint beforeBase, ulong beforeUsed, nint afterBase, ulong afterUsed)
     {
@@ -729,6 +682,7 @@ internal sealed record MaterialSubmissionProbeEvent(
     nint Context,
     ContextSnapshot Before,
     ContextSnapshot After,
+    GeometryStateSnapshot GeometryState,
     ArenaDelta CommandDelta,
     ArenaDelta PayloadDelta,
     IReadOnlyList<CommandAllocationSnapshot> CommandAllocations,
@@ -819,24 +773,11 @@ internal sealed record MaterialObservation(
     string AfterQwords
 );
 
-internal sealed record ModelInputProfileSnapshot(
-    long Calls,
-    int UniqueModels,
-    IReadOnlyList<long> Combinations,
-    IReadOnlyList<ModelInputProfileCandidate> Candidates
-);
-
-internal sealed record ModelInputProfileCandidate(
-    nint Model,
-    nint ModelResource,
-    uint GeometryIndex,
-    uint SlotIndex,
-    nint Transform,
-    nint WorldConstantBuffer,
-    nint Skeleton,
-    nint BoneList,
-    int ThreadId,
-    ulong TransformHash,
-    string TransformQwords
+internal readonly record struct GeometryStateSnapshot(
+    nint IndexBuffer,
+    string? IndexBufferQwords,
+    nint VertexDeclaration,
+    string? VertexDeclarationQwords,
+    IReadOnlyList<ulong>? VertexStreams
 );
 #endif

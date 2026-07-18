@@ -24,7 +24,6 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
     private long captureStarted;
     private string state = "Idle";
     private bool capturing;
-    private bool capturingModelInputProfile;
     private bool disposed;
 
     public TransparentDrawCorrelationTracer(
@@ -75,20 +74,6 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         Arm(true);
     }
 
-    public void ArmModelInputProfile()
-    {
-        lock (stateLock)
-        {
-            donor = null;
-            captureStarted = Stopwatch.GetTimestamp();
-            state = "Profiling ModelRenderer inputs for two seconds";
-            capturing = true;
-            capturingModelInputProfile = true;
-        }
-        submissionProbe.ArmModelInputProfile();
-        DebugFileLog.Information(LogSource, "Model input profile armed");
-    }
-
     private void Arm(bool duplicateMainSubmission)
     {
         if (underpaint == null)
@@ -112,7 +97,6 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
                 ? "Capturing one native duplicate (Slot 1 / Material 2 / charactertransparency)"
                 : "Capturing material submission (Slot 1 / Material 2 / charactertransparency)";
             capturing = true;
-            capturingModelInputProfile = false;
         }
         submissionProbe.Arm(snapshot.Model.Model, duplicateMainSubmission);
         underpaint.Diagnostics.BeginTransparentDrawCapture(128, 4);
@@ -127,7 +111,6 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             if (!capturing)
                 return;
             capturing = false;
-            capturingModelInputProfile = false;
             state = $"Cancelled: {reason}";
         }
         underpaint?.Diagnostics.CancelTransparentDrawCapture(reason);
@@ -139,22 +122,12 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
     {
         DonorSnapshot? currentDonor;
         long started;
-        bool modelInputProfile;
         lock (stateLock)
         {
             if (!capturing)
                 return;
             currentDonor = donor;
             started = captureStarted;
-            modelInputProfile = capturingModelInputProfile;
-        }
-
-        if (modelInputProfile)
-        {
-            var elapsed = Stopwatch.GetElapsedTime(started);
-            if (elapsed >= TimeSpan.FromSeconds(2))
-                CompleteModelInputProfile();
-            return;
         }
 
         if (currentDonor == null || !DonorStillValid(currentDonor))
@@ -189,7 +162,6 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         {
             currentDonor = donor;
             capturing = false;
-            capturingModelInputProfile = false;
             state =
                 $"Complete: {capture.Draws.Count} draws, {submissionEvents.Count} builds, {submissionCapture.Executions.Count} executed commands ({capture.Reason})";
         }
@@ -234,47 +206,6 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
                 candidate.StageC.Sequence,
                 candidate.Score,
                 string.Join(',', candidate.Evidence)
-            );
-        }
-    }
-
-    private void CompleteModelInputProfile()
-    {
-        var profile = submissionProbe.StopAndTakeModelInputProfile();
-        lock (stateLock)
-        {
-            capturing = false;
-            capturingModelInputProfile = false;
-            state = $"Complete: {profile.Calls} calls, {profile.UniqueModels} models, {profile.Candidates.Count} with Model+0x38";
-        }
-
-        DebugFileLog.Information(
-            LogSource,
-            "ModelInputProfile Calls={Calls} UniqueModels={UniqueModels} Combinations={Combinations} TransformCandidates={TransformCandidates}",
-            profile.Calls,
-            profile.UniqueModels,
-            string.Join(
-                ',',
-                profile.Combinations.Select((count, flags) => $"T{flags & 1}/S{(flags >> 1) & 1}/B{(flags >> 2) & 1}:{count}")
-            ),
-            profile.Candidates.Count
-        );
-        foreach (var candidate in profile.Candidates)
-        {
-            DebugFileLog.Debug(
-                LogSource,
-                "ModelInputCandidate Thread={Thread} Model=0x{Model:X} ModelResource=0x{ModelResource:X} GeometryIndex={GeometryIndex} Slot={Slot} Transform=0x{Transform:X} WorldCB=0x{WorldCB:X} Skeleton=0x{Skeleton:X} BoneList=0x{BoneList:X} TransformHash=0x{TransformHash:X16} TransformData={TransformData}",
-                candidate.ThreadId,
-                candidate.Model.ToInt64(),
-                candidate.ModelResource.ToInt64(),
-                candidate.GeometryIndex,
-                candidate.SlotIndex,
-                candidate.Transform.ToInt64(),
-                candidate.WorldConstantBuffer.ToInt64(),
-                candidate.Skeleton.ToInt64(),
-                candidate.BoneList.ToInt64(),
-                candidate.TransformHash,
-                candidate.TransformQwords
             );
         }
     }
@@ -484,6 +415,18 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
                 ',',
                 item.CommandAllocations.Select(allocation => $"0x{allocation.Address:X}/{allocation.Size}/0x{allocation.Hash:X16}")
             )
+        );
+        DebugFileLog.Debug(
+            LogSource,
+            "SubmissionGeometry Cycle={Cycle} IndexBuffer=0x{IndexBuffer:X} VertexDeclaration=0x{VertexDeclaration:X} Streams={Streams} IndexBufferObject={IndexBufferObject} VertexDeclarationObject={VertexDeclarationObject}",
+            item.BuildCycle,
+            item.GeometryState.IndexBuffer.ToInt64(),
+            item.GeometryState.VertexDeclaration.ToInt64(),
+            item.GeometryState.VertexStreams == null
+                ? "none"
+                : string.Join(',', item.GeometryState.VertexStreams.Select((value, index) => $"+0x{index * 8:X}=0x{value:X}")),
+            item.GeometryState.IndexBufferQwords ?? "none",
+            item.GeometryState.VertexDeclarationQwords ?? "none"
         );
         var material = item.MaterialObservation;
         DebugFileLog.Debug(
