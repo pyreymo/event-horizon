@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-19 状态：原生 builder `ffxiv_dx11.exe+0x281DD0` 已证实能在原调用现场自动生成完整 Stage A、两族 Stage C和辅助 view command；相同输入重复提交也已闭环验证。两秒实机 profile覆盖165095次 builder调用、313个唯一 Model，全部为 `Model+0x38 == null / Skeleton != null / BoneList != null`，因此自然非 skinned carrier和“寻找 Model工厂”路线已经终止。静态追踪进一步确认 caller `0x281AE0` 把原生 index buffer和vertex streams安装到线程 Context，`0x281DD0` 只按geometry补入vertex declaration，后续pass builder接收material参数与count/start/base并复制整套geometry状态。当前主线已改为映射并创建 Underpaint-owned Kernel VB/IB wrapper、vertex declaration和stream binding；不修改共享对象，不 patch command packet。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-19 状态：原生 builder `ffxiv_dx11.exe+0x281DD0` 已证实能让插件自有 VB/IB 自动生成完整 Stage A、两族 Stage C 和辅助 view command。资源创建、生命周期、线程 Context 几何绑定与恢复、同步 builder 调用边界现已迁入独立 `ffxiv-underpaint` 仓库；EventHorizon 不再实现这些原生细节，只保留 Slot 1 / Material 2 / `charactertransparency.shpk` 的一次性验收触发器。衣服不是后端输入模型，只是当前已知可稳定到达 builder 的临时调用现场。旧近似后端保持冻结且行为未改。下一阻塞项已收敛为 donor-independent 的原生 material/per-instance 提交入口；不再寻找所谓 Model 工厂，不修改共享对象，也不 patch command packet。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 

@@ -359,3 +359,26 @@ Underpaint-owned geometry draw range
 IDA随后确认了正式资源入口：`0x2255A0/0x21DC10` 创建并填充104-byte native VertexBuffer，`0x2257F0/0x21E240` 创建并填充112-byte native IndexBuffer，`0x225A20 -> 0x235720` 从四字节元素描述取得带缓存和引用计数的 VertexDeclaration。三类资源都通过标准引用计数释放，不需要伪造wrapper或把裸 D3D pointer塞入共享对象。
 
 下一版显式 `Arm custom native triangle` PoC在目标主view的 `0x283320` hook内执行：先保留donor原提交，再创建独立native VB/IB/VertexDeclaration，暂时替换当前线程 Context的 `+0x888/+0x890/+0x8C0`，以 `vertexCount=3/startIndex=0/indexCount=3` 再调用一次同一pass builder，并在返回前恢复全部原 Context字段。它不修改 Model、Material、骨骼、donor buffer或已生成command。首次实测证明资源创建和hook触发均成功，但因曾将第5参数误判为baseVertex而传入 `3/0/0`，indexCount为零，未生成draw；现已依据原调用稳定的 `580/12560/2280` 修正参数语义。成功标准首先是日志出现 `CustomGeometrySubmission ... CustomRange=3/0/3`，且后续 D3D捕获出现使用新VB/IB、Count=3的 Stage A/C命令；肉眼是否明显可见不是首要判据。
+
+## 2026-07-19 independent native geometry 成功结果与迁移
+
+修正 `indexCount` 后，实机日志闭环确认插件自有几何进入了完整原生提交：
+
+- native VB wrapper `0x2456FDD1128` 对应 D3D VB `0x2454B951220`；
+- native IB wrapper `0x241D9A7DB20` 对应 D3D IB `0x2454B954EA0`；
+- VertexDeclaration `0x2422E3AD770` 使用已确认的双 stream、7元素布局；
+- builder 收到 `CustomRange=3/0/3`，在主 View 30.12 生成 push 6/7/8/9，并在辅助 View 32/33 生成 push 10/11；
+- D3D侧分别出现 Stage A sequence 34、Stage C family 1 sequence 43、Stage C family 2 sequence 52，三者均为 `Count=3`，且都绑定上述插件自有 VB/IB；
+- donor原提交未被替换，builder返回后原线程 Context的 IB、VertexDeclaration和两个 stream binding均恢复。
+
+这已经证明“原生几何 command入口能统一驱动 Stage A/C”的核心判断。它没有证明衣服或人物 Model 是正式载体：当前衣服过滤只负责把验证调用放进一个已知有效的 material/pass context。
+
+已将以下所有权迁入相邻独立仓库 `ffxiv-underpaint`：
+
+- Kernel VertexBuffer / IndexBuffer / VertexDeclaration 的创建、初始化、引用计数释放；
+- 插件 positions/indices 到原生双 stream 布局的转换；
+- 当前线程 `Graphics::Kernel::Context` 几何状态的安装和无条件恢复；
+- 在原 hook、原线程、原生命周期内同步调用 pass builder 的最小边界；
+- renderer销毁时回收仍存活的原生几何。
+
+EventHorizon侧已经删除资源工厂、wrapper字段、stream打包和native release代码。它只创建测试三角形、命中一次衣服调用并把 `modelRenderer + materialParams + 原builder回调` 交给 Underpaint，因此不会把人物/衣服筛选固化为后端语义。该入口暂时保持 internal，直到找到不借用衣服 material调用的独立 material/per-instance输入边界；这也是正式公开后端前唯一的主线阻塞项。

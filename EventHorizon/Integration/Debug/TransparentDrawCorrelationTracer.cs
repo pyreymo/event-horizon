@@ -34,7 +34,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
     {
         this.targetManager = targetManager;
         this.underpaint = underpaint;
-        submissionProbe = new MaterialSubmissionContainerProbe(gameInteropProvider);
+        submissionProbe = new MaterialSubmissionContainerProbe(gameInteropProvider, underpaint);
     }
 
     public string State

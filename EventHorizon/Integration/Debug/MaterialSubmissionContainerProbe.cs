@@ -2,7 +2,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Numerics;
-using System.Runtime.InteropServices;
 using System.Threading;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
@@ -10,6 +9,8 @@ using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Render;
 using FFXIVClientStructs.FFXIV.Client.System.Resource.Handle;
 using FFXIVClientStructs.Interop;
+using Underpaint;
+using Underpaint.Internal;
 
 namespace EventHorizon.Integration.Debug;
 
@@ -34,12 +35,6 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
     private const string PrepareDrawStateSignature = "40 56 41 56 48 83 EC 48 80 7A";
     private const string NativeCaller = "ffxiv_dx11.exe+0x281D91";
     private const string ExpandPassesSignature = "44 89 4C 24 ?? 44 89 44 24 ?? 53 56 57 41 54 41 55";
-    private const string CreateVertexBufferSignature = "40 55 56 57 41 57 48 83 EC 28";
-    private const string InitializeVertexBufferSignature =
-        "48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 50 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 44 24 ?? 44 8B 49";
-    private const string CreateIndexBufferSignature = "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 7C 24 ?? 41 56 48 83 EC 20 48 8B 05";
-    private const string InitializeIndexBufferSignature = "40 53 48 83 EC 20 F7 41 40 00 08 00 00 48 8B D9";
-    private const string CreateVertexDeclarationSignature = "48 8B 49 ?? E9 ?? ?? ?? ?? CC CC CC CC CC CC CC 40 53 55 57";
 
     [ThreadStatic]
     private static BuildScope? activeScope;
@@ -51,11 +46,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
     private readonly Hook<PreprocessCommandsDelegate> preprocessCommandsHook;
     private readonly Hook<PrepareDrawStateDelegate> prepareDrawStateHook;
     private readonly Hook<ExpandPassesDelegate> expandPassesHook;
-    private readonly Hook<CreateVertexBufferDelegate> createVertexBufferHook;
-    private readonly Hook<InitializeBufferDelegate> initializeVertexBufferHook;
-    private readonly Hook<CreateIndexBufferDelegate> createIndexBufferHook;
-    private readonly Hook<InitializeBufferDelegate> initializeIndexBufferHook;
-    private readonly Hook<CreateVertexDeclarationDelegate> createVertexDeclarationHook;
+    private readonly UnderpaintRenderer? underpaint;
     private readonly Lock stateLock = new();
     private readonly List<MaterialSubmissionProbeEvent> events = [];
     private readonly List<CommandConsumptionSnapshot> consumptionEvents = [];
@@ -65,9 +56,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
     private int duplicateMainSubmissionArmed;
     private int customGeometrySubmissionArmed;
     private long nextBuildCycle;
-    private nint customVertexBuffer;
-    private nint customIndexBuffer;
-    private nint customVertexDeclaration;
+    private NativeGeometry? customGeometry;
     private bool disposed;
 
     private delegate nint MaterialBuilderDelegate(
@@ -105,16 +94,9 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
         int indexCount
     );
 
-    private delegate nint CreateVertexBufferDelegate(Device* device, int byteSize, uint flags, byte allocationCategory);
-
-    private delegate byte InitializeBufferDelegate(nint buffer, void* data);
-
-    private delegate nint CreateIndexBufferDelegate(Device* device, int byteSize, int elementSize, uint flags, byte allocationCategory);
-
-    private delegate nint CreateVertexDeclarationDelegate(Device* device, byte* elements, uint elementCount);
-
-    public MaterialSubmissionContainerProbe(IGameInteropProvider gameInteropProvider)
+    public MaterialSubmissionContainerProbe(IGameInteropProvider gameInteropProvider, UnderpaintRenderer? underpaint)
     {
+        this.underpaint = underpaint;
         materialBuilderHook = gameInteropProvider.HookFromSignature<MaterialBuilderDelegate>(
             MaterialBuilderSignature,
             MaterialBuilderDetour
@@ -140,26 +122,6 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             PrepareDrawStateDetour
         );
         expandPassesHook = gameInteropProvider.HookFromSignature<ExpandPassesDelegate>(ExpandPassesSignature, ExpandPassesDetour);
-        createVertexBufferHook = gameInteropProvider.HookFromSignature<CreateVertexBufferDelegate>(
-            CreateVertexBufferSignature,
-            (_, _, _, _) => 0
-        );
-        initializeVertexBufferHook = gameInteropProvider.HookFromSignature<InitializeBufferDelegate>(
-            InitializeVertexBufferSignature,
-            (_, _) => 0
-        );
-        createIndexBufferHook = gameInteropProvider.HookFromSignature<CreateIndexBufferDelegate>(
-            CreateIndexBufferSignature,
-            (_, _, _, _, _) => 0
-        );
-        initializeIndexBufferHook = gameInteropProvider.HookFromSignature<InitializeBufferDelegate>(
-            InitializeIndexBufferSignature,
-            (_, _) => 0
-        );
-        createVertexDeclarationHook = gameInteropProvider.HookFromSignature<CreateVertexDeclarationDelegate>(
-            CreateVertexDeclarationSignature,
-            (_, _, _) => 0
-        );
         materialBuilderHook.Enable();
         onRenderMaterialHook.Enable();
         allocateCommandHook.Enable();
@@ -212,19 +174,12 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
         Stop();
         prepareDrawStateHook.Dispose();
         expandPassesHook.Dispose();
-        createVertexDeclarationHook.Dispose();
-        initializeIndexBufferHook.Dispose();
-        createIndexBufferHook.Dispose();
-        initializeVertexBufferHook.Dispose();
-        createVertexBufferHook.Dispose();
         preprocessCommandsHook.Dispose();
         pushBackCommandHook.Dispose();
         allocateCommandHook.Dispose();
         onRenderMaterialHook.Dispose();
         materialBuilderHook.Dispose();
-        ReleaseNativeResource(ref customVertexDeclaration);
-        ReleaseNativeResource(ref customIndexBuffer);
-        ReleaseNativeResource(ref customVertexBuffer);
+        customGeometry?.Dispose();
     }
 
     private nint ExpandPassesDetour(
@@ -249,169 +204,56 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             return result;
         }
 
-        if (!EnsureCustomGeometryResources())
+        if (underpaint == null)
         {
-            DebugFileLog.Information("MaterialSubmissionProbe", "Custom native geometry resources could not be created");
+            DebugFileLog.Information("MaterialSubmissionProbe", "Underpaint native geometry backend is unavailable");
             return result;
         }
 
-        var bytes = (byte*)context;
-        var savedIndexBuffer = *(nint*)(bytes + 0x888);
-        var savedVertexDeclaration = *(nint*)(bytes + 0x890);
-        Span<ulong> savedStreams = stackalloc ulong[4];
-        for (var index = 0; index < savedStreams.Length; index++)
-            savedStreams[index] = *(ulong*)(bytes + 0x8C0 + index * 8);
-
-        nint customResult;
         try
         {
-            *(nint*)(bytes + 0x888) = customIndexBuffer;
-            *(nint*)(bytes + 0x890) = customVertexDeclaration;
-            *(nint*)(bytes + 0x8C0) = customVertexBuffer;
-            *(ulong*)(bytes + 0x8C8) = PackStreamBinding(0, 20);
-            *(nint*)(bytes + 0x8D0) = customVertexBuffer;
-            *(ulong*)(bytes + 0x8D8) = PackStreamBinding(60, 24);
-            customResult = expandPassesHook.Original(modelRenderer, param, 3, 0, 3);
-        }
-        finally
-        {
-            *(nint*)(bytes + 0x888) = savedIndexBuffer;
-            *(nint*)(bytes + 0x890) = savedVertexDeclaration;
-            for (var index = 0; index < savedStreams.Length; index++)
-                *(ulong*)(bytes + 0x8C0 + index * 8) = savedStreams[index];
-        }
+            customGeometry ??= underpaint.CreateNativeGeometry(
+                [new Vector3(-0.75f, 0f, 0f), new Vector3(0.75f, 0f, 0f), new Vector3(0f, 1.5f, 0f)],
+                [0, 1, 2]
+            );
+            var submission = underpaint.SubmitNativeGeometry(
+                (nint)modelRenderer,
+                (nint)param,
+                customGeometry,
+                (renderer, parameters, vertices, firstIndex, indices) =>
+                    expandPassesHook.Original(
+                        (ModelRenderer*)renderer,
+                        (ModelRenderer.OnRenderMaterialParams2*)parameters,
+                        vertices,
+                        firstIndex,
+                        indices
+                    )
+            );
 
-        DebugFileLog.Information(
-            "MaterialSubmissionProbe",
-            "CustomGeometrySubmission Cycle={Cycle} Thread={Thread} Context=0x{Context:X} VB=0x{VB:X} VBResource=0x{VBResource:X} IB=0x{IB:X} IBResource=0x{IBResource:X} VertexDeclaration=0x{VertexDeclaration:X} OriginalRange={OriginalVertices}/{OriginalStart}/{OriginalIndices} CustomRange=3/0/3 Result=0x{Result:X}",
-            scope.BuildCycle,
-            scope.ThreadId,
-            (nint)context,
-            customVertexBuffer,
-            *(nint*)(customVertexBuffer + 0x40),
-            customIndexBuffer,
-            *(nint*)(customIndexBuffer + 0x48),
-            customVertexDeclaration,
-            vertexCount,
-            startIndex,
-            indexCount,
-            customResult
-        );
+            DebugFileLog.Information(
+                "MaterialSubmissionProbe",
+                "CustomGeometrySubmission Cycle={Cycle} Thread={Thread} Context=0x{Context:X} VB=0x{VB:X} VBResource=0x{VBResource:X} IB=0x{IB:X} IBResource=0x{IBResource:X} VertexDeclaration=0x{VertexDeclaration:X} OriginalRange={OriginalVertices}/{OriginalStart}/{OriginalIndices} CustomRange={CustomVertices}/0/{CustomIndices} Result=0x{Result:X}",
+                scope.BuildCycle,
+                scope.ThreadId,
+                submission.Context,
+                submission.VertexBuffer,
+                submission.VertexBufferResource,
+                submission.IndexBuffer,
+                submission.IndexBufferResource,
+                submission.VertexDeclaration,
+                vertexCount,
+                startIndex,
+                indexCount,
+                submission.VertexCount,
+                submission.IndexCount,
+                submission.BuilderResult
+            );
+        }
+        catch (Exception exception)
+        {
+            DebugFileLog.Error("MaterialSubmissionProbe", exception, "Underpaint native geometry submission failed");
+        }
         return result;
-    }
-
-    private bool EnsureCustomGeometryResources()
-    {
-        lock (stateLock)
-        {
-            if (customVertexBuffer != 0 && customIndexBuffer != 0 && customVertexDeclaration != 0)
-                return true;
-
-            var device = Device.Instance();
-            if (device == null)
-                return false;
-
-            NativeStream0Vertex* stream0 = stackalloc NativeStream0Vertex[3];
-            stream0[0] = new(new Vector3(-0.75f, 0f, 0f));
-            stream0[1] = new(new Vector3(0.75f, 0f, 0f));
-            stream0[2] = new(new Vector3(0f, 1.5f, 0f));
-            NativeStream1Vertex* stream1 = stackalloc NativeStream1Vertex[3];
-            stream1[0] = NativeStream1Vertex.Default;
-            stream1[1] = NativeStream1Vertex.Default;
-            stream1[2] = NativeStream1Vertex.Default;
-            byte* vertexData = stackalloc byte[132];
-            new ReadOnlySpan<byte>(stream0, 60).CopyTo(new Span<byte>(vertexData, 60));
-            new ReadOnlySpan<byte>(stream1, 72).CopyTo(new Span<byte>(vertexData + 60, 72));
-            ushort* indices = stackalloc ushort[] { 0, 1, 2 };
-            byte* declaration = stackalloc byte[]
-            {
-                0,
-                0,
-                0x13,
-                0,
-                0,
-                12,
-                0x3C,
-                1,
-                0,
-                16,
-                0x3C,
-                7,
-                1,
-                0,
-                0x1C,
-                2,
-                1,
-                8,
-                0x24,
-                15,
-                1,
-                12,
-                0x24,
-                3,
-                1,
-                16,
-                0x1C,
-                8,
-            };
-
-            customVertexBuffer = createVertexBufferHook.Original(device, 132, 0x804, 0);
-            customIndexBuffer = createIndexBufferHook.Original(device, 6, 1, 0x804, 0);
-            customVertexDeclaration = createVertexDeclarationHook.Original(device, declaration, 7);
-            if (
-                customVertexBuffer == 0
-                || customIndexBuffer == 0
-                || customVertexDeclaration == 0
-                || initializeVertexBufferHook.Original(customVertexBuffer, vertexData) == 0
-                || initializeIndexBufferHook.Original(customIndexBuffer, indices) == 0
-            )
-            {
-                ReleaseNativeResource(ref customVertexDeclaration);
-                ReleaseNativeResource(ref customIndexBuffer);
-                ReleaseNativeResource(ref customVertexBuffer);
-                return false;
-            }
-            return true;
-        }
-    }
-
-    private static ulong PackStreamBinding(int byteOffset, byte stride) => ((ulong)(uint)byteOffset << 8) | stride;
-
-    private static void ReleaseNativeResource(ref nint resource)
-    {
-        var value = resource;
-        resource = 0;
-        if (value == 0)
-            return;
-        var release = (delegate* unmanaged<nint, void>)(*(nint*)(*(nint*)value + 0x18));
-        release(value);
-    }
-
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    private readonly struct NativeStream0Vertex(Vector3 position)
-    {
-        public readonly Vector3 Position = position;
-        public readonly uint Attribute1 = uint.MaxValue;
-        public readonly uint Attribute7 = 0;
-    }
-
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    private readonly struct NativeStream1Vertex
-    {
-        public static readonly NativeStream1Vertex Default = new(0x3C003C0000000000, uint.MaxValue, uint.MaxValue, 0);
-
-        private NativeStream1Vertex(ulong attribute2, uint attribute15, uint attribute3, ulong attribute8)
-        {
-            Attribute2 = attribute2;
-            Attribute15 = attribute15;
-            Attribute3 = attribute3;
-            Attribute8 = attribute8;
-        }
-
-        public readonly ulong Attribute2;
-        public readonly uint Attribute15;
-        public readonly uint Attribute3;
-        public readonly ulong Attribute8;
     }
 
     private nint MaterialBuilderDetour(
