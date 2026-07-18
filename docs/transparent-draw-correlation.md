@@ -381,4 +381,27 @@ IDA随后确认了正式资源入口：`0x2255A0/0x21DC10` 创建并填充104-by
 - 在原 hook、原线程、原生命周期内同步调用 pass builder 的最小边界；
 - renderer销毁时回收仍存活的原生几何。
 
-EventHorizon侧已经删除资源工厂、wrapper字段、stream打包和native release代码。它只创建测试三角形、命中一次衣服调用并把 `modelRenderer + materialParams + 原builder回调` 交给 Underpaint，因此不会把人物/衣服筛选固化为后端语义。该入口暂时保持 internal，直到找到不借用衣服 material调用的独立 material/per-instance输入边界；这也是正式公开后端前唯一的主线阻塞项。
+EventHorizon侧已经删除资源工厂、wrapper字段、stream打包和native release代码。第一次迁移后实测结果未退化：Stage A sequence 34、Stage C sequence 43/52，以及辅助 Stage C sequence 54 均继续出现 `Count=3`，且绑定迁移后 Underpaint 创建的同一组插件 VB/IB。
+
+### 无目标提交现场
+
+继续静态追踪确认：
+
+- `ResourceManager.GetResourceSync` 可以由资源路径推导 category、type 和 CRC；`.mtrl` 加载完成后，`MaterialResourceHandle` 会自行加载 SHPK/纹理并在 `+0xC0` 建立 `Render::Material`。因此独立持有材质资源可行。
+- 但 `0x281DD0` 不是“只给 Material 即可调用”的入口。它读取 `Model.Materials`、`ModelResourceHandle` 的 geometry/material映射、bone/instancing buffers以及多组 model-owned资源；伪造 Model 仍是错误方向。
+- 真正已验证的几何 pass展开入口是 `0x283320`。它接收 `0x281DD0` 已准备好的 `OnRenderMaterialParams2` 与当前线程 Context状态；此前的自有 VB/IB PoC实际也是在这一层完成重复提交。
+
+据此，Underpaint 增加了一个仍为 internal 的一次性 standalone arm：
+
+```text
+EventHorizon 只创建测试三角形并 arm
+  -> Underpaint 等待下一次 View=30 / SubView=11 的原生 pass builder 调用
+  -> 保留原调用
+  -> 临时安装 Underpaint-owned VB/IB/VertexDeclaration
+  -> 用当前完整 material/per-instance context 再调用一次 0x283320
+  -> 无条件恢复 Context
+```
+
+该路径不再读取目标角色，也没有 Slot、MaterialIndex 或 SHPK过滤。日志 `StandaloneNativeSubmission` 会记录提交现场的 model renderer、material params、model、view/subview、Context、自有资源和 `3/0/3` range。下一次实机验收只需打开 `/eh 3d` 后点击 `Arm custom native triangle`，不需要选中角色或穿指定衣服。
+
+这一步解决的是“谁负责找到可用原生提交现场”：现在由 Underpaint 自己负责。它尚未解决“材质和实例状态完全由插件独立拥有”；当前仍借用命中现场已经准备好的 material/per-instance context。正式公开后端前的剩余主线是把独立加载的 `MaterialResourceHandle/Render::Material` 接到可复制的最小 params 状态，或找到为非 skinned primitive 准备该状态的更高层原生入口。

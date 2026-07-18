@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-19 状态：原生 builder `ffxiv_dx11.exe+0x281DD0` 已证实能让插件自有 VB/IB 自动生成完整 Stage A、两族 Stage C 和辅助 view command。资源创建、生命周期、线程 Context 几何绑定与恢复、同步 builder 调用边界现已迁入独立 `ffxiv-underpaint` 仓库；EventHorizon 不再实现这些原生细节，只保留 Slot 1 / Material 2 / `charactertransparency.shpk` 的一次性验收触发器。衣服不是后端输入模型，只是当前已知可稳定到达 builder 的临时调用现场。旧近似后端保持冻结且行为未改。下一阻塞项已收敛为 donor-independent 的原生 material/per-instance 提交入口；不再寻找所谓 Model 工厂，不修改共享对象，也不 patch command packet。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-19 状态：原生 builder 已证实能让插件自有 VB/IB 自动生成完整 Stage A、两族 Stage C 和辅助 view command。资源创建、生命周期、线程 Context 几何绑定与恢复现已迁入独立 `ffxiv-underpaint` 仓库。迁移后的实测仍稳定出现四条绑定插件 VB/IB 的 `Count=3` draw。随后入口进一步下移到实际 pass builder `ffxiv_dx11.exe+0x283320`：Underpaint 可显式 arm 一次，并在下一次主场景原生提交现场自行消费，不再要求目标角色、Slot 1、Material 2 或 `charactertransparency.shpk` 才能触发。该无目标路径尚待一次实机验收；材质和 per-instance 状态仍暂借当前原生提交现场。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 

@@ -199,7 +199,7 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.EndDisabled();
         if (clearDebugLogState.Length != 0)
             ImGui.TextDisabled(clearDebugLogState);
-        ImGui.TextDisabled("Custom triangle submits independent native VB/IB resources through the target material's pass builder.");
+        ImGui.TextDisabled("Custom triangle uses the next main-view native submission site; no character or equipment filter is required.");
     }
 #endif
 

@@ -6,6 +6,7 @@ using FFXIVClientStructs.FFXIV.Client.Game.Object;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Render;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
 using Underpaint;
+using Underpaint.Internal;
 using RenderMaterial = FFXIVClientStructs.FFXIV.Client.Graphics.Render.Material;
 using RenderModel = FFXIVClientStructs.FFXIV.Client.Graphics.Render.Model;
 
@@ -21,9 +22,11 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
     private readonly MaterialSubmissionContainerProbe submissionProbe;
     private readonly Lock stateLock = new();
     private DonorSnapshot? donor;
+    private NativeGeometry? standaloneGeometry;
     private long captureStarted;
     private string state = "Idle";
     private bool capturing;
+    private bool standaloneCapture;
     private bool disposed;
 
     public TransparentDrawCorrelationTracer(
@@ -76,7 +79,24 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
 
     public void ArmCustomNativeGeometry()
     {
-        Arm(false, true);
+        if (underpaint == null)
+        {
+            SetState("Unavailable: Underpaint failed to initialize");
+            return;
+        }
+
+        standaloneGeometry ??= underpaint.CreateNativeGeometry([new(-0.75f, 0f, 0f), new(0.75f, 0f, 0f), new(0f, 1.5f, 0f)], [0, 1, 2]);
+        underpaint.ArmNativeGeometrySubmission(standaloneGeometry);
+        lock (stateLock)
+        {
+            donor = null;
+            standaloneCapture = true;
+            captureStarted = Stopwatch.GetTimestamp();
+            state = "Waiting for an independent main-view native submission site";
+            capturing = true;
+        }
+        underpaint.Diagnostics.BeginTransparentDrawCapture(128, 4);
+        DebugFileLog.Information(LogSource, "Standalone native geometry armed; no character, equipment slot, or material filter is active");
     }
 
     private void Arm(bool duplicateMainSubmission, bool customGeometrySubmission = false)
@@ -97,6 +117,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         lock (stateLock)
         {
             donor = snapshot;
+            standaloneCapture = false;
             captureStarted = Stopwatch.GetTimestamp();
             state =
                 customGeometrySubmission ? "Submitting one custom native triangle through the target material"
@@ -125,6 +146,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             state = $"Cancelled: {reason}";
         }
         underpaint?.Diagnostics.CancelTransparentDrawCapture(reason);
+        underpaint?.CancelNativeGeometrySubmission();
         submissionProbe.Stop();
         DebugFileLog.Information(LogSource, "Capture cancelled: {Reason}", reason);
     }
@@ -132,19 +154,30 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
     public void Update()
     {
         DonorSnapshot? currentDonor;
+        bool currentStandaloneCapture;
         long started;
         lock (stateLock)
         {
             if (!capturing)
                 return;
             currentDonor = donor;
+            currentStandaloneCapture = standaloneCapture;
             started = captureStarted;
         }
 
-        if (currentDonor == null || !DonorStillValid(currentDonor))
+        if (!currentStandaloneCapture && (currentDonor == null || !DonorStillValid(currentDonor)))
         {
             Cancel("donor-invalid");
             return;
+        }
+        if (currentStandaloneCapture && underpaint?.TryTakeNativeGeometrySubmission(out var standaloneSubmission) == true)
+        {
+            LogStandaloneSubmission(standaloneSubmission);
+            SetState(
+                standaloneSubmission.Succeeded
+                    ? "Independent native submission completed; collecting draw evidence"
+                    : $"Independent native submission failed: {standaloneSubmission.Failure}"
+            );
         }
         if (Stopwatch.GetElapsedTime(started) >= CaptureTimeout)
         {
@@ -161,6 +194,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             return;
         disposed = true;
         Cancel("dispose");
+        standaloneGeometry?.Dispose();
         submissionProbe.Dispose();
     }
 
@@ -177,9 +211,6 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
                 $"Complete: {capture.Draws.Count} draws, {submissionEvents.Count} builds, {submissionCapture.Executions.Count} executed commands ({capture.Reason})";
         }
 
-        if (currentDonor == null)
-            return;
-
         foreach (var submissionEvent in submissionEvents)
             LogSubmission(submissionEvent);
         foreach (var consumption in submissionCapture.Consumptions)
@@ -189,6 +220,17 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
 
         foreach (var draw in capture.Draws)
             LogDraw(draw);
+
+        if (currentDonor == null)
+        {
+            DebugFileLog.Information(
+                LogSource,
+                "Standalone capture complete Reason={Reason} Draws={Draws}",
+                capture.Reason,
+                capture.Draws.Count
+            );
+            return;
+        }
 
         var match = TransparentDrawCorrelationMatcher.Match(
             new CorrelationDonorEvidence(true, currentDonor.TextureResources),
@@ -219,6 +261,31 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
                 string.Join(',', candidate.Evidence)
             );
         }
+    }
+
+    private static void LogStandaloneSubmission(NativeGeometryStandaloneSubmission item)
+    {
+        var submission = item.Submission;
+        DebugFileLog.Information(
+            LogSource,
+            "StandaloneNativeSubmission Success={Success} Failure={Failure} ModelRenderer=0x{ModelRenderer:X} MaterialParams=0x{MaterialParams:X} Model=0x{Model:X} View={View} SubView={SubView} Context=0x{Context:X} VB=0x{VB:X} VBResource=0x{VBResource:X} IB=0x{IB:X} IBResource=0x{IBResource:X} VertexDeclaration=0x{VertexDeclaration:X} Range={Vertices}/0/{Indices} Result=0x{Result:X}",
+            item.Succeeded,
+            item.Failure ?? "",
+            item.ModelRenderer,
+            item.MaterialParameters,
+            item.Model,
+            item.View,
+            item.SubView,
+            submission.Context,
+            submission.VertexBuffer,
+            submission.VertexBufferResource,
+            submission.IndexBuffer,
+            submission.IndexBufferResource,
+            submission.VertexDeclaration,
+            submission.VertexCount,
+            submission.IndexCount,
+            submission.BuilderResult
+        );
     }
 
     private DonorSnapshot? TryCaptureDonor()
