@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-19 状态：原生 builder 已证实能让插件自有 VB/IB 自动生成完整 Stage A、两族 Stage C 和辅助 view command。资源创建、生命周期、线程 Context 几何绑定与恢复现已迁入独立 `ffxiv-underpaint` 仓库。迁移后的实测仍稳定出现四条绑定插件 VB/IB 的 `Count=3` draw。随后入口进一步下移到实际 pass builder `ffxiv_dx11.exe+0x283320`：Underpaint 可显式 arm 一次，并在下一次主场景原生提交现场自行消费，不再要求目标角色、Slot 1、Material 2 或 `charactertransparency.shpk` 才能触发。该无目标路径尚待一次实机验收；材质和 per-instance 状态仍暂借当前原生提交现场。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-19 状态：原生 builder 已证实能让插件自有 VB/IB 自动生成完整 Stage A、两族 Stage C 和辅助 view command。资源创建、生命周期、线程 Context 几何绑定与恢复现已迁入独立 `ffxiv-underpaint` 仓库。迁移后的实测仍稳定出现四条绑定插件 VB/IB 的 `Count=3` draw。入口随后下移到实际 pass builder `ffxiv_dx11.exe+0x283320`。第一次无目标实测暴露出一个必要约束：不能消费任意首个主视图调用；该调用的原 geometry 使用 `20/28` streams，而插件 geometry 是已验证的 `20/24` ABI，结果虽执行 `3/0/3` builder 调用却没有生成命令。现在 Underpaint 只消费下一次 `20/24` 兼容现场，并记录源 vertex declaration、streams 和 range；仍不要求目标角色、Slot、MaterialIndex 或指定 SHPK。该修正版待实机验收。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 

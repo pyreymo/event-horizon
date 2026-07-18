@@ -199,7 +199,9 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.EndDisabled();
         if (clearDebugLogState.Length != 0)
             ImGui.TextDisabled(clearDebugLogState);
-        ImGui.TextDisabled("Custom triangle uses the next main-view native submission site; no character or equipment filter is required.");
+        ImGui.TextDisabled(
+            "Custom triangle uses the next compatible 20/24 main-view submission site; no character or equipment filter is required."
+        );
     }
 #endif
 

@@ -402,6 +402,8 @@ EventHorizon 只创建测试三角形并 arm
   -> 无条件恢复 Context
 ```
 
-该路径不再读取目标角色，也没有 Slot、MaterialIndex 或 SHPK过滤。日志 `StandaloneNativeSubmission` 会记录提交现场的 model renderer、material params、model、view/subview、Context、自有资源和 `3/0/3` range。下一次实机验收只需打开 `/eh 3d` 后点击 `Arm custom native triangle`，不需要选中角色或穿指定衣服。
+该路径不再读取目标角色，也没有 Slot、MaterialIndex 或 SHPK过滤。第一次实测确认 arm 会在 21ms 内命中并调用 `3/0/3`，但没有产生 `Count=3`：命中现场随后可见的原 draw 使用 stream strides `20/28`，而插件自有 vertex declaration/数据布局固定为先前已经成功验证的 `20/24`。因此“任意主视图现场都兼容”是错误假设；builder 被调用不代表不匹配的 vertex ABI 会生成命令。
+
+修正后，arm 只在当前 Context 的两个 stream strides 为 `20/24` 时消费。它仍然不检查人物、装备或材质身份。日志 `StandaloneNativeSubmission` 额外记录源 VB/IB、vertex declaration、strides和原 range；若捕获窗口内不存在兼容现场，UI和日志会明确报告 `No compatible 20/24 native submission site`，而不会把一次无命令的调用误报为成功。下一次实机验收只需打开 `/eh 3d` 后点击 `Arm custom native triangle`，不需要选中角色或穿指定衣服。
 
 这一步解决的是“谁负责找到可用原生提交现场”：现在由 Underpaint 自己负责。它尚未解决“材质和实例状态完全由插件独立拥有”；当前仍借用命中现场已经准备好的 material/per-instance context。正式公开后端前的剩余主线是把独立加载的 `MaterialResourceHandle/Render::Material` 接到可复制的最小 params 状态，或找到为非 skinned primitive 准备该状态的更高层原生入口。

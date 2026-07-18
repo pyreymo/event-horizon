@@ -27,6 +27,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
     private string state = "Idle";
     private bool capturing;
     private bool standaloneCapture;
+    private bool standaloneSubmissionSeen;
     private bool disposed;
 
     public TransparentDrawCorrelationTracer(
@@ -91,6 +92,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         {
             donor = null;
             standaloneCapture = true;
+            standaloneSubmissionSeen = false;
             captureStarted = Stopwatch.GetTimestamp();
             state = "Waiting for an independent main-view native submission site";
             capturing = true;
@@ -118,6 +120,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         {
             donor = snapshot;
             standaloneCapture = false;
+            standaloneSubmissionSeen = false;
             captureStarted = Stopwatch.GetTimestamp();
             state =
                 customGeometrySubmission ? "Submitting one custom native triangle through the target material"
@@ -172,6 +175,8 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         }
         if (currentStandaloneCapture && underpaint?.TryTakeNativeGeometrySubmission(out var standaloneSubmission) == true)
         {
+            lock (stateLock)
+                standaloneSubmissionSeen = true;
             LogStandaloneSubmission(standaloneSubmission);
             SetState(
                 standaloneSubmission.Succeeded
@@ -208,7 +213,9 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             currentDonor = donor;
             capturing = false;
             state =
-                $"Complete: {capture.Draws.Count} draws, {submissionEvents.Count} builds, {submissionCapture.Executions.Count} executed commands ({capture.Reason})";
+                standaloneCapture && !standaloneSubmissionSeen
+                    ? $"No compatible 20/24 native submission site was found ({capture.Reason})"
+                    : $"Complete: {capture.Draws.Count} draws, {submissionEvents.Count} builds, {submissionCapture.Executions.Count} executed commands ({capture.Reason})";
         }
 
         foreach (var submissionEvent in submissionEvents)
@@ -223,11 +230,13 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
 
         if (currentDonor == null)
         {
+            underpaint?.CancelNativeGeometrySubmission();
             DebugFileLog.Information(
                 LogSource,
-                "Standalone capture complete Reason={Reason} Draws={Draws}",
+                "Standalone capture complete Reason={Reason} Draws={Draws} SubmissionSeen={SubmissionSeen}",
                 capture.Reason,
-                capture.Draws.Count
+                capture.Draws.Count,
+                standaloneSubmissionSeen
             );
             return;
         }
@@ -268,7 +277,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         var submission = item.Submission;
         DebugFileLog.Information(
             LogSource,
-            "StandaloneNativeSubmission Success={Success} Failure={Failure} ModelRenderer=0x{ModelRenderer:X} MaterialParams=0x{MaterialParams:X} Model=0x{Model:X} View={View} SubView={SubView} Context=0x{Context:X} VB=0x{VB:X} VBResource=0x{VBResource:X} IB=0x{IB:X} IBResource=0x{IBResource:X} VertexDeclaration=0x{VertexDeclaration:X} Range={Vertices}/0/{Indices} Result=0x{Result:X}",
+            "StandaloneNativeSubmission Success={Success} Failure={Failure} ModelRenderer=0x{ModelRenderer:X} MaterialParams=0x{MaterialParams:X} Model=0x{Model:X} View={View} SubView={SubView} SourceVB=0x{SourceVB:X} SourceIB=0x{SourceIB:X} SourceVertexDeclaration=0x{SourceVertexDeclaration:X} SourceStrides={SourceStream0Stride}/{SourceStream1Stride} SourceRange={SourceVertices}/{SourceStart}/{SourceIndices} Context=0x{Context:X} VB=0x{VB:X} VBResource=0x{VBResource:X} IB=0x{IB:X} IBResource=0x{IBResource:X} VertexDeclaration=0x{VertexDeclaration:X} Range={Vertices}/0/{Indices} Result=0x{Result:X}",
             item.Succeeded,
             item.Failure ?? "",
             item.ModelRenderer,
@@ -276,6 +285,14 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             item.Model,
             item.View,
             item.SubView,
+            item.SourceVertexBuffer,
+            item.SourceIndexBuffer,
+            item.SourceVertexDeclaration,
+            item.SourceStream0Stride,
+            item.SourceStream1Stride,
+            item.SourceVertexCount,
+            item.SourceStartIndex,
+            item.SourceIndexCount,
             submission.Context,
             submission.VertexBuffer,
             submission.VertexBufferResource,
