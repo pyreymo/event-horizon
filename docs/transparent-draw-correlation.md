@@ -358,4 +358,4 @@ Underpaint-owned geometry draw range
 
 IDA随后确认了正式资源入口：`0x2255A0/0x21DC10` 创建并填充104-byte native VertexBuffer，`0x2257F0/0x21E240` 创建并填充112-byte native IndexBuffer，`0x225A20 -> 0x235720` 从四字节元素描述取得带缓存和引用计数的 VertexDeclaration。三类资源都通过标准引用计数释放，不需要伪造wrapper或把裸 D3D pointer塞入共享对象。
 
-下一版显式 `Arm custom native triangle` PoC在目标主view的 `0x283320` hook内执行：先保留donor原提交，再创建独立native VB/IB/VertexDeclaration，暂时替换当前线程 Context的 `+0x888/+0x890/+0x8C0`，以 `Count=3/Start=0/Base=0` 再调用一次同一pass builder，并在返回前恢复全部原 Context字段。它不修改 Model、Material、骨骼、donor buffer或已生成command。成功标准首先是日志出现 `CustomGeometrySubmission`，且后续 D3D捕获出现使用新VB/IB、Count=3的 Stage A/C命令；肉眼是否明显可见不是首要判据。
+下一版显式 `Arm custom native triangle` PoC在目标主view的 `0x283320` hook内执行：先保留donor原提交，再创建独立native VB/IB/VertexDeclaration，暂时替换当前线程 Context的 `+0x888/+0x890/+0x8C0`，以 `vertexCount=3/startIndex=0/indexCount=3` 再调用一次同一pass builder，并在返回前恢复全部原 Context字段。它不修改 Model、Material、骨骼、donor buffer或已生成command。首次实测证明资源创建和hook触发均成功，但因曾将第5参数误判为baseVertex而传入 `3/0/0`，indexCount为零，未生成draw；现已依据原调用稳定的 `580/12560/2280` 修正参数语义。成功标准首先是日志出现 `CustomGeometrySubmission ... CustomRange=3/0/3`，且后续 D3D捕获出现使用新VB/IB、Count=3的 Stage A/C命令；肉眼是否明显可见不是首要判据。

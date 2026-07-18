@@ -100,9 +100,9 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
     private delegate nint ExpandPassesDelegate(
         ModelRenderer* modelRenderer,
         ModelRenderer.OnRenderMaterialParams2* param,
-        int count,
+        int vertexCount,
         int startIndex,
-        int baseVertex
+        int indexCount
     );
 
     private delegate nint CreateVertexBufferDelegate(Device* device, int byteSize, uint flags, byte allocationCategory);
@@ -230,12 +230,12 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
     private nint ExpandPassesDetour(
         ModelRenderer* modelRenderer,
         ModelRenderer.OnRenderMaterialParams2* param,
-        int count,
+        int vertexCount,
         int startIndex,
-        int baseVertex
+        int indexCount
     )
     {
-        var result = expandPassesHook.Original(modelRenderer, param, count, startIndex, baseVertex);
+        var result = expandPassesHook.Original(modelRenderer, param, vertexCount, startIndex, indexCount);
         var scope = activeScope;
         var context = scope?.Context;
         if (
@@ -271,7 +271,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             *(ulong*)(bytes + 0x8C8) = PackStreamBinding(0, 20);
             *(nint*)(bytes + 0x8D0) = customVertexBuffer;
             *(ulong*)(bytes + 0x8D8) = PackStreamBinding(60, 24);
-            customResult = expandPassesHook.Original(modelRenderer, param, 3, 0, 0);
+            customResult = expandPassesHook.Original(modelRenderer, param, 3, 0, 3);
         }
         finally
         {
@@ -283,7 +283,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
 
         DebugFileLog.Information(
             "MaterialSubmissionProbe",
-            "CustomGeometrySubmission Cycle={Cycle} Thread={Thread} Context=0x{Context:X} VB=0x{VB:X} VBResource=0x{VBResource:X} IB=0x{IB:X} IBResource=0x{IBResource:X} VertexDeclaration=0x{VertexDeclaration:X} OriginalRange={OriginalCount}/{OriginalStart}/{OriginalBase} CustomRange=3/0/0 Result=0x{Result:X}",
+            "CustomGeometrySubmission Cycle={Cycle} Thread={Thread} Context=0x{Context:X} VB=0x{VB:X} VBResource=0x{VBResource:X} IB=0x{IB:X} IBResource=0x{IBResource:X} VertexDeclaration=0x{VertexDeclaration:X} OriginalRange={OriginalVertices}/{OriginalStart}/{OriginalIndices} CustomRange=3/0/3 Result=0x{Result:X}",
             scope.BuildCycle,
             scope.ThreadId,
             (nint)context,
@@ -292,9 +292,9 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             customIndexBuffer,
             *(nint*)(customIndexBuffer + 0x48),
             customVertexDeclaration,
-            count,
+            vertexCount,
             startIndex,
-            baseVertex,
+            indexCount,
             customResult
         );
         return result;
