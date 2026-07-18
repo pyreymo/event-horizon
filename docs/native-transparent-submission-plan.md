@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-18 状态：原生 builder `ffxiv_dx11.exe+0x281DD0` 已证实能在原调用现场自动生成完整 Stage A、两族 Stage C和辅助 view command；相同输入重复提交也已闭环验证。后续 transform 边界分析确认目标 skinned 衣服直接使用 builder 之前生成的 current/previous joint palette，bounds和透明 sort也在 CharacterBase 层先行生成。`OnRenderModelParams`/render job不是完整 per-instance transform input。按本文停止条件，偏移副本路线归入情况 C并暂停；不修改共享 Skeleton/CharacterBase，不 patch command packet。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-18 状态：原生 builder `ffxiv_dx11.exe+0x281DD0` 已证实能在原调用现场自动生成完整 Stage A、两族 Stage C和辅助 view command；相同输入重复提交也已闭环验证。当前 skinned 衣服的 transform/bounds/sort依赖共享 Skeleton、Model-owned joint palette和CharacterBase预计算数据，因此仅停止“复制这件衣服并偏移”的 donor-specific PoC。Underpaint 原生后端继续推进：下一阶段构造非 skinned、独立 `Model+0x38` transform/history和独立 geometry ownership的最小原生 Model/SubMesh载体，把 Underpaint-owned VB/IB交给该 builder自动展开完整 pass。不修改共享 Skeleton/CharacterBase，不 patch command packet。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 

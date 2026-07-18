@@ -41,16 +41,16 @@ transform 边界已经确认：
 - joint palette 在 builder 之前由共享 `Skeleton.Transform`、共享 pose、bind/inverse-bind 数据、camera view 和可选 post-bone deformation 生成。
 - CharacterBase 在调用 Model submit virtual 之前已经用角色 bounds / view distance 算出透明 sort depth，并把 object constant 与 packed sort/object 数据复制进异步 job。
 - `OnRenderModelParams` 只是 272-byte frame/job-arena record 的 0x20-byte 前缀，不拥有 transform、bounds 或 palette；浅复制它不会产生独立实例。
-- 因此当前没有“复制调用级 input 后改 transform即可完整重算”的安全边界。本路线按情况 C 停止偏移 PoC；不修改共享 Skeleton/角色状态，也不回退到 command packet patching。
+- 因此当前没有“复制这件 skinned 衣服的调用级 input 后改 transform即可完整重算”的安全边界。这件衣服作为 transform donor 的小偏移 PoC 按情况 C 停止；该结论不终止 Underpaint 原生后端，后端主线转向非 skinned、独立 transform 的最小原生 Model/geometry 载体。
 
 仍未确认的只剩当前 RVA、signature 和未公开字段偏移在客户端更新后的稳定性；这不改变本客户端版本上的停止结论。
 
 ### 希望 reviewer 重点检查
 
-1. skinned 路径把 Skeleton transform 烘进 rotating joint palette、而不是给 builder 传 world input 的判断是否有遗漏分支。
-2. CharacterBase 的 bounds / distance sort 与 Model-owned palette 分属两套更早的更新链，是否存在尚未发现的、更高层独立 per-instance render input 能同时重建二者。
-3. builder 返回的 `0x2` 来自局部 shader-key/guard 对象的清理返回值、调用者只透传最后一次 geometry 结果且不分支的判断是否正确。
-4. 若 reviewer 仍建议继续实现，请明确指出无需修改共享 CharacterBase/Skeleton、也无需自行管理 PostBone updater 生命周期的原生复制入口；否则当前停止条件成立。
+1. `0x281DD0` 作为“原生 Model/geometry/material -> 完整多 pass command”入口的调用约束是否已经识别完整。
+2. 非 skinned 分支的 `Model+0x38` transform object 能否作为独立静态载体的 current/previous transform owner。
+3. 最小原生 Model/geometry 外壳中，哪些字段必须原生创建，哪些 geometry buffer/range 可以安全替换为 Underpaint-owned VB/IB。
+4. builder 返回的 `0x2` 来自局部 shader-key/guard 对象的清理返回值、调用者只透传最后一次 geometry 结果且不分支的判断是否正确。
 
 ### 代码位置与版本
 
@@ -145,15 +145,28 @@ builder 有两个互斥分支：
 - 静态上未见 builder 修改共享 Model、Material、Skeleton transform/pose、BoneList palette/history或 CharacterBase bounds。除 command arena及同线程 TLS state外，未发现影响下一帧 geometry/history 的写入。
 - 相同输入重复调用生成独立 command/payload allocation，但两组命令引用同一 CharacterData CB和同一 current/previous joint palette。地址独立不等于 per-instance数据独立。
 
-### 最终决策
+### donor-specific 决策与后端主线
 
-本目标属于情况 C，不实现小偏移 PoC：
+仅“复制当前 skinned 衣服并给副本偏移 transform”属于情况 C，不实现这个 donor-specific PoC：
 
 - 在 builder 层复制 `OnRenderModelParams` 只能复制 Model 指针、CharacterData CB和已计算的 sort payload；palette、bounds和history仍属于 donor。
 - 上移到 `0x281AE0` caller 或 `0x280F40` job producer仍得不到完整实例输入，因为 palette已在 PostBone updater中生成，bounds/sort已在 CharacterBase submit loop中生成。
 - 再上移只能通过共享 CharacterBase/Skeleton transform/pose、共享 bounds/history，或自行创建并正确调度一套 Model/BoneList/palette/CharacterData/bounds/sort 生命周期来表达副本。前者违反“不修改后恢复共享状态”，后者已不是可复制的调用级 input，也没有已确认的安全 frame lifetime/release boundary。
 
-因此不增加运行时写入探针，不恢复通用 tracer，不 patch command packet，也不跨帧保存任何临时 native pointer。原有同 transform duplicate 仅保留为已完成的 builder 能力证明，不把它扩展成正式后端。
+这不是 Underpaint 原生后端的终止结论。`0x281DD0` 已经解决了正式后端的关键问题之一：给它一个完整原生 Model/geometry/material 输入，游戏会自动展开 Stage A、两族 Stage C 和辅助 view。当前缺口是给这个 builder 提供一个由插件独立拥有、能承载 Underpaint geometry/transform 的最小原生载体，而不是继续复制这件衣服。
+
+后续主线改为：
+
+```text
+非 skinned 静态 Model
+  -> 独立 Model+0x38 transform/history object
+  -> 最小且独立的 native geometry entry
+  -> 接入 Underpaint-owned VB/IB、draw range 和 bounds
+  -> 在原 builder hook / 原线程 / 原 context 内调用 0x281DD0
+  -> 验证游戏仍自动生成完整 Stage A / Stage C / 辅助 view
+```
+
+下一轮静态分析优先从已经发现的非 skinned 创建路径、`Model+0x38` transform object 和 geometry resource ownership开始；不再扩展衣服的 Skeleton/BoneList分析，不恢复通用 tracer，不 patch command packet，也不跨帧保存临时 native pointer。
 
 ## 新运行时探针
 
@@ -286,16 +299,16 @@ executor 观察到每一对 command 使用相同的 RT/depth-stencil、VS/PS wra
 
 重复提交 PoC 已达到 [native-transparent-submission-plan.md](native-transparent-submission-plan.md) 规定的首个成功条件：同一次高层调用可以由游戏自动生成完整 Stage A/C，而不是复制最终 packet。现阶段应停止继续扩展 command/executor tracer，也不应尝试直接修改 frame-arena 中已经生成的 command。
 
-transform 输入静态分析已经完成，结论见上文“2026-07-18 transform 输入边界静态分析”。目标 skinned 衣服不存在可由 builder/caller/job 浅复制并完整重算 palette、bounds、sort和history的 per-instance input；路线按预先约定的情况 C 停止。
+当前 skinned donor 的 transform 输入分析已经完成，结论见上文。它不能作为简单、独立的 transform carrier，但不影响 `0x281DD0` 继续作为 Underpaint 原生多 pass builder。
 
-正式后端前的唯一阻塞项不再是“多采一轮日志”，而是外部 reviewer 能否指出一个更高层、独立拥有以下全部数据和生命周期的原生入口：
+正式后端下一阶段要构造或复用一个非 skinned 最小载体，独立拥有：
 
 ```text
-独立 transform + shared pose read-only input
-独立 current/previous joint palette
+独立 current/previous transform object
 独立 bounds/culling/sort
 独立 object/history identity
+Underpaint-owned geometry buffers / draw range
 安全的同帧 resource lifetime 与释放边界
 ```
 
-若没有这样的入口，不继续实现 native transform duplicate。不能用 command packet patching、临时改共享 Skeleton/CharacterBase 后恢复、或跨帧持有当前 hook 临时指针绕过该结论。
+下一步不是继续向上追当前衣服的 render job，而是沿非 skinned Model 创建路径和 geometry ownership向下确认最小载体。只有当游戏要求载体必须绑定共享角色/Skeleton，或者无法让独立 Model 使用插件 geometry时，才考虑终止整个原生后端。仍然不能用 command packet patching、临时改共享对象后恢复、或跨帧持有当前 hook 临时指针绕过所有权问题。
