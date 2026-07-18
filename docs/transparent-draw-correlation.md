@@ -35,20 +35,22 @@ nint Builder(
 - 第二次调用自动复制 Stage A、两族 Stage C 和 View 32/33 辅助提交；
 - 普通只读 capture 与显式重复提交 PoC 相互独立，旧 Underpaint 近似后端没有参与或被修改。
 
-尚未确认：
+transform 边界已经确认：
 
-- object/world transform 的直接来源究竟是 `OnRenderModelParams`、其指向的临时数据、model/skeleton 状态，还是另一层隐式 context；
-- 第二次调用能否在不修改共享 Model、Material、骨骼和第一份提交数据的情况下使用独立 transform；
-- builder 是否会针对不同 transform 重新计算 bounds、sort、previous-world/motion/history 等所有派生数据；
-- 当前 RVA、signature 和未公开字段偏移在客户端更新后的稳定性。
+- 目标衣服走 skinned 分支。builder 不为它创建 world constant，也不读取一个可替换的 transform 参数；它直接绑定 Model-owned `BoneList` 中已经生成的 current/previous joint palette。
+- joint palette 在 builder 之前由共享 `Skeleton.Transform`、共享 pose、bind/inverse-bind 数据、camera view 和可选 post-bone deformation 生成。
+- CharacterBase 在调用 Model submit virtual 之前已经用角色 bounds / view distance 算出透明 sort depth，并把 object constant 与 packed sort/object 数据复制进异步 job。
+- `OnRenderModelParams` 只是 272-byte frame/job-arena record 的 0x20-byte 前缀，不拥有 transform、bounds 或 palette；浅复制它不会产生独立实例。
+- 因此当前没有“复制调用级 input 后改 transform即可完整重算”的安全边界。本路线按情况 C 停止偏移 PoC；不修改共享 Skeleton/角色状态，也不回退到 command packet patching。
+
+仍未确认的只剩当前 RVA、signature 和未公开字段偏移在客户端更新后的稳定性；这不改变本客户端版本上的停止结论。
 
 ### 希望 reviewer 重点检查
 
-1. `ffxiv_dx11.exe+0x281DD0` 的函数边界、签名和返回值使用是否判断正确，尤其是 `OnRenderModelParams*` 的真实所有权与生命周期。
-2. 在第一次调用返回后、仍处于同一 detour 和线程时再次调用，是否遗漏了必须恢复的隐式入口状态。当前第二次调用从第一次调用后的 context 状态开始，但实测输出 command/GPU state 与第一次一致。
-3. transform 是否应在该 builder 的上一层复制 job/input，而不是直接复制或修改 `OnRenderModelParams`。
-4. 哪些字段控制 current/previous transform、bounds、skeleton palette、object identity 和透明排序；最小安全 PoC 应复制哪一层数据。
-5. builder 两次都返回 `0x2`，当前 detour 返回第一次结果；请确认调用者是否读取或依赖这个返回值。
+1. skinned 路径把 Skeleton transform 烘进 rotating joint palette、而不是给 builder 传 world input 的判断是否有遗漏分支。
+2. CharacterBase 的 bounds / distance sort 与 Model-owned palette 分属两套更早的更新链，是否存在尚未发现的、更高层独立 per-instance render input 能同时重建二者。
+3. builder 返回的 `0x2` 来自局部 shader-key/guard 对象的清理返回值、调用者只透传最后一次 geometry 结果且不分支的判断是否正确。
+4. 若 reviewer 仍建议继续实现，请明确指出无需修改共享 CharacterBase/Skeleton、也无需自行管理 PostBone updater 生命周期的原生复制入口；否则当前停止条件成立。
 
 ### 代码位置与版本
 
@@ -88,6 +90,70 @@ nint Builder(
 - builder 后续同时使用 model、material、geometry entry、camera/view 状态、skeleton/constant buffers，并进入不同的 command builder 分支。
 - 这些分支最终调用当前线程 `Graphics::Kernel::Context.AllocateCommand` / `PushBackCommand`。因此当前最可信的输出容器不是长期 render-item 数组，而是线程私有 `Context` 的 command arena 和 payload arena。
 - builder 的上一层是遍历 model geometry 的 render job；再上一层负责建立并提交异步 job。只读阶段没有调用或复制任何 builder/packet；后续 PoC 仅在原 builder detour 内做了一次相同输入的重复调用，没有复制最终 packet。
+
+## 2026-07-18 transform 输入边界静态分析
+
+本轮继续先用 FFCS 确认 `ModelRenderer`、`Model`、`Skeleton`、`Transform`、`CharacterBase` 和 `DrawObject` 的公开布局，再用 IDA 从实际绑定的 constant resource、bounds 和 SortKey 反向追踪。结论针对当前目标 Slot 1 / MaterialIndex 2 / `charactertransparency.shpk`。
+
+### 调用与生命周期
+
+- `ffxiv_dx11.exe+0x280F40` 从 TLS job arena 分配 8704-byte block，每块容纳 32 个 272-byte record。它把 `Model*` 写到 `+0x00`、flags/LOD 写到 `+0x08/+0x0C`，再把上层给出的 16-byte payload 复制到 `+0x10`。
+- `OnRenderModelParams` 正是该 272-byte record 的 0x20-byte 前缀，所有权为当前 frame/render job；不是 stack-local，也不是长期对象。它只可在当前 job/hook 生命周期内使用。
+- job executor `ffxiv_dx11.exe+0x281AE0` 先调用 Model 的 `RenderModelCallback`，再遍历 geometry 调用 `ffxiv_dx11.exe+0x281DD0`。Human callback `ffxiv_dx11.exe+0x433270` 把 record `+0x10` 的第一个 qword 绑定为角色 object constant，并设置其他 TLS graphics state。
+- `ffxiv_dx11.exe+0x281DD0` 对每个 geometry 调用 `OnRenderMaterial`，但不读取其返回寄存器；返回的 `0x2` 来自函数末尾局部 shader-key/guard 的清理 helper。`0x281AE0` 只让每次 geometry 的返回值覆盖前一次并最终返回最后一个，不比较、不累加，也不把它当作 item count。
+
+### current / previous transform 与 palette
+
+builder 有两个互斥分支：
+
+1. 非 skinned Model 的 `Model+0x38` 非空时，builder 在 `0x28202B` 绑定该长期对象 `+0x20` 的 128-byte constant buffer。该对象的 update virtual `0x266DD0` 用对象 `+0x30` position、`+0x40` rotation、`+0x50` scale 和当前 camera view 生成 current 64 bytes；previous 64 bytes来自对象 `+0x60..+0x9F` 的上一帧缓存，首帧标记 `+0xA0` 令 previous=current。builder 不生成或上传它。
+2. 本次目标衣服属于 skinned Model，`Model+0x38 == 0`。builder 从 geometry entry 选择 `Model.BoneList[paletteIndex]`，把 `BoneList+0x90 + ringIndex*8` 绑定为 `JointMatrixArray`，把上一 ring slot（首帧/刚更新时可退回 current）绑定为 `JointMatrixArrayPrev`。这就是 Stage A、两族 Stage C 和辅助 view 共用的 current/previous world-bearing constant；它们没有独立的 per-command world 副本。
+
+`BoneList` 是 224-byte、Model-owned、注册到 `PostBoneDeformerBaseUpdater` 的长期对象。它在初始化时从共享 `Skeleton.Transform` 复制 position (`Skeleton+0x20`)、rotation (`+0x30`) 和 scale (`+0x40`)，持有 Skeleton ref，并为四个 ring slot 各创建 palette buffer。update virtual `0x267D70`：
+
+- 从共享 Skeleton pose 取得每根骨骼的 model-space transform；
+- 与 model resource 中的 bind/inverse-bind 数据组合；
+- 把 Skeleton transform 与当前 camera view 组合后乘入每根骨骼矩阵；
+- 写入当前 ring palette，更新 current/previous 有效位，再由 builder 选择 current 与 previous resource。
+
+可选 post-bone deformation 指针会覆盖这份对象的局部 transform/pose 来源，但仍是长期、ref-counted、由 updater 调度的对象，不是 job-owned value。代码中未发现独立 normal/world-inverse constant；skinned shader 的 normal/world 变换随同一 joint palette/bind 数据完成。
+
+### bounds、sort 与 object/history 数据
+
+- Human 的 `ComputeAxisAlignedBounds` virtual 直接返回 CharacterBase `+0x1E0..+0x1EF` 的 16-byte bounds。该值在 Model submit/builder 之前已由 CharacterBase 更新链准备好；builder 不读取或重算它。
+- Human submit loop `0x433FE0` 在调用 Model virtual slot 5 (`0x276190`) 前，优先取 attach bone 179 的世界位置与当前 view camera 算距离；没有该 bone 时使用上层传入的距离。它结合角色半径/偏移算出量化透明 depth，再加 Human slot-specific stable offset (`0x448A90`) 并打包进 16-byte job payload 的第二个 qword。
+- payload 第一个 qword是 CharacterBase `+0x270` 的 CharacterData constant buffer。Human render-model callback 在 builder 之前把它绑定到 TLS；第二个 qword包含量化 sort depth、slot/order bits、outline/visibility bits和 CharacterBase `+0x95C` 的高 32 位 object 数据。它是 per-submit value，但不包含可重建 palette 或 bounds 的 transform。
+- temporal identity 不以单独的 `historyIndex` 参数进入 builder。world history 由非 skinned transform 对象自身的 previous matrix/首帧位表达；本目标的 history 由 `BoneList` 对象身份、四槽 ring index和 current/previous 有效位表达。共享 Skeleton pose 与原角色 history 都不能通过浅复制 job 隔离。
+
+### 字段分类
+
+| 类别 | 当前确认字段/对象 |
+| --- | --- |
+| 不可变资源引用 | `ModelResourceHandle`、geometry entry、`Material*`、shader package、bind/inverse-bind 数据、Model material/geometry tables |
+| per-instance 输入 | CharacterBase CharacterData CB、16-byte submit payload、view/slot/flags；但没有独立 transform value |
+| current/previous temporal 输入 | 非 skinned transform object 的 current/previous matrix；本目标 `BoneList` 的 current/previous joint-palette ring 和有效位 |
+| bounds/culling/sort 输入 | CharacterBase 16-byte bounds、attach-bone/world distance、slot stable offset、packed sort depth/object bits；均在 builder 前生成 |
+| 可变 scratch | stack-local 0x48-byte `OnRenderMaterialParams2`、local shader-key guard、TLS graphics bindings/sort/view state |
+| 输出 | 当前线程 `Graphics::Kernel::Context` command arena、payload arena和 sorted command groups |
+| 共享状态 | `Model`、`Material`、shared `Skeleton` pose/transform、CharacterBase bounds/CharacterData CB、Model-owned `BoneList` palette resources |
+| 隐式 thread/context 状态 | TLS `Graphics::Kernel::Context`、current view/subview、camera、SortKey、PostBone updater ring index、frame/job arena |
+
+### builder 读写与副作用
+
+- builder 读取 `ModelRenderer` 的 sampler/scene/subview keys和 shader handles；读取 `OnRenderModelParams` 的 Model、LOD/flags和 packed payload高位；读取 Model/ModelResource geometry、materials、BoneList/palette和附加 resources。
+- 它修改 stack-local `OnRenderMaterialParams2`、TLS graphics bindings/keys、command/payload arena及 command group。command builders会临时切换 view/sort/GPU state并恢复其明确保存的字段；外层 job结束时清理 callback/TLS入口状态。
+- 静态上未见 builder 修改共享 Model、Material、Skeleton transform/pose、BoneList palette/history或 CharacterBase bounds。除 command arena及同线程 TLS state外，未发现影响下一帧 geometry/history 的写入。
+- 相同输入重复调用生成独立 command/payload allocation，但两组命令引用同一 CharacterData CB和同一 current/previous joint palette。地址独立不等于 per-instance数据独立。
+
+### 最终决策
+
+本目标属于情况 C，不实现小偏移 PoC：
+
+- 在 builder 层复制 `OnRenderModelParams` 只能复制 Model 指针、CharacterData CB和已计算的 sort payload；palette、bounds和history仍属于 donor。
+- 上移到 `0x281AE0` caller 或 `0x280F40` job producer仍得不到完整实例输入，因为 palette已在 PostBone updater中生成，bounds/sort已在 CharacterBase submit loop中生成。
+- 再上移只能通过共享 CharacterBase/Skeleton transform/pose、共享 bounds/history，或自行创建并正确调度一套 Model/BoneList/palette/CharacterData/bounds/sort 生命周期来表达副本。前者违反“不修改后恢复共享状态”，后者已不是可复制的调用级 input，也没有已确认的安全 frame lifetime/release boundary。
+
+因此不增加运行时写入探针，不恢复通用 tracer，不 patch command packet，也不跨帧保存任何临时 native pointer。原有同 transform duplicate 仅保留为已完成的 builder 能力证明，不把它扩展成正式后端。
 
 ## 新运行时探针
 
@@ -220,11 +286,16 @@ executor 观察到每一对 command 使用相同的 RT/depth-stencil、VS/PS wra
 
 重复提交 PoC 已达到 [native-transparent-submission-plan.md](native-transparent-submission-plan.md) 规定的首个成功条件：同一次高层调用可以由游戏自动生成完整 Stage A/C，而不是复制最终 packet。现阶段应停止继续扩展 command/executor tracer，也不应尝试直接修改 frame-arena 中已经生成的 command。
 
-下一步只做 transform 输入静态分析：
+transform 输入静态分析已经完成，结论见上文“2026-07-18 transform 输入边界静态分析”。目标 skinned 衣服不存在可由 builder/caller/job 浅复制并完整重算 palette、bounds、sort和history的 per-instance input；路线按预先约定的情况 C 停止。
 
-1. 从 builder 的调用者向上确认 `OnRenderModelParams`、render job 和 object/model transform 的构造与所有权。
-2. 识别 current world、previous world、bounds、bone palette、object identity 和 sort depth 的来源及复制边界。
-3. 判断是否能复制调用级 job/input，在第二次 builder 调用前只修改副本的 transform；不能修改共享 `Model`、`Material` 或原角色骨骼状态。
-4. 只有确认 builder 会根据副本重新生成必要派生状态后，才实现一个同样一次性、显式 arm 的小偏移 PoC。
+正式后端前的唯一阻塞项不再是“多采一轮日志”，而是外部 reviewer 能否指出一个更高层、独立拥有以下全部数据和生命周期的原生入口：
 
-当前唯一关键缺口是安全的独立 transform 输入边界。若 transform 只能通过修改共享角色/model 状态，或必须跨线程/跨帧持有临时指针，则应停止该实现路线；不能用 command packet patching 绕过这个结论。
+```text
+独立 transform + shared pose read-only input
+独立 current/previous joint palette
+独立 bounds/culling/sort
+独立 object/history identity
+安全的同帧 resource lifetime 与释放边界
+```
+
+若没有这样的入口，不继续实现 native transform duplicate。不能用 command packet patching、临时改共享 Skeleton/CharacterBase 后恢复、或跨帧持有当前 hook 临时指针绕过该结论。

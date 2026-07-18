@@ -1,5 +1,7 @@
 # 原生透明提交逆向计划
 
+> 2026-07-18 状态：原生 builder `ffxiv_dx11.exe+0x281DD0` 已证实能在原调用现场自动生成完整 Stage A、两族 Stage C和辅助 view command；相同输入重复提交也已闭环验证。后续 transform 边界分析确认目标 skinned 衣服直接使用 builder 之前生成的 current/previous joint palette，bounds和透明 sort也在 CharacterBase 层先行生成。`OnRenderModelParams`/render job不是完整 per-instance transform input。按本文停止条件，偏移副本路线归入情况 C并暂停；不修改共享 Skeleton/CharacterBase，不 patch command packet。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+
 ## 文档目的
 
 本文压缩记录 Underpaint 半透明路线在完成 Stage A/B/C 原型后的架构判断、后续逆向目标、第一阶段实施计划，以及需要人工配合的实机验证步骤。
