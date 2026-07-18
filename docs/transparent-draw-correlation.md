@@ -54,3 +54,23 @@
 8. 提供日志，以及捕获期间是否出现长卡、崩溃或持续日志。
 
 当前唯一缺少的关键证据是：这段 builder 新增的 `Context` command 范围，是否就是稍后产生目标 Stage A/C draw 的那组被消费数据。下一轮日志先证明 producer 的稳定边界；确认后才能安全地定位其 executor 并建立逐项关联。
+
+## 2026-07-18 producer 实机结果
+
+同一日志包含透明衣服和非透明替换装备两次采集：
+
+- 透明衣服的 Slot 1 有 `skin.shpk`、`character.shpk`、`charactertransparency.shpk` 三个材质，目标材质稳定为 index 2；探针命中 10 次。
+- 替换装备的 Slot 1 没有 `charactertransparency.shpk`，探针命中 0 次，证明 model/material/SHPK 过滤没有串到同角色其他材质。
+- 每次命中的 model、material、geometry index 2、geometry entry 和 geometry hash 完全一致。
+- producer 稳定形成两种形状：View 30 / SubView 11 每次新增 3520 bytes、12 次 allocation；View 1 / SubView 9 每次新增 1056 bytes、6 次 allocation。
+- 两种形状中 allocation 都以 176-byte 块与附属块交替出现。View 30 有 6 个 176-byte 候选 command，View 1 有 3 个；这强烈暗示一次目标材质展开已经生成多份 pass-specific draw command，而不是一个稍后才被无限展开的单 item。
+- `AllocationBase/AllocationUsedSize` 始终没有变化；本路径的有效输出全部位于 command arena。
+- `OnRenderMaterial` 返回寄存器稳定为 `0xC9`，但调用者仍不使用它。`Params2` 只有 `+0x40/+0x41` 改变，flags 从低位 0 变为 `0xC96`；可选输出描述保持全零。
+
+FFCS 和 IDA 随后确认 `Context.PushBackCommand` 会把 `{SortKey, Command*}` 写为 16-byte group；`ImmediateContext.PreprocessCommands/ProcessCommands` 稍后消费排序后的 group，且命令按 SortKey 而不是生产顺序执行。下一版窄探针因此只增加：
+
+- 在目标 builder 范围内记录真正传给 `PushBackCommand` 的 command 地址、type、SortKey、view 和 allocation size；
+- 在 `PreprocessCommands` 输入中按同一 command 指针定位排序后的 buffer/group index；
+- 对 draw command 直接解析 count、start index、base vertex、instance count，并保留 bounded payload hash/qword 快照。
+
+下一次采集的唯一目标变为：把 producer 的 6/3 个 pushed command 逐项对应到现有 Stage A/C draw range。确认映射后，才需要决定是否继续进入更低的 GPU 状态 executor。

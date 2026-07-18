@@ -1,4 +1,5 @@
 #if DEBUG
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Threading;
 using Dalamud.Hooking;
@@ -24,6 +25,8 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
     private const int Params2Size = 0x48;
     private const int MaxEvents = 128;
     private const int MaxAllocationsPerBuild = 64;
+    private const int MaxPushedCommandsPerBuild = 16;
+    private const int MaxConsumptionEvents = 128;
     private const int MaxHashBytes = 1024 * 1024;
     private const string NativeCaller = "ffxiv_dx11.exe+0x281D91";
 
@@ -33,8 +36,12 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
     private readonly Hook<MaterialBuilderDelegate> materialBuilderHook;
     private readonly Hook<OnRenderMaterialDelegate> onRenderMaterialHook;
     private readonly Hook<AllocateCommandDelegate> allocateCommandHook;
+    private readonly Hook<PushBackCommandDelegate> pushBackCommandHook;
+    private readonly Hook<PreprocessCommandsDelegate> preprocessCommandsHook;
     private readonly Lock stateLock = new();
     private readonly List<MaterialSubmissionProbeEvent> events = [];
+    private readonly List<CommandConsumptionSnapshot> consumptionEvents = [];
+    private readonly ConcurrentDictionary<nint, ProducedCommandIdentity> producedCommands = new();
     private nint targetModel;
     private long nextBuildCycle;
     private bool disposed;
@@ -56,6 +63,14 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
 
     private delegate void* AllocateCommandDelegate(Context* context, ulong size);
 
+    private delegate void PushBackCommandDelegate(Context* context, void* command);
+
+    private delegate void PreprocessCommandsDelegate(
+        ImmediateContext* immediateContext,
+        RenderCommandBufferGroup* renderCommands,
+        uint renderCommandCount
+    );
+
     public MaterialSubmissionContainerProbe(IGameInteropProvider gameInteropProvider)
     {
         materialBuilderHook = gameInteropProvider.HookFromSignature<MaterialBuilderDelegate>(
@@ -70,25 +85,41 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             (nint)Context.MemberFunctionPointers.AllocateCommand,
             AllocateCommandDetour
         );
+        pushBackCommandHook = gameInteropProvider.HookFromAddress<PushBackCommandDelegate>(
+            (nint)Context.MemberFunctionPointers.PushBackCommand,
+            PushBackCommandDetour
+        );
+        preprocessCommandsHook = gameInteropProvider.HookFromAddress<PreprocessCommandsDelegate>(
+            (nint)ImmediateContext.MemberFunctionPointers.PreprocessCommands,
+            PreprocessCommandsDetour
+        );
         materialBuilderHook.Enable();
         onRenderMaterialHook.Enable();
         allocateCommandHook.Enable();
+        pushBackCommandHook.Enable();
+        preprocessCommandsHook.Enable();
     }
 
     public void Arm(nint model)
     {
         lock (stateLock)
+        {
             events.Clear();
+            consumptionEvents.Clear();
+        }
+        producedCommands.Clear();
         Interlocked.Exchange(ref targetModel, model);
     }
 
-    public MaterialSubmissionProbeEvent[] StopAndTake()
+    public MaterialSubmissionProbeCapture StopAndTake()
     {
         lock (stateLock)
         {
             Interlocked.Exchange(ref targetModel, 0);
-            var result = events.ToArray();
+            var result = new MaterialSubmissionProbeCapture(events.ToArray(), consumptionEvents.ToArray());
             events.Clear();
+            consumptionEvents.Clear();
+            producedCommands.Clear();
             return result;
         }
     }
@@ -104,6 +135,8 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             return;
         disposed = true;
         Stop();
+        preprocessCommandsHook.Dispose();
+        pushBackCommandHook.Dispose();
         allocateCommandHook.Dispose();
         onRenderMaterialHook.Dispose();
         materialBuilderHook.Dispose();
@@ -219,6 +252,88 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
         return result;
     }
 
+    private void PushBackCommandDetour(Context* context, void* command)
+    {
+        pushBackCommandHook.Original(context, command);
+        var scope = activeScope;
+        if (scope == null || scope.Context != context || command == null || scope.PushedCommands.Count >= MaxPushedCommandsPerBuild)
+        {
+            return;
+        }
+
+        var address = (nint)command;
+        var allocationSize = scope.Allocations.LastOrDefault(allocation => allocation.Address == address).Size;
+        var identity = new ProducedCommandIdentity(
+            scope.BuildCycle,
+            scope.ThreadId,
+            (nint)context,
+            address,
+            *(uint*)command,
+            context->SortKey,
+            context->ViewIndex,
+            context->CurrentSubViewIndex,
+            allocationSize,
+            scope.PushedCommands.Count
+        );
+        scope.PushedCommands.Add(identity);
+        producedCommands[address] = identity;
+    }
+
+    private void PreprocessCommandsDetour(
+        ImmediateContext* immediateContext,
+        RenderCommandBufferGroup* renderCommands,
+        uint renderCommandCount
+    )
+    {
+        try
+        {
+            if (Interlocked.CompareExchange(ref targetModel, 0, 0) != 0 && renderCommands != null && renderCommandCount <= 1_000_000)
+            {
+                for (var index = 0u; index < renderCommandCount; index++)
+                {
+                    var group = (byte*)renderCommands + index * 0x10;
+                    var command = *(nint*)(group + 8);
+                    if (!producedCommands.TryGetValue(command, out var producer))
+                        continue;
+
+                    var snapshot = new CommandConsumptionSnapshot(
+                        producer,
+                        Stopwatch.GetTimestamp(),
+                        Environment.CurrentManagedThreadId,
+                        (nint)immediateContext,
+                        (nint)renderCommands,
+                        renderCommandCount,
+                        index,
+                        *(uint*)group,
+                        ReadCommandArguments((void*)command, producer.CommandType),
+                        HashRange((void*)command, producer.AllocationSize),
+                        FormatCommandQwords((void*)command, producer.AllocationSize)
+                    );
+                    lock (stateLock)
+                    {
+                        if (
+                            Interlocked.CompareExchange(ref targetModel, 0, 0) != 0
+                            && consumptionEvents.Count < MaxConsumptionEvents
+                            && !consumptionEvents.Any(item =>
+                                item.Producer.Command == command
+                                && item.RenderCommandBuffer == (nint)renderCommands
+                                && item.GroupIndex == index
+                            )
+                        )
+                        {
+                            consumptionEvents.Add(snapshot);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            DebugFileLog.Error("MaterialSubmissionProbe", exception, "Failed to observe command consumption");
+        }
+        preprocessCommandsHook.Original(immediateContext, renderCommands, renderCommandCount);
+    }
+
     private void CompleteScope(BuildScope scope)
     {
         var after = CaptureContext(scope.Context);
@@ -261,6 +376,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             commandDelta,
             payloadDelta,
             allocations,
+            scope.PushedCommands.ToArray(),
             scope.MaterialObservation
         );
 
@@ -342,6 +458,28 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             Enumerable.Range(0, bytes.Length / 8).Select(index => $"+0x{index * 8:X}=0x{BitConverter.ToUInt64(bytes, index * 8):X}")
         );
 
+    private static CommandArguments ReadCommandArguments(void* command, uint commandType)
+    {
+        if (command == null)
+            return default;
+        var bytes = (byte*)command;
+        return commandType switch
+        {
+            5 => new CommandArguments(*(uint*)(bytes + 0x0C), *(uint*)(bytes + 0x08), 0, 0),
+            6 => new CommandArguments(*(uint*)(bytes + 0x18), *(uint*)(bytes + 0x14), *(int*)(bytes + 0x08), 0),
+            7 => new CommandArguments(*(uint*)(bytes + 0x18), *(uint*)(bytes + 0x14), 0, *(uint*)(bytes + 0x1C)),
+            _ => default,
+        };
+    }
+
+    private static string FormatCommandQwords(void* command, ulong size)
+    {
+        if (command == null || size == 0)
+            return "none";
+        var qwordCount = checked((int)Math.Min(size / 8, 22));
+        return string.Join(',', Enumerable.Range(0, qwordCount).Select(index => $"+0x{index * 8:X}=0x{((ulong*)command)[index]:X}"));
+    }
+
     private sealed class BuildScope(
         long buildCycle,
         long timestamp,
@@ -372,11 +510,17 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
         public ContextSnapshot Before { get; } = before;
         public ulong GeometryHash { get; } = geometryHash;
         public List<PendingAllocation> Allocations { get; } = [];
+        public List<ProducedCommandIdentity> PushedCommands { get; } = [];
         public MaterialObservation? MaterialObservation { get; set; }
     }
 
     private readonly record struct PendingAllocation(nint Address, ulong Size);
 }
+
+internal sealed record MaterialSubmissionProbeCapture(
+    IReadOnlyList<MaterialSubmissionProbeEvent> Builds,
+    IReadOnlyList<CommandConsumptionSnapshot> Consumptions
+);
 
 internal sealed record MaterialSubmissionProbeEvent(
     long BuildCycle,
@@ -398,8 +542,38 @@ internal sealed record MaterialSubmissionProbeEvent(
     ArenaDelta CommandDelta,
     ArenaDelta PayloadDelta,
     IReadOnlyList<CommandAllocationSnapshot> CommandAllocations,
+    IReadOnlyList<ProducedCommandIdentity> PushedCommands,
     MaterialObservation? MaterialObservation
 );
+
+internal sealed record ProducedCommandIdentity(
+    long BuildCycle,
+    int ProducerThreadId,
+    nint Context,
+    nint Command,
+    uint CommandType,
+    uint SortKey,
+    int ViewIndex,
+    byte SubViewIndex,
+    ulong AllocationSize,
+    int PushIndex
+);
+
+internal sealed record CommandConsumptionSnapshot(
+    ProducedCommandIdentity Producer,
+    long Timestamp,
+    int ConsumerThreadId,
+    nint ImmediateContext,
+    nint RenderCommandBuffer,
+    uint RenderCommandCount,
+    uint GroupIndex,
+    uint GroupSortKey,
+    CommandArguments Arguments,
+    ulong? PayloadHash,
+    string PayloadQwords
+);
+
+internal readonly record struct CommandArguments(uint Count, uint StartIndex, int BaseVertex, uint InstanceCount);
 
 internal readonly record struct ContextSnapshot(
     nint CommandAllocationBase,

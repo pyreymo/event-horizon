@@ -144,13 +144,14 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
     private void Complete(TransparentDrawCapture capture)
     {
         DonorSnapshot? currentDonor;
-        MaterialSubmissionProbeEvent[] submissionEvents;
-        submissionEvents = submissionProbe.StopAndTake();
+        var submissionCapture = submissionProbe.StopAndTake();
+        var submissionEvents = submissionCapture.Builds;
         lock (stateLock)
         {
             currentDonor = donor;
             capturing = false;
-            state = $"Complete: {capture.Draws.Count} draws, {submissionEvents.Length} submission builds ({capture.Reason})";
+            state =
+                $"Complete: {capture.Draws.Count} draws, {submissionEvents.Count} builds, {submissionCapture.Consumptions.Count} consumed commands ({capture.Reason})";
         }
 
         if (currentDonor == null)
@@ -158,6 +159,8 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
 
         foreach (var submissionEvent in submissionEvents)
             LogSubmission(submissionEvent);
+        foreach (var consumption in submissionCapture.Consumptions)
+            LogCommandConsumption(consumption);
 
         foreach (var draw in capture.Draws)
             LogDraw(draw);
@@ -168,12 +171,13 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         );
         DebugFileLog.Information(
             LogSource,
-            "Capture complete Reason={Reason} StartedAt={StartedAt} CompletedAt={CompletedAt} Draws={Draws} SubmissionBuilds={SubmissionBuilds} Match={Match} Unique={Unique} Candidates={Candidates}",
+            "Capture complete Reason={Reason} StartedAt={StartedAt} CompletedAt={CompletedAt} Draws={Draws} SubmissionBuilds={SubmissionBuilds} SubmissionCommandsConsumed={SubmissionCommandsConsumed} Match={Match} Unique={Unique} Candidates={Candidates}",
             capture.Reason,
             capture.StartedAt,
             capture.CompletedAt,
             capture.Draws.Count,
-            submissionEvents.Length,
+            submissionEvents.Count,
+            submissionCapture.Consumptions.Count,
             match.Conclusion,
             match.IsUnique,
             match.Candidates.Count
@@ -408,6 +412,47 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             material?.ChangedOffsets ?? "none",
             material?.BeforeQwords ?? "none",
             material?.AfterQwords ?? "none"
+        );
+        DebugFileLog.Debug(
+            LogSource,
+            "SubmissionCommands Cycle={Cycle} Pushed={Pushed}",
+            item.BuildCycle,
+            string.Join(
+                ',',
+                item.PushedCommands.Select(command =>
+                    $"#{command.PushIndex}:0x{command.Command:X}/type{command.CommandType}/sort0x{command.SortKey:X}/view{command.ViewIndex}.{command.SubViewIndex}/size{command.AllocationSize}"
+                )
+            )
+        );
+    }
+
+    private static void LogCommandConsumption(CommandConsumptionSnapshot item)
+    {
+        DebugFileLog.Debug(
+            LogSource,
+            "SubmissionConsumer Cycle={Cycle} PushIndex={PushIndex} Timestamp={Timestamp} ProducerThread={ProducerThread} ConsumerThread={ConsumerThread} Context=0x{Context:X} ImmediateContext=0x{ImmediateContext:X} Command=0x{Command:X} Type={Type} ProducerSort=0x{ProducerSort:X} GroupSort=0x{GroupSort:X} View={View}.{SubView} Buffer=0x{Buffer:X} BufferCount={BufferCount} GroupIndex={GroupIndex} Count={Count} StartIndex={StartIndex} BaseVertex={BaseVertex} Instances={Instances} PayloadHash=0x{PayloadHash:X16} Payload={Payload}",
+            item.Producer.BuildCycle,
+            item.Producer.PushIndex,
+            item.Timestamp,
+            item.Producer.ProducerThreadId,
+            item.ConsumerThreadId,
+            item.Producer.Context.ToInt64(),
+            item.ImmediateContext.ToInt64(),
+            item.Producer.Command.ToInt64(),
+            item.Producer.CommandType,
+            item.Producer.SortKey,
+            item.GroupSortKey,
+            item.Producer.ViewIndex,
+            item.Producer.SubViewIndex,
+            item.RenderCommandBuffer.ToInt64(),
+            item.RenderCommandCount,
+            item.GroupIndex,
+            item.Arguments.Count,
+            item.Arguments.StartIndex,
+            item.Arguments.BaseVertex,
+            item.Arguments.InstanceCount,
+            item.PayloadHash,
+            item.PayloadQwords
         );
     }
 
