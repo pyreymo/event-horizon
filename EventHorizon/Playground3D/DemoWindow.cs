@@ -184,6 +184,8 @@ internal sealed class DemoWindow : Window, IDisposable
             ImGui.SameLine();
             if (ImGui.Button("Arm one native duplicate"))
                 transparentDrawTracer.ArmNativeDuplicate();
+            if (ImGui.Button("Capture native static carrier"))
+                transparentDrawTracer.ArmStaticCarrier();
         }
         else if (ImGui.Button("Cancel transparent capture"))
         {
@@ -196,7 +198,7 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.EndDisabled();
         if (clearDebugLogState.Length != 0)
             ImGui.TextDisabled(clearDebugLogState);
-        ImGui.TextDisabled("Targets slot 1/material 2 of the selected PC; duplicate runs once in main view 30.12.");
+        ImGui.TextDisabled("Transparent probes target slot 1/material 2; static carrier captures the first independent non-skinned Model.");
     }
 #endif
 

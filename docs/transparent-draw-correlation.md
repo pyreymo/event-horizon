@@ -168,6 +168,26 @@ builder 有两个互斥分支：
 
 下一轮静态分析优先从已经发现的非 skinned 创建路径、`Model+0x38` transform object 和 geometry resource ownership开始；不再扩展衣服的 Skeleton/BoneList分析，不恢复通用 tracer，不 patch command packet，也不跨帧保存临时 native pointer。
 
+### 非蒙皮 Model 工厂与 geometry 边界
+
+FFCS 给出 `Model.ModelDrawInit` 后，IDA 已将非蒙皮创建路径收敛到两个原生入口：
+
+- `ffxiv_dx11.exe+0x2B86F0` 分配 0x180-byte `Model`，调用构造函数和 `ModelDrawInit`；初始化失败时走原生析构/引用计数路径。
+- `ModelDrawInit`（`ffxiv_dx11.exe+0x273CE0`）对 `ModelResourceHandle` 增加引用，建立 Materials 数组，并从 mdl data 初始化 `Model+0x88` 的 per-geometry draw-count表及其他模型状态。
+- 工厂随后对调用者传入的 transform/history对象增加引用，释放旧 `Model+0x38` owner，再把新对象挂到 `Model+0x38`。因此 Model外壳和 transform owner都有可复用的原生构造/释放协议，不需要浅复制长期对象。
+
+builder 对 geometry 的最终读取同时跨越三处：0x24-byte geometry entry提供 material、palette、start/base等字段；`Model+0x88`表提供当前geometry的 draw count；`ModelResourceHandle+0x190`表提供 per-geometry原生 binding对象。后者被直接写入 graphics context，说明 Underpaint 的裸 `ID3D11Buffer*` 不能直接替代它。当前唯一未确认的是该 binding对象如何拥有/引用 vertex buffer、index buffer、layout和stride，以及游戏是否已有可调用的创建函数。
+
+为避免继续静态猜 offset，Debug UI新增一次性 `Capture native static carrier`：显式 arm后只选择首个 `Model+0x38 != 0`、`Skeleton == null`、`BoneList == null` 的 builder输入，并在原hook内同步复制：
+
+- transform owner、world constant buffer、current/previous/history数据hash和qword；
+- draw-count表、当前geometry count；
+- geometry binding表、当前binding地址和有限hash；
+- geometry entry的index count、material、palette和base vertex字段；
+- builder生成的command、排序后consumer和executor状态。
+
+捕获一秒后自动结束；不修改原生对象，不重复提交，不保存供下一帧异步解引用的model/transform/resource指针。下一次实机日志的唯一任务是确认一个真实非蒙皮载体的这些字段能否形成稳定、完整的创建模板。
+
 ## 新运行时探针
 
 每次命中只记录目标角色 Slot 1 / MaterialIndex 2 / `charactertransparency.shpk`：
@@ -190,7 +210,7 @@ builder 有两个互斥分支：
 5. `/eh 3d` 打开 Underpaint Demo，展开 `Transparent draw correlation`。
 6. 选中 donor，确认摘要显示 `slot 1` 且 material/texture 数量合理；如需只读基线，先点 `Clear EventHorizon logs`，再点 `Arm transparent capture`。
 7. `Arm one native duplicate` 会执行一次真实的额外原生提交，只用于复现实验，不应在普通游戏期间启用。
-8. 当前重复提交验证已经完成，下一步开始前不需要继续人工采集。
+8. 当前透明衣服重复提交验证已经完成，不再点击 duplicate。点击一次 `Capture native static carrier`，保持普通场景一至两秒；状态显示 Complete 后提供日志。无需选择衣服 donor；若 15 秒内显示 `no-static-carrier-found`，换到有场景摆件或其他静态模型的区域再试一次。
 
 下文按采集轮次保留了当时的待验证问题；最新结论和下一步见文末。
 
@@ -311,4 +331,4 @@ Underpaint-owned geometry buffers / draw range
 安全的同帧 resource lifetime 与释放边界
 ```
 
-下一步不是继续向上追当前衣服的 render job，而是沿非 skinned Model 创建路径和 geometry ownership向下确认最小载体。只有当游戏要求载体必须绑定共享角色/Skeleton，或者无法让独立 Model 使用插件 geometry时，才考虑终止整个原生后端。仍然不能用 command packet patching、临时改共享对象后恢复、或跨帧持有当前 hook 临时指针绕过所有权问题。
+下一步不是继续向上追当前衣服的 render job。Model工厂和独立 transform owner的静态边界已经找到；当前只等待一次 `Capture native static carrier` 实机结果，确认 `ModelResourceHandle+0x190` geometry binding对象的真实形状和executor绑定结果。拿到日志后优先定位该 binding的原生创建/释放函数，再做“原生 Model/transform/material + Underpaint geometry”的一次性提交。只有当 binding无法独立拥有插件geometry，或其创建必须篡改共享资源时，才考虑终止整个原生后端。仍然不能用 command packet patching、临时改共享对象后恢复、或跨帧持有当前 hook 临时指针绕过所有权问题。

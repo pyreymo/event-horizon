@@ -24,6 +24,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
     private long captureStarted;
     private string state = "Idle";
     private bool capturing;
+    private bool capturingStaticCarrier;
     private bool disposed;
 
     public TransparentDrawCorrelationTracer(
@@ -74,6 +75,20 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         Arm(true);
     }
 
+    public void ArmStaticCarrier()
+    {
+        lock (stateLock)
+        {
+            donor = null;
+            captureStarted = Stopwatch.GetTimestamp();
+            state = "Capturing one native non-skinned carrier";
+            capturing = true;
+            capturingStaticCarrier = true;
+        }
+        submissionProbe.ArmStaticCarrier();
+        DebugFileLog.Information(LogSource, "Static carrier capture armed");
+    }
+
     private void Arm(bool duplicateMainSubmission)
     {
         if (underpaint == null)
@@ -97,6 +112,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
                 ? "Capturing one native duplicate (Slot 1 / Material 2 / charactertransparency)"
                 : "Capturing material submission (Slot 1 / Material 2 / charactertransparency)";
             capturing = true;
+            capturingStaticCarrier = false;
         }
         submissionProbe.Arm(snapshot.Model.Model, duplicateMainSubmission);
         underpaint.Diagnostics.BeginTransparentDrawCapture(128, 4);
@@ -111,6 +127,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             if (!capturing)
                 return;
             capturing = false;
+            capturingStaticCarrier = false;
             state = $"Cancelled: {reason}";
         }
         underpaint?.Diagnostics.CancelTransparentDrawCapture(reason);
@@ -122,12 +139,24 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
     {
         DonorSnapshot? currentDonor;
         long started;
+        bool staticCarrier;
         lock (stateLock)
         {
             if (!capturing)
                 return;
             currentDonor = donor;
             started = captureStarted;
+            staticCarrier = capturingStaticCarrier;
+        }
+
+        if (staticCarrier)
+        {
+            var elapsed = Stopwatch.GetElapsedTime(started);
+            if (submissionProbe.HasStaticCarrierCandidate && elapsed >= TimeSpan.FromSeconds(1))
+                CompleteStaticCarrier();
+            else if (elapsed >= CaptureTimeout)
+                Cancel("no-static-carrier-found");
+            return;
         }
 
         if (currentDonor == null || !DonorStillValid(currentDonor))
@@ -162,6 +191,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         {
             currentDonor = donor;
             capturing = false;
+            capturingStaticCarrier = false;
             state =
                 $"Complete: {capture.Draws.Count} draws, {submissionEvents.Count} builds, {submissionCapture.Executions.Count} executed commands ({capture.Reason})";
         }
@@ -208,6 +238,31 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
                 string.Join(',', candidate.Evidence)
             );
         }
+    }
+
+    private void CompleteStaticCarrier()
+    {
+        var submissionCapture = submissionProbe.StopAndTake();
+        lock (stateLock)
+        {
+            capturing = false;
+            capturingStaticCarrier = false;
+            state = $"Complete: {submissionCapture.Builds.Count} carrier builds, {submissionCapture.Executions.Count} executed commands";
+        }
+
+        foreach (var submissionEvent in submissionCapture.Builds)
+            LogSubmission(submissionEvent);
+        foreach (var consumption in submissionCapture.Consumptions)
+            LogCommandConsumption(consumption);
+        foreach (var execution in submissionCapture.Executions)
+            LogCommandExecution(execution);
+        DebugFileLog.Information(
+            LogSource,
+            "Static carrier capture complete Builds={Builds} CommandsConsumed={CommandsConsumed} CommandsExecuted={CommandsExecuted}",
+            submissionCapture.Builds.Count,
+            submissionCapture.Consumptions.Count,
+            submissionCapture.Executions.Count
+        );
     }
 
     private DonorSnapshot? TryCaptureDonor()
@@ -367,7 +422,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
     {
         DebugFileLog.Debug(
             LogSource,
-            "SubmissionBuild Cycle={Cycle} Timestamp={Timestamp} Caller={Caller} Thread={Thread} ModelRenderer=0x{ModelRenderer:X} ModelParams=0x{ModelParams:X} Model=0x{Model:X} ModelResource=0x{ModelResource:X} GeometryIndex={GeometryIndex} GeometryEntry=0x{GeometryEntry:X} GeometryHash={GeometryHash:X16} Material=0x{Material:X} MaterialIndex=2 MaterialResource=0x{MaterialResource:X} Shpk=charactertransparency.shpk Context=0x{Context:X} View={ViewBefore}->{ViewAfter} SubView={SubViewBefore}->{SubViewAfter} SortKey=0x{SortKeyBefore:X}->0x{SortKeyAfter:X}",
+            "SubmissionBuild Cycle={Cycle} Timestamp={Timestamp} Caller={Caller} Thread={Thread} ModelRenderer=0x{ModelRenderer:X} ModelParams=0x{ModelParams:X} Model=0x{Model:X} ModelResource=0x{ModelResource:X} GeometryIndex={GeometryIndex} GeometryEntry=0x{GeometryEntry:X} GeometryHash={GeometryHash:X16} Material=0x{Material:X} MaterialIndex={MaterialIndex} MaterialResource=0x{MaterialResource:X} Shpk={Shpk} Context=0x{Context:X} View={ViewBefore}->{ViewAfter} SubView={SubViewBefore}->{SubViewAfter} SortKey=0x{SortKeyBefore:X}->0x{SortKeyAfter:X}",
             item.BuildCycle,
             item.Timestamp,
             item.NativeCaller,
@@ -380,7 +435,9 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             item.GeometryEntry.ToInt64(),
             item.GeometryHash,
             item.Material.ToInt64(),
+            item.MaterialIndex,
             item.MaterialResource.ToInt64(),
+            item.ShpkName,
             item.Context.ToInt64(),
             item.Before.ViewIndex,
             item.After.ViewIndex,
@@ -389,6 +446,27 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             item.Before.SortKey,
             item.After.SortKey
         );
+        if (item.StaticCarrier is { } carrier)
+        {
+            DebugFileLog.Debug(
+                LogSource,
+                "StaticCarrier Cycle={Cycle} Transform=0x{Transform:X} WorldCB=0x{WorldCB:X} TransformHash=0x{TransformHash:X16} TransformData={TransformData} DrawCountTable=0x{DrawCountTable:X} DrawCount={DrawCount} GeometryBindingTable=0x{GeometryBindingTable:X} GeometryBinding=0x{GeometryBinding:X} GeometryBindingHash=0x{GeometryBindingHash:X16} EntryIndexCount={EntryIndexCount} EntryMaterialIndex={EntryMaterialIndex} EntryPaletteIndex={EntryPaletteIndex} EntryBaseVertex={EntryBaseVertex}",
+                item.BuildCycle,
+                carrier.Transform.ToInt64(),
+                carrier.WorldConstantBuffer.ToInt64(),
+                carrier.TransformHash ?? 0,
+                carrier.TransformQwords,
+                carrier.DrawCountTable.ToInt64(),
+                carrier.DrawCount,
+                carrier.GeometryBindingTable.ToInt64(),
+                carrier.GeometryBinding.ToInt64(),
+                carrier.GeometryBindingHash ?? 0,
+                carrier.EntryIndexCount,
+                carrier.EntryMaterialIndex,
+                carrier.EntryPaletteIndex,
+                carrier.EntryBaseVertex
+            );
+        }
         DebugFileLog.Debug(
             LogSource,
             "SubmissionArena Cycle={Cycle} CommandBase=0x{CommandBaseBefore:X}->0x{CommandBaseAfter:X} CommandUsed={CommandUsedBefore}->{CommandUsedAfter} NewCommands=0x{CommandAddress:X}/{CommandSize}/0x{CommandHash:X16}/{CommandStatus} PayloadBase=0x{PayloadBaseBefore:X}->0x{PayloadBaseAfter:X} PayloadUsed={PayloadUsedBefore}->{PayloadUsedAfter} NewPayload=0x{PayloadAddress:X}/{PayloadSize}/0x{PayloadHash:X16}/{PayloadStatus} Allocations={Allocations}",

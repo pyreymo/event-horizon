@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-18 状态：原生 builder `ffxiv_dx11.exe+0x281DD0` 已证实能在原调用现场自动生成完整 Stage A、两族 Stage C和辅助 view command；相同输入重复提交也已闭环验证。当前 skinned 衣服的 transform/bounds/sort依赖共享 Skeleton、Model-owned joint palette和CharacterBase预计算数据，因此仅停止“复制这件衣服并偏移”的 donor-specific PoC。Underpaint 原生后端继续推进：下一阶段构造非 skinned、独立 `Model+0x38` transform/history和独立 geometry ownership的最小原生 Model/SubMesh载体，把 Underpaint-owned VB/IB交给该 builder自动展开完整 pass。不修改共享 Skeleton/CharacterBase，不 patch command packet。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-18 状态：原生 builder `ffxiv_dx11.exe+0x281DD0` 已证实能在原调用现场自动生成完整 Stage A、两族 Stage C和辅助 view command；相同输入重复提交也已闭环验证。当前 skinned 衣服的 transform/bounds/sort依赖共享 Skeleton、Model-owned joint palette和CharacterBase预计算数据，因此仅停止“复制这件衣服并偏移”的 donor-specific PoC。静态分析又确认 `ffxiv_dx11.exe+0x2B86F0` 是安全的原生 Model 工厂：它分配 0x180-byte Model、调用 `ModelDrawInit` 完成资源/材质/draw表初始化，并接管调用者提供的独立 `Model+0x38` transform/history对象。geometry仍通过 `ModelResourceHandle` 的原生 per-geometry binding对象而非裸 D3D11 buffer进入builder。当前 Debug版已加入一次性非蒙皮载体捕获，等待一轮实机日志裁决该 binding的最小所有权边界；之后才接 Underpaint-owned VB/IB。不修改共享 Skeleton/CharacterBase，不 patch command packet。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 
