@@ -74,7 +74,12 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         Arm(true);
     }
 
-    private void Arm(bool duplicateMainSubmission)
+    public void ArmCustomNativeGeometry()
+    {
+        Arm(false, true);
+    }
+
+    private void Arm(bool duplicateMainSubmission, bool customGeometrySubmission = false)
     {
         if (underpaint == null)
         {
@@ -93,15 +98,21 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         {
             donor = snapshot;
             captureStarted = Stopwatch.GetTimestamp();
-            state = duplicateMainSubmission
-                ? "Capturing one native duplicate (Slot 1 / Material 2 / charactertransparency)"
+            state =
+                customGeometrySubmission ? "Submitting one custom native triangle through the target material"
+                : duplicateMainSubmission ? "Capturing one native duplicate (Slot 1 / Material 2 / charactertransparency)"
                 : "Capturing material submission (Slot 1 / Material 2 / charactertransparency)";
             capturing = true;
         }
-        submissionProbe.Arm(snapshot.Model.Model, duplicateMainSubmission);
+        submissionProbe.Arm(snapshot.Model.Model, duplicateMainSubmission, customGeometrySubmission);
         underpaint.Diagnostics.BeginTransparentDrawCapture(128, 4);
         LogDonor(snapshot);
-        DebugFileLog.Information(LogSource, "Capture armed NativeDuplicate={NativeDuplicate}", duplicateMainSubmission);
+        DebugFileLog.Information(
+            LogSource,
+            "Capture armed NativeDuplicate={NativeDuplicate} CustomGeometry={CustomGeometry}",
+            duplicateMainSubmission,
+            customGeometrySubmission
+        );
     }
 
     public void Cancel(string reason = "manual-cancel")

@@ -346,3 +346,16 @@ Underpaint-owned geometry draw range
 ```
 
 下一次采集只回答一个问题：`Context+0x888/+0x8C0` 中的 Kernel buffer wrapper如何对应现有 D3D侧 IB/VB，以及16-byte stream binding中哪一项是buffer、offset和stride。若对象快照足够，就直接追其构造/释放函数并实现 Underpaint-owned wrapper；若仍不够，只在同一目标 hook中补一个更窄的字段验证。仍然不能用 command packet patching、临时改共享对象后恢复、或跨帧持有当前 hook临时指针绕过所有权问题。
+
+## 2026-07-19 native geometry input 实机结果
+
+`SubmissionGeometry` 与同次目标 `DrawIndexed Count=2280 / StartIndex=12560` 已逐字段对应：
+
+- `Context+0x888 = 0x2454B9B4F90` 是 Kernel IndexBuffer；其对象 `+0x48 = 0x245B9C4CAE0`，正好等于 D3D侧目标 IB。
+- stream 0/1均引用 Kernel VertexBuffer `0x24570217660`；该对象 `+0x40 = 0x2454782C320`，正好等于 D3D侧目标 VB。
+- 每个16-byte stream binding是 `{KernelVertexBuffer*, packed}`，其中 `packed = (byteOffset << 8) | stride`。`0x2AC6814` 解为 offset `0x2AC68=175208`、stride `0x14=20`；`0x2D9B818` 解为 offset `0x2D9B8=186808`、stride `0x18=24`，均与 D3D捕获完全一致。
+- VertexDeclaration保存28-byte、7元素描述，每元素四字节 `{stream, offset, type, usage}`；本次描述为 `00-00-13-00 00-0C-3C-01 00-10-3C-07 01-00-1C-02 01-08-24-0F 01-0C-24-03 01-10-1C-08`。
+
+IDA随后确认了正式资源入口：`0x2255A0/0x21DC10` 创建并填充104-byte native VertexBuffer，`0x2257F0/0x21E240` 创建并填充112-byte native IndexBuffer，`0x225A20 -> 0x235720` 从四字节元素描述取得带缓存和引用计数的 VertexDeclaration。三类资源都通过标准引用计数释放，不需要伪造wrapper或把裸 D3D pointer塞入共享对象。
+
+下一版显式 `Arm custom native triangle` PoC在目标主view的 `0x283320` hook内执行：先保留donor原提交，再创建独立native VB/IB/VertexDeclaration，暂时替换当前线程 Context的 `+0x888/+0x890/+0x8C0`，以 `Count=3/Start=0/Base=0` 再调用一次同一pass builder，并在返回前恢复全部原 Context字段。它不修改 Model、Material、骨骼、donor buffer或已生成command。成功标准首先是日志出现 `CustomGeometrySubmission`，且后续 D3D捕获出现使用新VB/IB、Count=3的 Stage A/C命令；肉眼是否明显可见不是首要判据。

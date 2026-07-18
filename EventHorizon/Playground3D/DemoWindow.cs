@@ -184,6 +184,9 @@ internal sealed class DemoWindow : Window, IDisposable
             ImGui.SameLine();
             if (ImGui.Button("Arm one native duplicate"))
                 transparentDrawTracer.ArmNativeDuplicate();
+            ImGui.SameLine();
+            if (ImGui.Button("Arm custom native triangle"))
+                transparentDrawTracer.ArmCustomNativeGeometry();
         }
         else if (ImGui.Button("Cancel transparent capture"))
         {
@@ -196,7 +199,7 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.EndDisabled();
         if (clearDebugLogState.Length != 0)
             ImGui.TextDisabled(clearDebugLogState);
-        ImGui.TextDisabled("Capture records the target geometry's native index buffer, vertex declaration, and stream bindings.");
+        ImGui.TextDisabled("Custom triangle submits independent native VB/IB resources through the target material's pass builder.");
     }
 #endif
 
