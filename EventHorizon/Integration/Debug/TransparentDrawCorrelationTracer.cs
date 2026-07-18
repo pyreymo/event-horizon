@@ -66,6 +66,16 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
 
     public void Arm()
     {
+        Arm(false);
+    }
+
+    public void ArmNativeDuplicate()
+    {
+        Arm(true);
+    }
+
+    private void Arm(bool duplicateMainSubmission)
+    {
         if (underpaint == null)
         {
             SetState("Unavailable: Underpaint failed to initialize");
@@ -83,13 +93,15 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         {
             donor = snapshot;
             captureStarted = Stopwatch.GetTimestamp();
-            state = "Capturing material submission (Slot 1 / Material 2 / charactertransparency)";
+            state = duplicateMainSubmission
+                ? "Capturing one native duplicate (Slot 1 / Material 2 / charactertransparency)"
+                : "Capturing material submission (Slot 1 / Material 2 / charactertransparency)";
             capturing = true;
         }
-        submissionProbe.Arm(snapshot.Model.Model);
+        submissionProbe.Arm(snapshot.Model.Model, duplicateMainSubmission);
         underpaint.Diagnostics.BeginTransparentDrawCapture(128, 4);
         LogDonor(snapshot);
-        DebugFileLog.Information(LogSource, "Capture armed");
+        DebugFileLog.Information(LogSource, "Capture armed NativeDuplicate={NativeDuplicate}", duplicateMainSubmission);
     }
 
     public void Cancel(string reason = "manual-cancel")
@@ -426,6 +438,20 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
                     $"#{command.PushIndex}:0x{command.Command:X}/type{command.CommandType}/sort0x{command.SortKey:X}/view{command.ViewIndex}.{command.SubViewIndex}/size{command.AllocationSize}"
                 )
             )
+        );
+        DebugFileLog.Debug(
+            LogSource,
+            "SubmissionDuplicate Cycle={Cycle} Applied={Applied} OriginalPushCount={OriginalPushCount} BuilderReturn=0x{BuilderReturn:X} DuplicateReturn=0x{DuplicateReturn:X} BoundaryView={BoundaryView}.{BoundarySubView} BoundarySort=0x{BoundarySort:X} BoundaryCommandUsed={BoundaryCommandUsed} MaterialCalls={MaterialCalls}",
+            item.BuildCycle,
+            item.DuplicateApplied,
+            item.DuplicateApplied ? item.DuplicateStartPushIndex : item.PushedCommands.Count,
+            item.BuilderResult.ToInt64(),
+            item.DuplicateBuilderResult.ToInt64(),
+            item.DuplicateBoundary.ViewIndex,
+            item.DuplicateBoundary.SubViewIndex,
+            item.DuplicateBoundary.SortKey,
+            item.DuplicateBoundary.CommandAllocationUsedSize,
+            item.MaterialCallCount
         );
     }
 

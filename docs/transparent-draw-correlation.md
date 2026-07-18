@@ -6,7 +6,7 @@
 
 旧的 Underpaint 手写 Stage A/C 近似后端已经冻结，只保留为实验对照。临时 `Skip Stage A` A/B 开关已经删除。`agent/stability-probes` 中已经验证过的 pass 退出注入、viewport/scissor、投影与 depth-bias 稳定性修复继续保留，因为它们用于避免旧后端污染后续实验判断，不代表继续扩展近似材质系统。
 
-新的 `TransparentDrawCorrelation` 路径只在 Debug 构建中存在，且仅做读取：
+新的 `TransparentDrawCorrelation` 路径只在 Debug 构建中存在。普通 `Arm transparent capture` 仍严格只读；另有显式的一次性原生重复提交实验，默认不启用：
 
 - EventHorizon 在 framework/game-thread 时点从当前目标的固定 Slot 1 生成不可变 donor 快照；
 - hook `ModelRenderer.OnRenderMaterial` 的唯一直接调用者，并以 Slot 1 的 `Model*`、MaterialIndex 2 和 `charactertransparency.shpk` 三重过滤；
@@ -53,7 +53,7 @@
 7. 保持装备可见，固定条件重复采集一次，用于比较 container、allocation count 和 payload hash 是否稳定。
 8. 提供日志，以及捕获期间是否出现长卡、崩溃或持续日志。
 
-当前唯一缺少的关键证据是：这段 builder 新增的 `Context` command 范围，是否就是稍后产生目标 Stage A/C draw 的那组被消费数据。下一轮日志先证明 producer 的稳定边界；确认后才能安全地定位其 executor 并建立逐项关联。
+下文按采集轮次保留了当时的待验证问题；最新结论和下一步见文末。
 
 ## 2026-07-18 producer 实机结果
 
@@ -91,3 +91,25 @@ FFCS 和 IDA 随后确认 `Context.PushBackCommand` 会把 `{SortKey, Command*}`
 现在已确认 builder 直接生成完整的多 view、多 pass `DrawIndexed` command 集合。剩余唯一证据是：主 buffer 四个命令中，哪三个分别成为当前观察到的 Stage A、Stage C family 1、Stage C family 2，以及第四个落在哪个辅助目标。
 
 下一版仍不扩建通用 tracer，只 hook type 6 执行前已经存在的状态准备 helper，并只对已登记 command 生效。它记录 command 执行时间以及当时的 RT、depth-stencil、VS/PS、blend/depth/rasterizer、topology、scissor 和 index-buffer 状态，可直接与紧随其后的 `DrawIndexed` 时间及 Stage A/C 资源状态对应。
+
+## 2026-07-18 command executor 实机结果
+
+第三轮日志取得 20 次 build、55 条有效 consumer 和 55 条 executor 记录。场景中出现了额外的 View 66/67/68，说明辅助 view 集合会随场景变化；主 View 30.12 的形状仍逐帧稳定。
+
+主 view 四条 command 与实际 draw 的时间和状态已经闭环：
+
+- push 0 / Sort `0xC4075C7F`：四个 G-buffer RT 加 depth，稳定对应目标 `StageA` draw；
+- push 2 / Sort `0xC8075C7F`：单 RT，稳定对应第一族目标 `StageC` draw；
+- push 3 / Sort `0xCB7FFFFE`：同一单 RT，稳定对应第二族目标 `StageC` draw；
+- push 1 / Sort `0xCB075C7F`：进入 executor 并准备完整 GPU 状态，但本次没有落到目标 geometry 的 D3D draw，保留为条件式或辅助 command，不为它强行命名。
+
+因此已经确认：一次 `ffxiv_dx11.exe+0x281DD0` geometry/material builder 调用，在同一线程的 `Graphics::Kernel::Context` 中自动生成 Stage A、两族 Stage C 和辅助提交；插件不需要分别伪造 A/C packet。
+
+下一步是受控的首次写入 PoC。Debug UI 的 `Arm one native duplicate` 只在目标角色 Slot 1、MaterialIndex 2、`charactertransparency.shpk` 且进入主 View 30.12 时消费一次 arm 状态。它先执行正常 builder，再在原 hook、原线程、原参数和原隐式 context 中额外调用一次原 builder；不修改 Material、transform 或已生成 command。日志额外记录：
+
+- 是否实际执行重复提交；
+- 第一次调用结束时的 command arena 边界和 push 数量；
+- 两次 builder 返回值与 `OnRenderMaterial` 调用次数；
+- 重复调用新增 command 的 push index、地址、sort/view、消费和执行状态。
+
+下一次人工采集只点 `Arm one native duplicate`。要验证的唯一关键证据是：第二次 builder 调用是否在原有六条主 build command 后再生成同形的六条 command，并分别再次进入 Stage A、两族 Stage C 和相同辅助 executor 路径。若形状不一致或出现异常，不继续修改隐式 context；若完整成组复制，才进入自定义 transform 输入的静态分析。

@@ -181,6 +181,9 @@ internal sealed class DemoWindow : Window, IDisposable
         {
             if (ImGui.Button("Arm transparent capture"))
                 transparentDrawTracer.Arm();
+            ImGui.SameLine();
+            if (ImGui.Button("Arm one native duplicate"))
+                transparentDrawTracer.ArmNativeDuplicate();
         }
         else if (ImGui.Button("Cancel transparent capture"))
         {
@@ -193,7 +196,7 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.EndDisabled();
         if (clearDebugLogState.Length != 0)
             ImGui.TextDisabled(clearDebugLogState);
-        ImGui.TextDisabled("Targets slot 1 of the currently selected PC; capture stops automatically.");
+        ImGui.TextDisabled("Targets slot 1/material 2 of the selected PC; duplicate runs once in main view 30.12.");
     }
 #endif
 

@@ -47,6 +47,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
     private readonly List<CommandExecutionSnapshot> executionEvents = [];
     private readonly ConcurrentDictionary<nint, ProducedCommandIdentity> producedCommands = new();
     private nint targetModel;
+    private int duplicateMainSubmissionArmed;
     private long nextBuildCycle;
     private bool disposed;
 
@@ -111,7 +112,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
         prepareDrawStateHook.Enable();
     }
 
-    public void Arm(nint model)
+    public void Arm(nint model, bool duplicateMainSubmission = false)
     {
         lock (stateLock)
         {
@@ -120,6 +121,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             executionEvents.Clear();
         }
         producedCommands.Clear();
+        Interlocked.Exchange(ref duplicateMainSubmissionArmed, duplicateMainSubmission ? 1 : 0);
         Interlocked.Exchange(ref targetModel, model);
     }
 
@@ -139,6 +141,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
 
     public void Stop()
     {
+        Interlocked.Exchange(ref duplicateMainSubmissionArmed, 0);
         Interlocked.Exchange(ref targetModel, 0);
     }
 
@@ -205,7 +208,20 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
         activeScope = scope;
         try
         {
-            return materialBuilderHook.Original(modelRenderer, param, modelResource, geometryIndex, flags);
+            var result = materialBuilderHook.Original(modelRenderer, param, modelResource, geometryIndex, flags);
+            scope.BuilderResult = result;
+            if (
+                scope.Before.ViewIndex == 30
+                && scope.Before.SubViewIndex == 12
+                && Interlocked.CompareExchange(ref duplicateMainSubmissionArmed, 0, 1) == 1
+            )
+            {
+                scope.DuplicateApplied = true;
+                scope.DuplicateStartPushIndex = scope.PushedCommands.Count;
+                scope.DuplicateBoundary = CaptureContext(context);
+                scope.DuplicateBuilderResult = materialBuilderHook.Original(modelRenderer, param, modelResource, geometryIndex, flags);
+            }
+            return result;
         }
         finally
         {
@@ -237,6 +253,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             if (observe)
             {
                 var after = new ReadOnlySpan<byte>(param, Params2Size).ToArray();
+                scope!.MaterialCallCount++;
                 scope!.MaterialObservation = new MaterialObservation(
                     (nint)param,
                     (nint)result,
@@ -446,7 +463,13 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             payloadDelta,
             allocations,
             scope.PushedCommands.ToArray(),
-            scope.MaterialObservation
+            scope.MaterialObservation,
+            scope.MaterialCallCount,
+            scope.BuilderResult,
+            scope.DuplicateApplied,
+            scope.DuplicateStartPushIndex,
+            scope.DuplicateBoundary,
+            scope.DuplicateBuilderResult
         );
 
         lock (stateLock)
@@ -581,6 +604,12 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
         public List<PendingAllocation> Allocations { get; } = [];
         public List<ProducedCommandIdentity> PushedCommands { get; } = [];
         public MaterialObservation? MaterialObservation { get; set; }
+        public int MaterialCallCount { get; set; }
+        public nint BuilderResult { get; set; }
+        public bool DuplicateApplied { get; set; }
+        public int DuplicateStartPushIndex { get; set; }
+        public ContextSnapshot DuplicateBoundary { get; set; }
+        public nint DuplicateBuilderResult { get; set; }
     }
 
     private readonly record struct PendingAllocation(nint Address, ulong Size);
@@ -613,7 +642,13 @@ internal sealed record MaterialSubmissionProbeEvent(
     ArenaDelta PayloadDelta,
     IReadOnlyList<CommandAllocationSnapshot> CommandAllocations,
     IReadOnlyList<ProducedCommandIdentity> PushedCommands,
-    MaterialObservation? MaterialObservation
+    MaterialObservation? MaterialObservation,
+    int MaterialCallCount,
+    nint BuilderResult,
+    bool DuplicateApplied,
+    int DuplicateStartPushIndex,
+    ContextSnapshot DuplicateBoundary,
+    nint DuplicateBuilderResult
 );
 
 internal sealed record ProducedCommandIdentity(
