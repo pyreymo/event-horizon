@@ -27,7 +27,9 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
     private const int MaxAllocationsPerBuild = 64;
     private const int MaxPushedCommandsPerBuild = 16;
     private const int MaxConsumptionEvents = 128;
+    private const int MaxExecutionEvents = 128;
     private const int MaxHashBytes = 1024 * 1024;
+    private const string PrepareDrawStateSignature = "40 56 41 56 48 83 EC 48 80 7A";
     private const string NativeCaller = "ffxiv_dx11.exe+0x281D91";
 
     [ThreadStatic]
@@ -38,9 +40,11 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
     private readonly Hook<AllocateCommandDelegate> allocateCommandHook;
     private readonly Hook<PushBackCommandDelegate> pushBackCommandHook;
     private readonly Hook<PreprocessCommandsDelegate> preprocessCommandsHook;
+    private readonly Hook<PrepareDrawStateDelegate> prepareDrawStateHook;
     private readonly Lock stateLock = new();
     private readonly List<MaterialSubmissionProbeEvent> events = [];
     private readonly List<CommandConsumptionSnapshot> consumptionEvents = [];
+    private readonly List<CommandExecutionSnapshot> executionEvents = [];
     private readonly ConcurrentDictionary<nint, ProducedCommandIdentity> producedCommands = new();
     private nint targetModel;
     private long nextBuildCycle;
@@ -71,6 +75,8 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
         uint renderCommandCount
     );
 
+    private delegate nint PrepareDrawStateDelegate(ImmediateContext* immediateContext, byte* state, int flags);
+
     public MaterialSubmissionContainerProbe(IGameInteropProvider gameInteropProvider)
     {
         materialBuilderHook = gameInteropProvider.HookFromSignature<MaterialBuilderDelegate>(
@@ -93,11 +99,16 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             (nint)ImmediateContext.MemberFunctionPointers.PreprocessCommands,
             PreprocessCommandsDetour
         );
+        prepareDrawStateHook = gameInteropProvider.HookFromSignature<PrepareDrawStateDelegate>(
+            PrepareDrawStateSignature,
+            PrepareDrawStateDetour
+        );
         materialBuilderHook.Enable();
         onRenderMaterialHook.Enable();
         allocateCommandHook.Enable();
         pushBackCommandHook.Enable();
         preprocessCommandsHook.Enable();
+        prepareDrawStateHook.Enable();
     }
 
     public void Arm(nint model)
@@ -106,6 +117,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
         {
             events.Clear();
             consumptionEvents.Clear();
+            executionEvents.Clear();
         }
         producedCommands.Clear();
         Interlocked.Exchange(ref targetModel, model);
@@ -116,9 +128,10 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
         lock (stateLock)
         {
             Interlocked.Exchange(ref targetModel, 0);
-            var result = new MaterialSubmissionProbeCapture(events.ToArray(), consumptionEvents.ToArray());
+            var result = new MaterialSubmissionProbeCapture(events.ToArray(), consumptionEvents.ToArray(), executionEvents.ToArray());
             events.Clear();
             consumptionEvents.Clear();
+            executionEvents.Clear();
             producedCommands.Clear();
             return result;
         }
@@ -135,6 +148,7 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             return;
         disposed = true;
         Stop();
+        prepareDrawStateHook.Dispose();
         preprocessCommandsHook.Dispose();
         pushBackCommandHook.Dispose();
         allocateCommandHook.Dispose();
@@ -295,6 +309,11 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
                     var command = *(nint*)(group + 8);
                     if (!producedCommands.TryGetValue(command, out var producer))
                         continue;
+                    if (*(uint*)group != producer.SortKey || *(uint*)command != producer.CommandType)
+                    {
+                        producedCommands.TryRemove(command, out _);
+                        continue;
+                    }
 
                     var snapshot = new CommandConsumptionSnapshot(
                         producer,
@@ -332,6 +351,56 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
             DebugFileLog.Error("MaterialSubmissionProbe", exception, "Failed to observe command consumption");
         }
         preprocessCommandsHook.Original(immediateContext, renderCommands, renderCommandCount);
+    }
+
+    private nint PrepareDrawStateDetour(ImmediateContext* immediateContext, byte* state, int flags)
+    {
+        var command = state == null ? 0 : (nint)(state - 0x20);
+        var observe = producedCommands.TryGetValue(command, out var producer) && producer.CommandType == 6;
+        var result = prepareDrawStateHook.Original(immediateContext, state, flags);
+        if (!observe || immediateContext == null || state == null)
+            return result;
+
+        try
+        {
+            var targets = new nint[5];
+            for (var index = 0; index < targets.Length; index++)
+                targets[index] = *(nint*)((byte*)immediateContext + 0x28 + index * 8);
+            var snapshot = new CommandExecutionSnapshot(
+                producer!,
+                Stopwatch.GetTimestamp(),
+                Environment.CurrentManagedThreadId,
+                (nint)immediateContext,
+                (nint)state,
+                ReadCommandArguments((void*)command, producer!.CommandType),
+                targets,
+                (nint)immediateContext->CurrentDepthStencilBuffer,
+                (nint)immediateContext->CurrentVertexShader,
+                (nint)immediateContext->CurrentPixelShader,
+                *(uint*)((byte*)immediateContext + 0xAC),
+                *(ulong*)((byte*)immediateContext + 0xB0),
+                *(uint*)((byte*)immediateContext + 0x17B4),
+                *(ulong*)state,
+                *(uint*)(state + 0x1C),
+                immediateContext->CurrentPrimitiveTopology,
+                *(int*)((byte*)immediateContext + 0x08),
+                *(int*)((byte*)immediateContext + 0x0C),
+                *(int*)((byte*)immediateContext + 0x10),
+                *(int*)((byte*)immediateContext + 0x14),
+                *(nint*)(state + 0x30)
+            );
+            lock (stateLock)
+            {
+                if (Interlocked.CompareExchange(ref targetModel, 0, 0) != 0 && executionEvents.Count < MaxExecutionEvents)
+                    executionEvents.Add(snapshot);
+            }
+            producedCommands.TryRemove(command, out _);
+        }
+        catch (Exception exception)
+        {
+            DebugFileLog.Error("MaterialSubmissionProbe", exception, "Failed to observe command execution");
+        }
+        return result;
     }
 
     private void CompleteScope(BuildScope scope)
@@ -519,7 +588,8 @@ internal sealed unsafe class MaterialSubmissionContainerProbe : IDisposable
 
 internal sealed record MaterialSubmissionProbeCapture(
     IReadOnlyList<MaterialSubmissionProbeEvent> Builds,
-    IReadOnlyList<CommandConsumptionSnapshot> Consumptions
+    IReadOnlyList<CommandConsumptionSnapshot> Consumptions,
+    IReadOnlyList<CommandExecutionSnapshot> Executions
 );
 
 internal sealed record MaterialSubmissionProbeEvent(
@@ -574,6 +644,30 @@ internal sealed record CommandConsumptionSnapshot(
 );
 
 internal readonly record struct CommandArguments(uint Count, uint StartIndex, int BaseVertex, uint InstanceCount);
+
+internal sealed record CommandExecutionSnapshot(
+    ProducedCommandIdentity Producer,
+    long Timestamp,
+    int ThreadId,
+    nint ImmediateContext,
+    nint State,
+    CommandArguments Arguments,
+    IReadOnlyList<nint> RenderTargets,
+    nint DepthStencil,
+    nint VertexShader,
+    nint PixelShader,
+    uint CurrentDepthState,
+    ulong CurrentStencilState,
+    uint CurrentBlendState,
+    ulong CommandDepthStencilState,
+    uint CommandRasterizerState,
+    int PrimitiveTopology,
+    int ScissorLeft,
+    int ScissorTop,
+    int ScissorRight,
+    int ScissorBottom,
+    nint IndexBuffer
+);
 
 internal readonly record struct ContextSnapshot(
     nint CommandAllocationBase,

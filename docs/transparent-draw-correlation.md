@@ -74,3 +74,20 @@ FFCS 和 IDA 随后确认 `Context.PushBackCommand` 会把 `{SortKey, Command*}`
 - 对 draw command 直接解析 count、start index、base vertex、instance count，并保留 bounded payload hash/qword 快照。
 
 下一次采集的唯一目标变为：把 producer 的 6/3 个 pushed command 逐项对应到现有 Stage A/C draw range。确认映射后，才需要决定是否继续进入更低的 GPU 状态 executor。
+
+## 2026-07-18 command consumer 实机结果
+
+第二轮日志取得 10 次 build、46 条 consumer 记录。其中 45 条是有效的一一关联，另 1 条明确暴露 frame-arena 地址复用：旧 command 地址后来对应 `Count=36` 的其他命令，且 GroupSort 已不再等于原 ProducerSort。后续探针因此把 command type 与 SortKey 一并作为生命周期校验，并在发现复用或执行完成后移除旧地址。
+
+有效结果稳定重复：
+
+- 所有 pushed command 都是 type 6，即原生 `DrawIndexed` command；
+- 所有命令的 draw range 都是 `Count=2280 / StartIndex=12560 / BaseVertex=0`，与目标材质现有 Stage A/C draw 完全一致；
+- 原先称为 View 30 的 3520-byte build 实际 push 六个命令：四个进入同一 745-entry 主 buffer，排序后 group index 固定为 201、312、366、370；另外两个分别进入 View 32 和 View 33 的 14-entry buffer，index 都为 5；
+- 原先称为 View 1 的 1056-byte build 实际 push 三个命令，进入 View 65 的 48-entry buffer，sub-view 7/8/9 的 group index 固定为 6、23、38；
+- 主 buffer 的四个命令按 SortKey 排列为 push 0、2、1、3，证明不能使用 builder 内的 push 顺序推断最终 pass 顺序；
+- D3D 侧稳定看到同一 range 的一个 Stage A 和两个 Stage C draw，因此九个原生命令中至少六个属于当前 A/C capture 范围之外的 view 或辅助提交。
+
+现在已确认 builder 直接生成完整的多 view、多 pass `DrawIndexed` command 集合。剩余唯一证据是：主 buffer 四个命令中，哪三个分别成为当前观察到的 Stage A、Stage C family 1、Stage C family 2，以及第四个落在哪个辅助目标。
+
+下一版仍不扩建通用 tracer，只 hook type 6 执行前已经存在的状态准备 helper，并只对已登记 command 生效。它记录 command 执行时间以及当时的 RT、depth-stencil、VS/PS、blend/depth/rasterizer、topology、scissor 和 index-buffer 状态，可直接与紧随其后的 `DrawIndexed` 时间及 Stage A/C 资源状态对应。

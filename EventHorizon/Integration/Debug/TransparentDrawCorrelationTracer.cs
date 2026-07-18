@@ -151,7 +151,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             currentDonor = donor;
             capturing = false;
             state =
-                $"Complete: {capture.Draws.Count} draws, {submissionEvents.Count} builds, {submissionCapture.Consumptions.Count} consumed commands ({capture.Reason})";
+                $"Complete: {capture.Draws.Count} draws, {submissionEvents.Count} builds, {submissionCapture.Executions.Count} executed commands ({capture.Reason})";
         }
 
         if (currentDonor == null)
@@ -161,6 +161,8 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             LogSubmission(submissionEvent);
         foreach (var consumption in submissionCapture.Consumptions)
             LogCommandConsumption(consumption);
+        foreach (var execution in submissionCapture.Executions)
+            LogCommandExecution(execution);
 
         foreach (var draw in capture.Draws)
             LogDraw(draw);
@@ -171,13 +173,14 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         );
         DebugFileLog.Information(
             LogSource,
-            "Capture complete Reason={Reason} StartedAt={StartedAt} CompletedAt={CompletedAt} Draws={Draws} SubmissionBuilds={SubmissionBuilds} SubmissionCommandsConsumed={SubmissionCommandsConsumed} Match={Match} Unique={Unique} Candidates={Candidates}",
+            "Capture complete Reason={Reason} StartedAt={StartedAt} CompletedAt={CompletedAt} Draws={Draws} SubmissionBuilds={SubmissionBuilds} SubmissionCommandsConsumed={SubmissionCommandsConsumed} SubmissionCommandsExecuted={SubmissionCommandsExecuted} Match={Match} Unique={Unique} Candidates={Candidates}",
             capture.Reason,
             capture.StartedAt,
             capture.CompletedAt,
             capture.Draws.Count,
             submissionEvents.Count,
             submissionCapture.Consumptions.Count,
+            submissionCapture.Executions.Count,
             match.Conclusion,
             match.IsUnique,
             match.Candidates.Count
@@ -453,6 +456,44 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             item.Arguments.InstanceCount,
             item.PayloadHash,
             item.PayloadQwords
+        );
+    }
+
+    private static void LogCommandExecution(CommandExecutionSnapshot item)
+    {
+        DebugFileLog.Debug(
+            LogSource,
+            "SubmissionExecutor Cycle={Cycle} PushIndex={PushIndex} Timestamp={Timestamp} Thread={Thread} Command=0x{Command:X} Type={Type} Sort=0x{Sort:X} View={View}.{SubView} ImmediateContext=0x{ImmediateContext:X} State=0x{State:X} Count={Count} StartIndex={StartIndex} BaseVertex={BaseVertex} Instances={Instances} RT={RenderTargets} DepthStencil=0x{DepthStencil:X} VS=0x{VS:X} PS=0x{PS:X} DepthState=0x{DepthState:X} StencilState=0x{StencilState:X} BlendState=0x{BlendState:X} CommandDepthStencil=0x{CommandDepthStencil:X} Rasterizer=0x{Rasterizer:X} Topology={Topology} Scissor={ScissorLeft},{ScissorTop},{ScissorRight},{ScissorBottom} IndexBuffer=0x{IndexBuffer:X}",
+            item.Producer.BuildCycle,
+            item.Producer.PushIndex,
+            item.Timestamp,
+            item.ThreadId,
+            item.Producer.Command.ToInt64(),
+            item.Producer.CommandType,
+            item.Producer.SortKey,
+            item.Producer.ViewIndex,
+            item.Producer.SubViewIndex,
+            item.ImmediateContext.ToInt64(),
+            item.State.ToInt64(),
+            item.Arguments.Count,
+            item.Arguments.StartIndex,
+            item.Arguments.BaseVertex,
+            item.Arguments.InstanceCount,
+            string.Join(',', item.RenderTargets.Select((target, index) => $"{index}:0x{target:X}")),
+            item.DepthStencil.ToInt64(),
+            item.VertexShader.ToInt64(),
+            item.PixelShader.ToInt64(),
+            item.CurrentDepthState,
+            item.CurrentStencilState,
+            item.CurrentBlendState,
+            item.CommandDepthStencilState,
+            item.CommandRasterizerState,
+            item.PrimitiveTopology,
+            item.ScissorLeft,
+            item.ScissorTop,
+            item.ScissorRight,
+            item.ScissorBottom,
+            item.IndexBuffer.ToInt64()
         );
     }
 
