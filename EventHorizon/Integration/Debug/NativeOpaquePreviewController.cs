@@ -167,14 +167,15 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
         {
             DebugFileLog.Information(
                 LogSource,
-                "Native preview opaque draw Sequence={Sequence} VS={VS} PS={PS} Layout={Layout} VSCB={VSCB} PSCB={PSCB} SRV={SRV}",
+                "Native preview opaque draw Sequence={Sequence} VS={VS} PS={PS} Layout={Layout} VSCB={VSCB} PSCB={PSCB} SRV={SRV} State={State}",
                 draw.Sequence,
                 $"0x{draw.VertexShader:X}",
                 $"0x{draw.PixelShader:X}",
                 $"0x{draw.InputLayout:X}",
                 string.Join(",", draw.VertexConstantBuffers.Select(FormatConstant)),
                 string.Join(",", draw.PixelConstantBuffers.Select(FormatConstant)),
-                string.Join(",", draw.ShaderResources.Select(FormatResource))
+                string.Join(",", draw.ShaderResources.Select(FormatResource)),
+                draw.PipelineState
             );
         }
         if (instance != null)
