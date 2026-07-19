@@ -1,6 +1,6 @@
 # Underpaint 原生基本图形材质契约计划
 
-> 当前状态（2026-07-19）：本计划取代“继续适配透明衣服材质”作为 Underpaint 原生提交后端的主线。`OnRenderMaterial -> ffxiv_dx11.exe+0x283320`、owned geometry、owned current/previous World CB、独立 shader selection、最小调用参数和 Context 恢复边界继续保留；装备 `e0378` 只保留为历史半透明管线证据，不再作为基本图形的材质、顶点协议或验收样本。
+> 当前状态（2026-07-19）：本计划取代“继续适配透明衣服材质”作为 Underpaint 原生提交后端的主线。owned geometry、owned current/previous World CB、独立 shader selection和Context恢复边界继续保留；装备 `e0378` 只保留为历史半透明管线证据。实机已经证明`OnRenderMaterial -> 0x283320`是ModelRenderer的六类pass协议，不能承载只有三类pass的`bg.shpk`；原生BG路线改为评估`BGInstancingRenderer -> 0x290520 -> 0x290E10`，不再修补错误的builder/profile组合。
 
 ## 目标
 
@@ -13,8 +13,8 @@ Underpaint positions / normals / colors / UV
     -> profile-owned vertex packing
     -> profile-owned material constants and texture defaults
     -> profile-owned current/previous transform
-    -> native OnRenderMaterial
-    -> native pass builder 0x283320
+    -> matching native renderer material selection
+    -> renderer-specific native pass builder
     -> native opaque G-buffer/depth and allowed auxiliary views
 ```
 
@@ -229,7 +229,11 @@ candidate-name/
 
 2026-07-19安全probe实机结果为`ActivePass=1`，slot 0解析到非空`VS4/PS0`；pass 2的`VS5/PS3`也非空。这排除了目标BG材质、builder入口主pass permutation和resolver失败。反汇编显示`sub_140283AC0`先直接snapshot并push第一条command，随后在`0x283E73`通过`sub_1402EFBE0`生成第二条command；历史崩溃恰好发生在第二条snapshot。该snapshot既可能在selection状态被消费后回退到`Context+0x878/+0x880`的current VS/PS，也可能在builder内部切换pass后遇到descriptor空槽；入口probe本身不能区分二者。owned路径此前只安装了descriptor，没有安装current shader槽，这是需要先补齐的明确调用边界缺口。
 
-当前实现因此不再停留于probe-only：在resolver证明active pass有效后，将同一slot的VS、PS和descriptor一起安装到TLS Context，再调用builder；三者都由统一Context scope保存并无条件恢复。这补齐的是原生builder的调用级shader输入，不是材质特判，也不通过裁掉builder生成的第二条command规避问题。另增加一个仅在Underpaint自己的同步提交期间生效的snapshot安全闸门：builder内任意command若仍将以空VS/PS进入`sub_14023B920`，就走该函数原有的失败返回并在builder返回后报告实际active pass；其他游戏提交完全透传。这样本轮验证即使推翻current-shader假设，也不会再触发同一native AV。
+后续安全实机命中了`ActivePass=6`，descriptor只提供pass 1和2。这直接推翻了“只缺current shader槽”的解释：`0x283320`内部的ModelRenderer helper明确要求第六类pass，而目标BG package没有这个协议。离线对照也显示`bg`、`bgprop`、`bgcolorchange`、`bgcrestchange`、`bguvscroll`和`crystal`均只有同样三类pass；只有`character`/`characterlegacy`覆盖ModelRenderer使用的六类pass。换另一个BG材质不会修复该入口。
+
+当前实现保留snapshot安全闸门，并在进入builder前根据owned flags检查pass 6；不兼容profile会在任何command写入arena前明确停止，避免产生部分提交。不得跳过pass 6、把pass 1 shader冒充pass 6，或清除原生material flags来伪造成功。
+
+静态定位到BG的对应链路：`0x290520`准备view、sorting和1至2个pass descriptor，随后调用`0x290E10`；后者遍历BG batch中的LOD/mesh/submesh/material，安装geometry/material bindings，调用同一个`0x1417E5700` resolver，再通过`0x23B920`生成command。它不是一个只接收VB/IB和Material的简单入口：当前输入仍包含BGInstancingRenderer、BG batch、resource tables和submesh记录。下一阶段只沿这条链向上确认是否存在可复制的per-instance/batch item；若必须伪造完整BgParts资源对象，则终止“复用BG builder”路线，基本图形继续使用Underpaint自有opaque backend，而不是退回Character材质。
 
 ### Phase 3：收敛internal后端
 
@@ -249,7 +253,8 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 
 | 部分 | 决策 |
 |---|---|
-| `0x283320` 原生pass builder | 保留 |
+| `0x283320` ModelRenderer pass builder | 仅保留为角色/模型协议研究成果；从BG primitive profile淘汰 |
+| `0x290520 -> 0x290E10` BG builder | 新的静态候选；先确认是否存在最小可复制batch input |
 | 同线程、同Context、同view时机 | 保留 |
 | owned VB/IB/VertexDeclaration | 保留，改由profile定义布局 |
 | owned current/previous World CB | 保留 |
@@ -285,3 +290,4 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 | 2026-07-19 | BG scene-key修正 | 首次实机在提交前失败：旧代码强制向`bg.shpk`写入角色model-type key；已改为只覆盖目标SHPK声明的canonical keys | 再次实机验证material callback和实际opaque draw |
 | 2026-07-19 | BG builder崩溃隔离 | 两次修正后第三次仍在同一空VS读取处崩溃；停止推测式提交，改为resolver probe-only | 安全采集实际descriptor的16个pass槽，确定缺失shader的精确原因 |
 | 2026-07-19 | BG current shader输入补齐 | probe确认active pass 1的VS/PS均有效；崩溃位于同一builder生成的第二条command snapshot，owned路径缺少`Context+0x878/+0x880`回退输入 | 实机验证两条command均生成、Context恢复且三角形可见 |
+| 2026-07-19 | Model/BG协议错配确认 | 安全闸门捕获builder内部`ActivePass=6`；离线SHPK对照确认BG全家族只有三类pass，`0x283320`属于六类pass的ModelRenderer协议 | 停止`bg.shpk -> 0x283320`；静态审计BG的`0x290520 -> 0x290E10`最小batch边界 |
