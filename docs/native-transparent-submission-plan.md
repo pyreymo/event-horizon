@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实能让插件自有 VB/IB 和128-byte current/previous World CB自动生成一条Opaque和五条辅助view command，均为 `Count=3`；shader model-type key已从角色skinned路径成功切到non-skinned。当前PoC继续拆除material donor：Underpaint在首次arm时为命中材质的 `MaterialResourceHandle` 持有独立引用，此后每次从该材质SHPK重新构造shader selection、迁入当前view的同名scene keys，并调用游戏原生material helper绑定材质constant和textures；所有Context槽位均同步恢复。该版本待实机验证。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB和owned shader selection。source geometry/material/SHPK selection已脱离；Context恢复已集中为单一scope，并已建立internal持续rigid实例与frame/view去重。当前待实机验证canonical renderer/subview scene keys与不同source flags覆盖；正式API的主要阻塞是source 176-byte object constant、`Params2+0x38/+0x44`及可靠延迟回收边界。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 
@@ -345,3 +345,7 @@ World输入实测已经通过：六条有效 `DrawIndexed Count=3` 统一绑定�
 `20/28` 对照已经通过：Underpaint自有 `20/24` geometry在该现场正常生成 `Count=3`，source geometry/material ABI由此闭环脱离。不过输出从六条变为九条，并出现Semitransparent及两条Semitransparent Stage C，暴露了最后一项source material污染：复制的 `OnRenderMaterialParams2+0x40`仍是source Material计算出的pass flags。
 
 当前实现已删除临时stride过滤，并改为按原生调用规则重建material params：保留同步现场的model/resource与 `+0x38` geometry/view输入，清空可选callback输出和pass flags，再对显式加载的owned Material调用原生 `ModelRenderer.OnRenderMaterial`，由游戏生成owned `+0x40`，之后才调用material helper和 `0x283320`。期间的TLS rasterizer、constant和texture状态均恢复。日志新增source/owned flags及material index。下一次实测的判据是owned flags与source分离，且自有三角形不再继承source的Semitransparent命令族。
+
+首次flags重建实测为 `0x15->0x15`，输出为当前测试material/view对应的一条Opaque与五条辅助draw，无Semitransparent；功能正确但仍缺source/owned不相同的判别样本。静态审计进一步确认 `Params2+0x38` low dword是上层pass/view request mask，`+0x3C/+0x3E`是source geometry index/alternate-builder dispatch，`+0x44`是辅助view bitmask。当前版本清掉后两项source geometry字段，暂时保留 `+0x38/+0x44`并明确记录；它们是下一阶段的source object/view边界，而不是材质协议。
+
+source shader selection依赖已删除。owned selection现在直接按CRC查询canonical `ModelRenderer.SceneKeys[20]`与`SubViewKeys[5]`，然后强制non-skinned model type；目标SHPK构造器default覆盖尚未解析的camera keys。Context保存/恢复已集中为单一scope。Underpaint同时增加internal持续rigid实例和 `FrameCounter+Context+view+subview` rendezvous去重，实例持有独立current/previous World CB并支持history reset；该能力仍受固定ABI、测试material、source 176-byte object constant以及 `+0x38/+0x44`限制，尚未公开。

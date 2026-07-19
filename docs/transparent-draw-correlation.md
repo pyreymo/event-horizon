@@ -507,3 +507,30 @@ retained MaterialResourceHandle -> Render::Material -> ShaderPackage
 静态复核 `0x283320` 后，剩余依赖已定位到参数本身：`Params2+0x38`携带geometry/view掩码，`+0x40`则由 `OnRenderMaterial` 根据Material、resource additional data、SHPK类型和Model callback生成，并被pass builder直接按位展开命令。当前版本不再复制 `+0x10..+0x37` 的可选callback输出，也不再沿用source `+0x40`。它保留调用级model/resource和 `+0x38`，按原生初始化规则重置其余字段，再对显式加载的目标Material同步调用游戏自己的 `OnRenderMaterial` 生成owned flags；随后才应用owned selector/material并进入 `0x283320`。调用期间改变的TLS rasterizer state、全部64个constant槽和目标texture槽均在 `finally` 中恢复。临时 `20/28` 过滤已经删除。
 
 日志新增 `Flags=source->owned` 和 `MaterialIndex`。下一次采集需要确认：任意source stride现场都可触发；owned flags与source透明flags分离；有效 `Count=3` 回到目标不透明材质应有的一条Opaque加辅助draw集合，不再出现由source params引入的Semitransparent家族。此后唯一尚未独立拥有的边界是source `OnRenderModelParams`/Model wrapper及当前view共有scene-key values；材质pass决策本身已改由目标Material原生生成。
+
+## 2026-07-19 rigid backend 边界审计与持续提交骨架
+
+flags重建后的首次实测得到 `Flags=0x15->0x15`，并恢复为当前测试material/view下的一条Opaque加五条辅助indexed draw，没有Semitransparent家族。这证明重建路径没有退化，但source与owned恰好相同，因此“不同source flags被覆盖”的判别证据仍需下一次非相同flags现场；`0x15`和六条draw都只属于当前测试组合，不是协议常量。
+
+对 `0x283320` 的最小输入审计结果：
+
+| 字段 | 分类 | 当前结论 |
+|---|---|---|
+| `OnRenderModelParams+0x00` | source object语义污染 | 指向source `Model`；`OnRenderMaterial`读取其flags/callback，`0x283320`的条件分支只额外读取少量Model字段。尚未独立。 |
+| `OnRenderModelParams+0x10` | owned instance候选 / 当前source污染 | 176-byte object constant由source `Model.RenderModelCallback`提供。当前仅复制到Underpaint-owned CB，内容仍继承carrier。CPU builder不解释其字段，实际消费由目标shader决定。 |
+| `OnRenderMaterialParams2+0x00` | scratch wrapper | 改指向调用栈内复制的model params。 |
+| `+0x08` | source geometry/resource | `0x283320`与`OnRenderMaterial`均不需要；当前版本清零。 |
+| `+0x10..+0x2F` | scratch/output | 原生material callback的可选输出；提交前清零，由owned Material调用重新生成。 |
+| `+0x30` | owned material输入 | Underpaint构造的目标SHPK selection。 |
+| `+0x38` low dword | 混合pass/view输入 | 来源是上层render request flags（特殊view会OR `0x1800`）；`0x283320`按低位bit-pair及 `0xC00000/0x3000000`展开不同view/pass。当前仍从rendezvous复制，不能写成material或geometry协议。 |
+| `+0x3C/+0x3E` | source geometry / 外层dispatch | 分别是source geometry index与选择alternate builder的字节；进入已选定的 `0x283320` 后不再使用，当前版本清零。 |
+| `+0x40` | owned material输入 | 清零后由目标Material的原生 `OnRenderMaterial`生成。 |
+| `+0x44` | source object/view语义污染 | 辅助View 32+的bit mask；builder用它枚举带有效camera的辅助view。当前仍复制，后续应由允许的view集合与自有可见性策略生成。 |
+
+canonical scene-key来源已经部分闭环。原生caller按目标SHPK的key CRC查询 `ModelRenderer.SceneKeys[20]` 和 `SubViewKeys[5]`；当前版本直接从这两个canonical表填充owned selection，并保留目标SHPK构造器的default values，不再读取source selection或要求source SHPK声明同名key。CameraManager中仍存在少量随camera变化的key/value对，FFCS尚未公开其表；本轮不猜偏移，下一次实机先验证当前目标opaque material是否只需renderer/subview canonical集合。日志新增 `CanonicalKeys=renderer+subview`。
+
+Underpaint内部已增加受限的持续rigid实例：每个实例拥有128-byte current/previous World CB，支持更新world-view和显式history reset；render rendezvous以 `Framework.FrameCounter + Context* + view + subview` 去重，每个实例在已验证的主view现场每帧只提交一次。该入口保持internal，固定双stream ABI、固定测试material和当前rendezvous仍未提升为公开假设。
+
+所有Context修改现集中到一个scope：统一保存/恢复IB、VertexDeclaration、四个stream binding、64个constant slot、目标material涉及的resource/sampler/flags槽以及`OnRenderMaterial`修改的rasterizer字段。selection/key storage为调用栈owned数据，不写入Context；当前路径不修改recording Context的topology，因此没有伪造未知topology offset。异常与正常返回共享同一恢复边界。
+
+资源生命周期采用保守策略：active instance移除后立即停止提交，但其World CB进入retired集合，直到backend teardown才释放；builder返回不视为frame/GPU完成边界。正式API前仍需找到可靠的frame-completion/延迟回收边界，并为geometry/material建立相同的引用与退休规则。当前持续后端还没有宣称完成多material、source-independent object constant、source-independent `+0x38/+0x44`、场景切换与数百帧实机验证。
