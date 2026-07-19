@@ -213,6 +213,8 @@ scope统一恢复TLS Context
 
 新增的一次性窄探针直接枚举已选VS/PS的`PVShader.ResourceEntry`，记录每个D3D slot对应的原生Id、SHPK CRC、大小以及当前Context资源地址。下一次采集即可把上述CB3/CB4/SRV4反查为可覆盖的原生slot，而不再通过装备部位或draw consumer间接猜测。
 
+首次resource-map结果只包含rendezvous当时active auxiliary pass的VS资源（CB0 `id=24/CRC=F0BAD919`、CB1 `id=5/CRC=76BB3DC0`），PS不使用资源；它没有覆盖builder随后为main opaque及shadow切换的descriptor pass。探针已修正为遍历同一descriptor的全部16个pass，按实际VS/PS组合去重，并通过preview capture对象写入同一个debug文件。这样仍是一条有界记录，但能够覆盖最终draw使用的CB3、CB4和SRV4，而不是把active-pass局部信息误当成整个permutation契约。
+
 ### Phase 0：离线契约分析器
 
 - 复用Penumbra.GameData解析 `.mdl/.mtrl/.shpk`，不重新发明文件格式。
@@ -379,3 +381,4 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 | 2026-07-19 | selection判据修正 | 首次实机在resolver前被本地检查拦截；静态确认`OnRenderMaterial`从不写selection `+0x00`，resolver也不读取该字段 | 删除错误前置检查，以resolver返回值验证独立selection |
 | 2026-07-19 | 最小builder成立、Character常量仍污染 | owned quad稳定生成4条Opaque与15条辅助draw；shader/layout/SRV稳定，但外观随裸体/头/身体carrier改变，`materialIndex=0`并非装备slot | 只枚举selected permutation实际使用的绑定，owned覆盖剩余非view Character constants |
 | 2026-07-20 | TLS污染收敛 | 两组draw仅有VS CB3、PS CB4和SRV4随carrier变化；owned方块可投影阴影，确认builder自动生成辅助/阴影视图commands | 用selected shader resource map反查native Id/CRC，随后在builder前安装owned neutral绑定并由统一scope恢复 |
+| 2026-07-20 | resource-map探针修正 | 首次输出只反射rendezvous active auxiliary pass，无法解释最终opaque draw；同时Underpaint插件日志未进入专用debug文件 | 遍历descriptor全部有效pass并随preview capture导出，下一次采集直接获得完整native Id/CRC映射 |

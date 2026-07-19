@@ -180,6 +180,8 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
         }
         if (instance != null)
         {
+            if (instance.TakeSelectedBindingMapCapture() is { } bindingMap)
+                DebugFileLog.Information(LogSource, "Native preview selected resource map {BindingMap}", bindingMap);
             foreach (var submission in instance.TakeSubmissionCapture())
             {
                 DebugFileLog.Information(
