@@ -45,6 +45,7 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
             [0, 1, 2, 2, 3, 0]
         );
         instance = underpaint.CreateNativeWorldRigidInstance(geometry, previewWorld);
+        instance.BeginSubmissionCapture(8);
         underpaint.BeginNativeGeometryDrawCapture(geometry);
         drawCaptureActive = true;
         state = "Waiting for the native render rendezvous";
@@ -176,10 +177,41 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
                 string.Join(",", draw.ShaderResources.Select(FormatResource))
             );
         }
+        if (instance != null)
+        {
+            foreach (var submission in instance.TakeSubmissionCapture())
+            {
+                DebugFileLog.Information(
+                    LogSource,
+                    "Native preview builder {Phase} Sequence={Sequence} Frame={Frame} Context={Context} View={View}/{SubView} Thread={Thread} WorldCB={WorldCB} Source={Source} Flags={Flags} Hash={Hash} CurrentHash={CurrentHash} PreviousHash={PreviousHash} Equal={Equal} Current={Current} Previous={Previous}",
+                    submission.Phase,
+                    submission.Sequence,
+                    submission.Frame,
+                    $"0x{submission.Context:X}",
+                    submission.View,
+                    submission.SubView,
+                    submission.ThreadId,
+                    $"0x{submission.WorldConstant:X}",
+                    $"0x{submission.SourcePointer:X}",
+                    $"0x{submission.ConstantFlags:X}",
+                    FormatHash(submission.ContentHash),
+                    FormatHash(submission.CurrentHash),
+                    FormatHash(submission.PreviousHash),
+                    submission.CurrentHash == submission.PreviousHash,
+                    FormatMatrix(submission.CurrentWorldView),
+                    FormatMatrix(submission.PreviousWorldView)
+                );
+            }
+        }
     }
 
     private static string FormatConstant(NativeGeometryConstantBufferBinding constant) =>
-        $"{constant.Slot}:0x{constant.Buffer:X}/{constant.ByteWidth}/{(constant.ContentHash is { } hash ? $"{hash:X16}" : "-")}";
+        $"{constant.Slot}:0x{constant.Buffer:X}/{constant.ByteWidth}/{FormatHash(constant.ContentHash)}/{FormatHash(constant.FirstHalfHash)}:{FormatHash(constant.SecondHalfHash)}";
+
+    private static string FormatHash(ulong? hash) => hash is { } value ? $"{value:X16}" : "-";
+
+    private static string FormatMatrix(Matrix4x4 value) =>
+        $"[{value.M11:R},{value.M12:R},{value.M13:R},{value.M14:R};{value.M21:R},{value.M22:R},{value.M23:R},{value.M24:R};{value.M31:R},{value.M32:R},{value.M33:R},{value.M34:R};{value.M41:R},{value.M42:R},{value.M43:R},{value.M44:R}]";
 
     private static string FormatResource(NativeGeometryShaderResourceBinding resource) =>
         $"{resource.Slot}:0x{resource.View:X}/0x{resource.Resource:X}";
