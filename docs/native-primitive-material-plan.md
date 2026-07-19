@@ -185,6 +185,34 @@ candidate-name/
 
 这项结果不要求恢复装备slot追踪，也不要求先构造完整render item。下一步只反射当前selected VS/PS实际使用的constant/resource binding，将其分类为frame/view公共输入和Character专属输入；前者保留，后者用Underpaint-owned neutral constant完整覆盖。若所有实际使用的非view绑定均可独立提供，则继续保留`0x283320`最小边界；只有存在无法从Character之外表达的必需输入时才上移。
 
+2026-07-20两组不同carrier的最终draw快照把残留进一步缩小：目标VS/PS、layout、World CB、256-byte实例CB、512-byte material CB以及SRV 0/1/2/3/5/6均保持稳定；只有VS slot 3的16-byte CB、PS slot 4的16-byte CB及SRV slot 4随carrier改变。VS/PS各自的frame/view CB仍按帧变化，属于预期公共状态。方块同时能够向场景投影阴影，证明builder已经把owned geometry扩展到辅助/阴影视图；无需另建shadow draw。
+
+因此当前可直接控制的最小拦截面固定在`ApplyMaterial`之后、`0x283320`之前的TLS Context resource arrays：
+
+```text
+owned selection + owned Material
+        |
+        v
+ApplyMaterial
+        |  写目标material CB与.mtrl直接纹理
+        v
+selected VS/PS resource reflection
+        |  D3D CB/SRV slot -> native resource Id/CRC
+        v
+Underpaint覆盖非view的constant/texture/sampler绑定
+        |
+        v
+0x283320
+        +-- main opaque commands
+        +-- auxiliary commands
+        +-- shadow commands
+        |
+        v
+scope统一恢复TLS Context
+```
+
+新增的一次性窄探针直接枚举已选VS/PS的`PVShader.ResourceEntry`，记录每个D3D slot对应的原生Id、SHPK CRC、大小以及当前Context资源地址。下一次采集即可把上述CB3/CB4/SRV4反查为可覆盖的原生slot，而不再通过装备部位或draw consumer间接猜测。
+
 ### Phase 0：离线契约分析器
 
 - 复用Penumbra.GameData解析 `.mdl/.mtrl/.shpk`，不重新发明文件格式。
@@ -350,3 +378,4 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 | 2026-07-19 | 乐观边界实验 | 暂停横向renderer调查；以已知合法的ModelRenderer fixture直接验证显式参数+当前view/TLS是否充分 | selection零seed、Params2零构造，采集builder commands与最终draw |
 | 2026-07-19 | selection判据修正 | 首次实机在resolver前被本地检查拦截；静态确认`OnRenderMaterial`从不写selection `+0x00`，resolver也不读取该字段 | 删除错误前置检查，以resolver返回值验证独立selection |
 | 2026-07-19 | 最小builder成立、Character常量仍污染 | owned quad稳定生成4条Opaque与15条辅助draw；shader/layout/SRV稳定，但外观随裸体/头/身体carrier改变，`materialIndex=0`并非装备slot | 只枚举selected permutation实际使用的绑定，owned覆盖剩余非view Character constants |
+| 2026-07-20 | TLS污染收敛 | 两组draw仅有VS CB3、PS CB4和SRV4随carrier变化；owned方块可投影阴影，确认builder自动生成辅助/阴影视图commands | 用selected shader resource map反查native Id/CRC，随后在builder前安装owned neutral绑定并由统一scope恢复 |
