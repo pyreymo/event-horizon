@@ -188,6 +188,8 @@ candidate-name/
 
 `bg.shpk`是大型通用包（56 VS、3850 PS、9244 nodes），但这不意味着需要先解释全部node。0517没有material-key override；实际提交只需把当前renderer/view canonical keys填入owned selection，再观察被选择的opaque node。若选择不能稳定复现，才对该一个node和对应VS/PS做进一步反汇编。
 
+`bg.shpk`声明自己的10个scene keys，不包含角色/装备SHPK使用的model-type key。2026-07-19首次实机提交因此暴露了一个旧假设：代码在复制目标SHPK声明的canonical keys之后，仍强制写入角色model-type key并主动报错。该强制写入已经删除。正确规则是：selection构造器先安装目标SHPK defaults，只对目标SHPK实际声明、且能从当前renderer/subview找到的key覆盖当前值；不得要求两个不同SHPK拥有同名scene key。
+
 原生 `ResourceManager.GetResourceSync` 的hash也已静态确认：`Crc32.FromBuffer`对完整虚拟路径执行标准反射CRC32并返回最终按位取反结果。0517 `.mtrl` 的hash为 `0x5D6A7B3E`，category为`BgCommon`；不再沿用运行时捕获的衣服资源常量。
 
 ### Phase 1：选择 `OpaquePrimitiveProfile`
@@ -267,3 +269,4 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 | 2026-07-19 | 方向重置 | 原生提交入口和owned实例链保留；衣服材质不再是后端验收条件 | 建立离线contract analyzer并筛选2至3个static opaque候选 |
 | 2026-07-19 | Phase 0完成 | 离线枚举、`.mdl/.mtrl/.shpk`解析和三候选对照完成；选定0517 `bg.shpk` profile，无需用户导出 | 实机验证BG profile的material callback、permutation和稳定可见性 |
 | 2026-07-19 | Phase 2实现中 | 衣服材质/vertex ABI和carrier过滤已从提交路径移除；Debug/Release构建通过 | 用户显示preview并采集一次bounded draw capture |
+| 2026-07-19 | BG scene-key修正 | 首次实机在提交前失败：旧代码强制向`bg.shpk`写入角色model-type key；已改为只覆盖目标SHPK声明的canonical keys | 再次实机验证material callback和实际opaque draw |
