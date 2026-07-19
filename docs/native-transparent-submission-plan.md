@@ -335,3 +335,5 @@ World输入实测已经通过：六条有效 `DrawIndexed Count=3` 统一绑定�
 首次arm仍从同步 `OnRenderMaterial -> 0x283320` 链取得一个有效 `Material*`，并给其resource handle增加自己的ref；这一步用于验证生命周期、selector重建和material binding，而不是最终API。日志新增source/owned Material、resource、SHPK、路径及 `MaterialCaptured`。第一次应为 `Captured=true`，同一插件生命周期再次arm应为 `false` 且owned身份/路径稳定。验证通过后，下一步将该已记录路径改由 `ResourceManager.GetResourceSync` 显式加载，届时可移除对source material和 `20/24` donor selector的要求。
 
 第一次实机在material helper调用前暴露一个编号错误：SHPK constant slot不是Context运行时constant ID。修正版改为在source material已绑定完成的64个Context constant槽中按 `MaterialParameterCBuffer*` 反查真实ID，记录为 `ConstantId`，并以该ID保存/恢复。失败路径没有执行material helper或builder，也没有修改Context。
+
+修正版两次实测已通过：日志中原缩写字段 `Captured=true/false`、owned resource/SHPK/path稳定、`ConstantId=25`，两次均生成六条有效 `Count=3`。日志标签现已改为 `MaterialCaptured`。根据resource handle确认的真实路径与键，当前版本进一步使用 `ResourceManager.GetResourceSync(Chara, 0x6D74726C, 0x56D3AB97, path)` 显式加载该不透明材质；第一次预期 `MaterialCaptured=false/MaterialLoaded=true`，之后为 `false/false`。验证通过后，剩余工作是让scene keys和material constant ID也脱离source material，再放宽source vertex ABI过滤。
