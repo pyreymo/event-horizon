@@ -167,7 +167,7 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
         {
             DebugFileLog.Information(
                 LogSource,
-                "Native preview opaque draw Sequence={Sequence} VS={VS} PS={PS} Layout={Layout} VSCB={VSCB} PSCB={PSCB} SRV={SRV} State={State}",
+                "Native preview opaque draw Sequence={Sequence} VS={VS} PS={PS} Layout={Layout} VSCB={VSCB} PSCB={PSCB} SRV={SRV} State={State} Output={Output}",
                 draw.Sequence,
                 $"0x{draw.VertexShader:X}",
                 $"0x{draw.PixelShader:X}",
@@ -175,7 +175,8 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
                 string.Join(",", draw.VertexConstantBuffers.Select(FormatConstant)),
                 string.Join(",", draw.PixelConstantBuffers.Select(FormatConstant)),
                 string.Join(",", draw.ShaderResources.Select(FormatResource)),
-                draw.PipelineState
+                draw.PipelineState,
+                string.Join(",", draw.RenderTargetSamples.Select(FormatRenderTargetSample))
             );
         }
         if (instance != null)
@@ -216,6 +217,9 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
 
     private static string FormatResource(NativeGeometryShaderResourceBinding resource) =>
         $"{resource.Slot}:0x{resource.View:X}/0x{resource.Resource:X}";
+
+    private static string FormatRenderTargetSample(NativeGeometryRenderTargetSample sample) =>
+        $"{sample.Slot}:0x{sample.Resource:X}/{sample.Format}/{sample.ContentHash:X16}";
 
     private static Vector3 GetScreenRayPoint(
         FFXIVClientStructs.FFXIV.Client.Game.Camera* camera,
