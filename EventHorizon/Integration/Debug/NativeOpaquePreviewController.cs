@@ -162,7 +162,27 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
             capture.Draws.Count,
             string.Join(",", groups)
         );
+        foreach (var draw in capture.Draws.Where(draw => draw.Pass == "Opaque" && draw.DrawType == "DrawIndexed"))
+        {
+            DebugFileLog.Information(
+                LogSource,
+                "Native preview opaque draw Sequence={Sequence} VS={VS} PS={PS} Layout={Layout} VSCB={VSCB} PSCB={PSCB} SRV={SRV}",
+                draw.Sequence,
+                $"0x{draw.VertexShader:X}",
+                $"0x{draw.PixelShader:X}",
+                $"0x{draw.InputLayout:X}",
+                string.Join(",", draw.VertexConstantBuffers.Select(FormatConstant)),
+                string.Join(",", draw.PixelConstantBuffers.Select(FormatConstant)),
+                string.Join(",", draw.ShaderResources.Select(FormatResource))
+            );
+        }
     }
+
+    private static string FormatConstant(NativeGeometryConstantBufferBinding constant) =>
+        $"{constant.Slot}:0x{constant.Buffer:X}/{constant.ByteWidth}/{(constant.ContentHash is { } hash ? $"{hash:X16}" : "-")}";
+
+    private static string FormatResource(NativeGeometryShaderResourceBinding resource) =>
+        $"{resource.Slot}:0x{resource.View:X}/0x{resource.Resource:X}";
 
     private static Vector3 GetScreenRayPoint(
         FFXIVClientStructs.FFXIV.Client.Game.Camera* camera,

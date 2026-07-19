@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/Model/SHPK selection/角色实例常量及pass/view mask均已脱离；canonical scene keys、受限mask和最小Model facade均已实机通过。原生材质像素、固定World锚点、尺寸和单面几何均已实机成立，但单面仍闪烁。日志显示11.9秒内1848次builder submission，约155次/秒，符合逐帧一次而非重复风暴。当前修正把`FixedWorld * CurrentView`从framework线程移入原生render rendezvous，在生成本帧current/previous CB前同线程采样；同时复用现有owned VB/IB过滤器自动捕获前四次submission的实际DrawIndexed汇总。清理日志按钮保留。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/Model/SHPK selection/角色实例常量及pass/view mask均已脱离；canonical scene keys、受限mask和最小Model facade均已实机通过。原生材质像素、固定World锚点、尺寸和单面几何均已实机成立，但render-thread WorldView修正后单面仍闪烁。实际draw capture得到三个完整执行批次，每批严格为一条Opaque indexed、三条辅助indexed和两条辅助non-indexed，没有重复主视图draw。当前窄capture增加每条Opaque的VS/PS/layout、VS/PS constant身份与hash、SRV身份，用下一次干净采集区分frame间shader/constant/texture变化。清理日志按钮保留。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 
@@ -364,4 +364,4 @@ mask重建实机已经通过：`0x01C00000->0x01C00000`与`3->3`仍生成一条O
 
 当前测试入口进一步改为internal持续rigid soak：两个实例共享同一owned geometry，分别维护独立128-byte current/previous World CB；主实例目标180次提交，副实例90次后删除，主实例中途执行一次显式history reset。每个实例记录submission、history reset、temporal advance、同frame重复提交及首末frame，D3D侧只汇总同时匹配owned slot0和IB的完整draw family。它用于一次实测覆盖多实例、同geometry复用、逐帧history、frame/view去重和删除后停止提交，不恢复通用command tracer。
 
-屏幕射线版本首次产生了肉眼可见的原生材质图案，固定World、缩小尺寸和单层6-index正面随后也通过，但单面仍闪烁，故双层竞争不是唯一根因。干净日志的`BuilderSubmissions=1848`覆盖11.9秒，约155次/秒，支持每游戏帧一次而非重复提交。当前最直接风险是framework线程按自己的更新时机计算WorldView，而render线程稍后按另一时机生成current/previous CB。新internal入口只保存不可变FixedWorld；在`0x283320` rendezvous所在render线程取得`Control.CameraManager`当前View，同线程计算WorldView、推进previous并提交。实际draw统计不新增hook：复用D3D后端已有的owned VB/IB精确过滤 capture，Show后自动收集前四次builder submission并输出`Pass/DrawType/Count:xN`汇总。`Clear EventHorizon logs`保持可用。
+render-thread WorldView修正后单面仍闪烁，排除了framework/render采样时序。实际draw capture两次都稳定得到`Draws=18`：三个执行批次各一条`Opaque/DrawIndexed/Count=6`、三条辅助indexed和两条辅助non-indexed；第四次builder的commands尚未执行时capture已由framework完成，故3批与4次builder计数的差一符合producer/consumer时序。没有同帧重复Opaque表面。下一版仍复用同一窄capture，只把三条Opaque各自的VS、PS、layout、VS/PS constants（含首个可读hash）和SRV资源身份写入日志。若这些跨帧变化，继续收紧selector/material/context；若稳定，再检查command引用资源生命周期和纹理内容。`Clear EventHorizon logs`保持可用。
