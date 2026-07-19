@@ -48,8 +48,8 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
         instance.BeginSubmissionCapture(8);
         underpaint.BeginNativeGeometryDrawCapture(geometry);
         drawCaptureActive = true;
-        state = "Waiting for the native render rendezvous";
-        DebugFileLog.Information(LogSource, "Native opaque preview shown");
+        state = "Waiting for the minimal ModelRenderer rendezvous";
+        DebugFileLog.Information(LogSource, "Minimal ModelRenderer preview shown; geometry/material/world/instance/selection are owned");
     }
 
     public void Hide()
@@ -85,7 +85,7 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
             if (drawCaptureActive && current.SubmissionCount >= 4)
                 CompleteDrawCapture("four-builder-submissions");
             if (current.HasSubmitted)
-                state = $"Submitted: native opaque panel ({current.SubmissionCount} builder calls)";
+                state = $"Submitted: minimal ModelRenderer panel ({current.SubmissionCount} builder calls)";
         }
         catch (Exception exception)
         {

@@ -1,6 +1,6 @@
 # Underpaint 原生基本图形材质契约计划
 
-> 当前状态（2026-07-19）：本计划取代“继续适配透明衣服材质”作为 Underpaint 原生提交后端的主线。owned geometry、owned current/previous World CB、独立 shader selection和Context恢复边界继续保留；装备 `e0378` 只保留为历史半透明管线证据。实机已经证明`OnRenderMaterial -> 0x283320`是ModelRenderer的六类pass协议，不能承载只有三类pass的`bg.shpk`；原生BG路线改为评估`BGInstancingRenderer -> 0x290520 -> 0x290E10`，不再修补错误的builder/profile组合。
+> 当前状态（2026-07-19）：优先验证最小 ModelRenderer 边界，不预设存在或必须构造统一 render item。当前实验只借用同步现场的 render thread、ModelRenderer、view/TLS Context 和 command arena；材质、SHPK selection、几何、World、instance constant 和 `OnRenderMaterialParams2` 均由 Underpaint 构造。`e0378` 暂时只作为已知能覆盖 `0x283320` 协议的测试 fixture，不是公开材质目标。只有该最小边界被明确否定后，才重新引入 bounds、LOD、history、object identity 或更高层 render job。
 
 ## 目标
 
@@ -142,6 +142,43 @@ candidate-name/
 
 ## 分阶段执行计划
 
+### 当前优先实验：最小 ModelRenderer 调用边界
+
+本轮不横向调查 BG/Figure/Decal，也不先建立公共 render-item 模型。验证顺序是：
+
+```text
+合法的当前原生运行环境
+  render thread + ModelRenderer + view/subview + TLS Context + command arena
+        |
+        +-- Underpaint-owned VB / IB / VertexDeclaration
+        +-- Underpaint-owned current World == previous World
+        +-- 显式加载的合法 ModelRenderer Material / SHPK
+        +-- selection 从全零初始化，不复制 donor descriptor
+        +-- Params2 从全零构造，只写明确的 main/aux view masks
+        +-- owned 176-byte instance constant和最小零值Model facade
+        |
+        v
+  OnRenderMaterial
+        |
+        v
+  0x283320 pass builder
+        |
+        +-- bounded PushBackCommand probe
+        |     command count / SortKey / pass / view / VS / PS / descriptor
+        |
+        +-- existing bounded D3D draw capture
+              final Count / shader / layout / constants / resources / state
+```
+
+历史版本已经证明同一 `e0378` fixture、20/24 geometry ABI、owned World和instance constant能生成完整command集合。本次只验证剩余donor语义是否必要：
+
+1. shader-selection首字段不再从source selection复制；初始化为零，要求`OnRenderMaterial`自行选择descriptor；
+2. `OnRenderMaterialParams2`不再复制source 0x48-byte wrapper；`+0x38/+0x44`使用当前实验明确允许的main/aux masks，其余输入和callback输出从零开始；
+3. 不读取source Model、source geometry、source Material、bounds、LOD、history、sort record或object identity；
+4. sort只观察builder在当前view环境生成的结果，第一版不另建culling/sort/history对象。
+
+成功判据不是“代码走到builder”，而是同一次有界采集中同时出现：selection由零seed得到非零descriptor、builder command数量/SortKey/view/shader合理、最终owned geometry draw执行、current/previous World相同。若失败，按最先失败的明确边界回退一个变量；不由一次失败推导完整render job必需。
+
 ### Phase 0：离线契约分析器
 
 - 复用Penumbra.GameData解析 `.mdl/.mtrl/.shpk`，不重新发明文件格式。
@@ -237,6 +274,15 @@ candidate-name/
 
 继续向上追踪后，`0x290520`没有普通直接caller；它由BG renderer初始化函数`0x28EAC0`注册到全局render callback表。回调边界为五个参数，除renderer和view/index外，一个参数持有实例位置/排序所需数据（函数直接读其间接数据的`+0x20..+0x28`世界位置并与当前camera origin计算sort depth），另一个参数持有scene-key descriptor/value map。这说明可复制边界若存在，应在render job生成该回调记录的一层，而不是`0x290E10`内部。
 
+`0x290E10`的读集进一步说明：它从多态BG对象的`+0x30`资源表读LOD ranges、36-byte submesh记录、vertex/index bindings、material数组、material resource、shader package、constants、textures和samplers。这只否定了“直接把`0x290E10`当成简单primitive API”，不能否定以下候选：
+
+- BG/Model/Figure/其他renderer在resource traversal之后是否汇入共用render-item或pass expansion helper；
+- `0x290E10`的分支callee（包括`0x293570`）是否已经是更小的单submesh/pass边界；
+- 是否存在游戏自带的debug/figure/decal/primitive renderer，其输入天然就是基本图形；
+- 能否合法构造共用render item并调用pass生产层，而不是patch已生成command packet。
+
+此前提出的“横向对比Model/BG/Figure尾部call graph”暂停。它是在最小ModelRenderer边界尚未被否定时过早扩大范围；只有本节实验给出明确反证后才恢复。
+
 ### Phase 3：收敛internal后端
 
 - 将提交核心与 `OpaquePrimitiveProfile` 分离。
@@ -255,8 +301,8 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 
 | 部分 | 决策 |
 |---|---|
-| `0x283320` ModelRenderer pass builder | 仅保留为角色/模型协议研究成果；从BG primitive profile淘汰 |
-| `0x290520 -> 0x290E10` BG builder | 新的静态候选；先确认是否存在最小可复制batch input |
+| `0x283320` ModelRenderer pass builder | 当前第一优先最小边界；先验证显式owned输入是否足够，不要求完整render item |
+| `0x290520 -> 0x290E10` BG builder | 不作为简单primitive API直接调用；保留其尾部callee作为共用pass层候选 |
 | 同线程、同Context、同view时机 | 保留 |
 | owned VB/IB/VertexDeclaration | 保留，改由profile定义布局 |
 | owned current/previous World CB | 保留 |
@@ -294,3 +340,5 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 | 2026-07-19 | BG current shader输入补齐 | probe确认active pass 1的VS/PS均有效；崩溃位于同一builder生成的第二条command snapshot，owned路径缺少`Context+0x878/+0x880`回退输入 | 实机验证两条command均生成、Context恢复且三角形可见 |
 | 2026-07-19 | Model/BG协议错配确认 | 安全闸门捕获builder内部`ActivePass=6`；离线SHPK对照确认BG全家族只有三类pass，`0x283320`属于六类pass的ModelRenderer协议 | 停止`bg.shpk -> 0x283320`；静态审计BG的`0x290520 -> 0x290E10`最小batch边界 |
 | 2026-07-19 | BG callback边界 | `0x290520`由`0x28EAC0`注册到render callback表；它在进入batch builder前已从实例记录和camera计算sort depth，并接收scene-key map | 定位生成该回调记录的render job，判断其是否可脱离完整BgParts对象构造 |
+| 2026-07-19 | 决策纠正 | BG当前边界需要完整resource graph，但尚未审计renderer之间的共用pass/render-item层，不能由此判死原生提交路线 | 恢复研究实现；横向对比Model/BG/Figure等renderer的尾部call graph |
+| 2026-07-19 | 乐观边界实验 | 暂停横向renderer调查；以已知合法的ModelRenderer fixture直接验证显式参数+当前view/TLS是否充分 | selection零seed、Params2零构造，采集builder commands与最终draw |
