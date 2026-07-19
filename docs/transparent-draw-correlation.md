@@ -522,10 +522,10 @@ flags重建后的首次实测得到 `Flags=0x15->0x15`，并恢复为当前测�
 | `+0x08` | source geometry/resource | `0x283320`与`OnRenderMaterial`均不需要；当前版本清零。 |
 | `+0x10..+0x2F` | scratch/output | 原生material callback的可选输出；提交前清零，由owned Material调用重新生成。 |
 | `+0x30` | owned material输入 | Underpaint构造的目标SHPK selection。 |
-| `+0x38` low dword | 混合pass/view输入 | 来源是上层render request flags（特殊view会OR `0x1800`）；`0x283320`按低位bit-pair及 `0xC00000/0x3000000`展开不同view/pass。当前仍从rendezvous复制，不能写成material或geometry协议。 |
+| `+0x38` low dword | owned受限view policy | `0x03000000`是主提交gate，`0x00C00000`是View 32+辅助gate，低10 bits为五组额外环境/view family。第一版只重建已验证的主/辅助gate，不继承source低位请求。 |
 | `+0x3C/+0x3E` | source geometry / 外层dispatch | 分别是source geometry index与选择alternate builder的字节；进入已选定的 `0x283320` 后不再使用，当前版本清零。 |
 | `+0x40` | owned material输入 | 清零后由目标Material的原生 `OnRenderMaterial`生成。 |
-| `+0x44` | source object/view语义污染 | 辅助View 32+的bit mask；builder用它枚举带有效camera的辅助view。当前仍复制，后续应由允许的view集合与自有可见性策略生成。 |
+| `+0x44` | owned受限view policy | 辅助View 32+的bit mask；builder还会检查对应SubView camera。第一版显式允许已验证的Views 32/33，不再继承source object可见性。该allowlist保持internal。 |
 
 canonical scene-key来源已经部分闭环。原生caller按目标SHPK的key CRC查询 `ModelRenderer.SceneKeys[20]` 和 `SubViewKeys[5]`；当前版本直接从这两个canonical表填充owned selection，并保留目标SHPK构造器的default values，不再读取source selection或要求source SHPK声明同名key。CameraManager中仍存在少量随camera变化的key/value对，FFCS尚未公开其表；本轮不猜偏移，下一次实机先验证当前目标opaque material是否只需renderer/subview canonical集合。日志新增 `CanonicalKeys=renderer+subview`。
 
@@ -553,3 +553,7 @@ Human+0xBF0 CustomizeParameterCBuffer
 ```
 
 因此 `+0x10` 是carrier的per-instance外观/环境输入，不是world transform，也不是可长期借用的view公共状态。旧实现虽然把它复制到一个owned CB，却没有把目标constant ID显式替换到Context，`0x283320`仍可能从当前Context继承source角色值。新实现从目标SHPK按CRC取得runtime ID并校验176-byte大小，写入Underpaint-owned neutral `g_InstanceParameter`，在同一Context scope内安装、提交并恢复。日志字段改为 `InstanceCB[id/CRC]=Source/Owned`，176-byte探针同时输出前三个`float4`，下一次采集可以直接验证command中的source角色实例常量已消失。
+
+实机结果已经关闭这项依赖：source为 `0x2474A85F2B0`、hash `1DF145870B8B5921`，owned为 `0x243D9E396B0`、hash `A4754D0D1120A645`，backing storage也不同；owned前三组均为显式neutral `(1,1,1,1)`。六条完整 `Count=3` indexed draw保持一条Opaque加五条辅助draw，无透明family。其后六条只匹配到owned stream1或IB，不是完整owned geometry。
+
+该样本还提供了pass-mask判别：source `+0x38` 为 `0x03C00000`，上一轮为 `0x01C00000`，但command集合相同。`0x283320`只以 `0x03000000`判断主入口是否启用，以 `0x00C00000`判断辅助View 32+入口；五组低位bit-pair会生成当前第一版不承诺支持的额外环境/view family。四个实际command helper不再读取 `+0x38/+0x44`。因此当前版本把wrapper字段重建为internal受限policy：一个已验证主gate、辅助gate和Views 32/33 allowlist。下一次日志会显示source→owned mask，验证结果应仍为相同六条完整draw；固定值不会进入公开API。

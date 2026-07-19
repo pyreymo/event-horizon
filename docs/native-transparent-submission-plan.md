@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB和owned shader selection。source geometry/material/SHPK selection已脱离，canonical renderer/subview scene keys已实机通过；Context恢复已集中为单一scope，并已建立internal持续rigid实例与frame/view去重。176-byte输入已确认为 `g_InstanceParameter`，当前构建改为按目标SHPK CRC安装Underpaint-owned neutral constant，等待实机验收。正式API的主要阻塞是 `Params2+0x38/+0x44`、剩余Model wrapper和可靠延迟回收边界。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/SHPK selection/角色实例常量均已脱离，canonical renderer/subview scene keys已实机通过；Context恢复已集中为单一scope，并已建立internal持续rigid实例与frame/view去重。当前构建进一步按第一版受限view策略重建 `Params2+0x38/+0x44`，等待实机验收。正式API的主要阻塞是剩余Model wrapper、通用view policy和可靠延迟回收边界。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 
@@ -353,3 +353,7 @@ source shader selection依赖已删除。owned selection现在直接按CRC查询
 `OnRenderModelParams+0x10` 的真实身份也已定位。角色回调 `0x433270` 把该指针绑定到CharacterUtility登记的Context constant ID 34；目标SHPK的constant表把ID 34映射为CRC `0x20A30B34`、size 11，即176-byte `g_InstanceParameter`。现场回调对象的同一指针也等于 `CharacterBase+0x270 CharacterDataCBuffer`。Human自己的 `CustomizeParameterCBuffer` 位于 `+0xBF0`，由另一虚函数单独绑定，因此二者不能再统称为object constant。`g_InstanceParameter`是颜色、环境、角色灯光、wetness、wind/previous wind、眼部及头部等per-instance语义，不是transform或frame/view公共输入。
 
 当前构建不再复制carrier的176 bytes。它从目标ShaderPackage按CRC查询canonical runtime constant ID并校验11个`float4`，创建Underpaint-owned neutral `g_InstanceParameter`，显式初始化白色乘色/环境/角色灯光、无wetness的范围参数和默认head-up，其余扩展字段清零。在调用 `0x283320` 前，该constant同时写入复制的model params并安装到当前Context ID；统一Context scope会无条件恢复原值。下一次采集的验收点是日志 `InstanceCB[34/CRC=0x20A30B34]=Source=.../Owned=...` 两者资源与hash不同，所有有效 `Count=3` command绑定owned constant，且Opaque/辅助draw集合不退化。
+
+owned instance constant实机验收通过：source/owned ConstantBuffer、backing storage和hash均不同，owned前三个`float4`为显式neutral值；六条完整owned indexed draw仍是一条Opaque加五条辅助draw，无异常或透明family。176-byte carrier实例输入据此关闭。
+
+同次样本的source pass mask从上一轮 `0x01C00000` 变化为 `0x03C00000`，但最终command集合完全相同。IDA确认 `+0x38 & 0x03000000`只是主提交gate，`& 0x00C00000`是View 32+辅助提交gate，低10 bits按五组bit-pair请求当前第一版不支持的额外环境/view family；`+0x44`仅作为View 32+i枚举mask，builder还会检查对应SubView camera。当前构建不再复制二者，而是为internal第一版明确请求已验证的主gate、辅助gate和Views 32/33。日志改为 `PassMask=source->owned`、`AuxViews=source->owned`；这些值是受限实现策略，不是公开API或通用原生协议。
