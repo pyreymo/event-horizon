@@ -341,3 +341,7 @@ World输入实测已经通过：六条有效 `DrawIndexed Count=3` 统一绑定�
 显式加载实测已经通过，仍生成六条有效 `Count=3`。下一版已移除source Material关联hook和 `20/24` source ABI过滤：原生material helper调用后直接从64个Context constant槽识别目标CB所在ID，并整体恢复全部槽位；目标SHPK selector只按CRC吸收当前view共有scene keys，然后强制non-skinned。当前唯一仍借用的高层数据是 `0x283320` 调度现场的params/model wrapper及其中与view/pass相关的flags；geometry、material resource/keys/constants/textures、World current/previous均已独立。
 
 无stride过滤的第一次实测仍命中 `20/24`，功能成功但对ABI独立性没有新增判别力。当前构建临时强制等待 `20/28` source现场；它正是早期borrowed-material版本调用builder却不生成command的对照条件。下一次只需arm一次，若日志为 `SourceStrides=20/28` 且仍出现六条有效 `Count=3`，即可删除临时过滤并把source geometry/material ABI视为已脱离。
+
+`20/28` 对照已经通过：Underpaint自有 `20/24` geometry在该现场正常生成 `Count=3`，source geometry/material ABI由此闭环脱离。不过输出从六条变为九条，并出现Semitransparent及两条Semitransparent Stage C，暴露了最后一项source material污染：复制的 `OnRenderMaterialParams2+0x40`仍是source Material计算出的pass flags。
+
+当前实现已删除临时stride过滤，并改为按原生调用规则重建material params：保留同步现场的model/resource与 `+0x38` geometry/view输入，清空可选callback输出和pass flags，再对显式加载的owned Material调用原生 `ModelRenderer.OnRenderMaterial`，由游戏生成owned `+0x40`，之后才调用material helper和 `0x283320`。期间的TLS rasterizer、constant和texture状态均恢复。日志新增source/owned flags及material index。下一次实测的判据是owned flags与source分离，且自有三角形不再继承source的Semitransparent命令族。

@@ -501,3 +501,9 @@ retained MaterialResourceHandle -> Render::Material -> ShaderPackage
 下一版删除窄 `OnRenderMaterial` 关联hook和source Material参数。material helper调用前保存全部64个Context constant槽，调用后直接按目标 `MaterialParameterCBuffer*` 识别其真实运行时ID，再在提交结束后整体恢复；因此不再需要source material帮助定位ID。source vertex stride的 `20/24` 限制也已删除：当前只等待View 30/SubView 11且具有可复制176-byte model wrapper的调度现场，独立material selector、geometry ABI和World输入均由Underpaint提供。source shader selection只作为本view共有scene-key values的CRC映射来源；它可以是不同SHPK，也不再要求包含或选择skinned model-type key。
 
 首次无stride过滤实测仍成功生成六条有效 `Count=3`，但调度顺序碰巧仍首先命中 `SourceStrides=20/24`，所以这次不能单独证明source ABI无关。下一版暂时强制只消费 `SourceStrides=20/28` 的View 30/SubView 11现场，直接复测此前在borrowed-material版本中无法生成command的条件。若独立material版本在该现场仍生成六条 `Count=3`，source geometry/material ABI依赖即可闭环；通过后删除这一临时测试过滤。
+
+强制 `20/28` 的实机结果确认了ABI脱钩：日志中的source range为 `1383/232/3336`、source strides为 `20/28`，而提交仍使用Underpaint自有 `20/24` VB和三索引IB，builder正常返回并生成有效 `Count=3`。但这次共有九条有效indexed draw，而非此前六条；其中新增一条Semitransparent和两条Semitransparent Stage C。目标material、selector和geometry均未变化，差异来自整块复制的source `OnRenderMaterialParams2`。
+
+静态复核 `0x283320` 后，剩余依赖已定位到参数本身：`Params2+0x38`携带geometry/view掩码，`+0x40`则由 `OnRenderMaterial` 根据Material、resource additional data、SHPK类型和Model callback生成，并被pass builder直接按位展开命令。当前版本不再复制 `+0x10..+0x37` 的可选callback输出，也不再沿用source `+0x40`。它保留调用级model/resource和 `+0x38`，按原生初始化规则重置其余字段，再对显式加载的目标Material同步调用游戏自己的 `OnRenderMaterial` 生成owned flags；随后才应用owned selector/material并进入 `0x283320`。调用期间改变的TLS rasterizer state、全部64个constant槽和目标texture槽均在 `finally` 中恢复。临时 `20/28` 过滤已经删除。
+
+日志新增 `Flags=source->owned` 和 `MaterialIndex`。下一次采集需要确认：任意source stride现场都可触发；owned flags与source透明flags分离；有效 `Count=3` 回到目标不透明材质应有的一条Opaque加辅助draw集合，不再出现由source params引入的Semitransparent家族。此后唯一尚未独立拥有的边界是source `OnRenderModelParams`/Model wrapper及当前view共有scene-key values；材质pass决策本身已改由目标Material原生生成。
