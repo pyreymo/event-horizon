@@ -108,7 +108,7 @@ public sealed class Plugin : IDalamudPlugin
     private SceneVisibilityController SceneVisibilityController { get; init; }
     private GBufferProbeController GBufferProbeController { get; init; }
 #if DEBUG
-    private TransparentDrawCorrelationTracer TransparentDrawCorrelationTracer { get; init; }
+    private NativeOpaquePreviewController NativeOpaquePreview { get; init; }
 #endif
     private DtrBar DtrStatusBar { get; init; }
     private DtrBackground DtrBackground { get; init; }
@@ -151,7 +151,7 @@ public sealed class Plugin : IDalamudPlugin
             SceneVisibilityController = new SceneVisibilityController(GameInteropProvider, Configuration);
             UnderpaintRenderer = InitializeUnderpaint();
 #if DEBUG
-            TransparentDrawCorrelationTracer = new TransparentDrawCorrelationTracer(GameInteropProvider, TargetManager, UnderpaintRenderer);
+            NativeOpaquePreview = new NativeOpaquePreviewController(UnderpaintRenderer);
 #endif
             GBufferProbeController = new GBufferProbeController(Configuration, UnderpaintRenderer);
             Culling = new CullingController(
@@ -177,7 +177,7 @@ public sealed class Plugin : IDalamudPlugin
             PlayerPreviewWindow = new PlayerPreviewWindow(playerPreviewPanel, OpenMainUi);
             UnderpaintDemoWindow = new DemoWindow(UnderpaintRenderer, ObjectTable, TargetManager, TextureProvider);
 #if DEBUG
-            UnderpaintDemoWindow.AttachTransparentDrawTracer(TransparentDrawCorrelationTracer);
+            UnderpaintDemoWindow.AttachNativeOpaquePreview(NativeOpaquePreview);
 #endif
             DtrStatusBar = new DtrBar(DtrBar, Configuration, Culling.GetStatus, SetPlayerHidingEnabled, ToggleConfigUi);
             DtrBackground = new DtrBackground(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
@@ -285,7 +285,7 @@ public sealed class Plugin : IDalamudPlugin
         windowSystem.RemoveAllWindows();
         UnderpaintDemoWindow?.Dispose();
 #if DEBUG
-        TransparentDrawCorrelationTracer?.Dispose();
+        NativeOpaquePreview?.Dispose();
 #endif
         SceneVisibilityController?.Dispose();
         GBufferProbeController?.Dispose();
@@ -439,7 +439,7 @@ public sealed class Plugin : IDalamudPlugin
         SceneVisibilityController.Update();
         GBufferProbeController.Update();
 #if DEBUG
-        TransparentDrawCorrelationTracer.Update();
+        NativeOpaquePreview.Update();
 #endif
         DtrStatusBar.Update();
         PlayerPreviewHighlighter.Update();

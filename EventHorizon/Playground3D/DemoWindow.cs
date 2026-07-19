@@ -38,8 +38,7 @@ internal sealed class DemoWindow : Window, IDisposable
     private bool diagnosticForceOpaqueAlpha = true;
     private NativeDrawSnapshot? diagnosticSnapshot;
 #if DEBUG
-    private TransparentDrawCorrelationTracer? transparentDrawTracer;
-    private string clearDebugLogState = "";
+    private NativeOpaquePreviewController? nativeOpaquePreview;
 #endif
     private bool boundaryStabilityTestEnabled;
     private Vector3 boundaryStabilityTestPosition;
@@ -75,7 +74,7 @@ internal sealed class DemoWindow : Window, IDisposable
     }
 
 #if DEBUG
-    public void AttachTransparentDrawTracer(TransparentDrawCorrelationTracer tracer) => transparentDrawTracer = tracer;
+    public void AttachNativeOpaquePreview(NativeOpaquePreviewController preview) => nativeOpaquePreview = preview;
 #endif
 
     public void StopWorldDraw()
@@ -113,7 +112,7 @@ internal sealed class DemoWindow : Window, IDisposable
         {
             DrawDiagnostics();
 #if DEBUG
-            DrawTransparentCorrelationUi();
+            DrawNativeOpaquePreviewUi();
 #endif
         }
 
@@ -170,41 +169,20 @@ internal sealed class DemoWindow : Window, IDisposable
     }
 
 #if DEBUG
-    private void DrawTransparentCorrelationUi()
+    private void DrawNativeOpaquePreviewUi()
     {
-        if (transparentDrawTracer == null || !ImGui.CollapsingHeader("Transparent draw correlation"))
+        if (nativeOpaquePreview == null || !ImGui.CollapsingHeader("Native opaque preview"))
             return;
 
-        ImGui.TextWrapped(transparentDrawTracer.DonorSummary);
-        ImGui.TextDisabled(transparentDrawTracer.State);
-        if (!transparentDrawTracer.IsCapturing)
+        ImGui.TextDisabled(nativeOpaquePreview.State);
+        if (!nativeOpaquePreview.IsVisible)
         {
-            if (ImGui.Button("Arm transparent capture"))
-                transparentDrawTracer.Arm();
-            ImGui.SameLine();
-            if (ImGui.Button("Arm one native duplicate"))
-                transparentDrawTracer.ArmNativeDuplicate();
-            ImGui.SameLine();
-            if (ImGui.Button("Arm custom native triangle"))
-                transparentDrawTracer.ArmCustomNativeGeometry();
-            ImGui.SameLine();
-            if (ImGui.Button("Run continuous native rigid soak"))
-                transparentDrawTracer.ArmContinuousNativeGeometry();
+            if (ImGui.Button("Show native opaque preview"))
+                nativeOpaquePreview.Show();
         }
-        else if (ImGui.Button("Cancel transparent capture"))
-        {
-            transparentDrawTracer.Cancel();
-        }
-        ImGui.SameLine();
-        ImGui.BeginDisabled(transparentDrawTracer.IsCapturing);
-        if (ImGui.Button("Clear EventHorizon logs"))
-            clearDebugLogState = DebugFileLog.Clear();
-        ImGui.EndDisabled();
-        if (clearDebugLogState.Length != 0)
-            ImGui.TextDisabled(clearDebugLogState);
-        ImGui.TextDisabled(
-            "Native triangle tests use the next compatible main-view submission site; no character or equipment filter is required."
-        );
+        else if (ImGui.Button("Hide native opaque preview"))
+            nativeOpaquePreview.Hide();
+        ImGui.TextDisabled("The native quad stays three metres in front of the active camera.");
     }
 #endif
 

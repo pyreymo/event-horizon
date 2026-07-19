@@ -567,3 +567,5 @@ mask重建实机验收通过：`PassMask=0x01C00000->0x01C00000`、`AuxViews=0x0
 实机结果关闭了该边界：source Model为`Flags0x28=0xFFFFFF81`，Material callback与Skeleton均非零；最小facade全部置零且`RendererVariant=0`。builder仍返回成功，owned Material flags为`0x15`，并生成一条Opaque与五条辅助完整`Count=3` draw，无透明family。至此原生不透明提交不再依赖source object、Model、Skeleton或角色callback，只把任意兼容的main-view调用当作render rendezvous。
 
 下一轮不再增加参数追踪。新增的 `Run continuous native rigid soak` 会创建两个共享geometry的persistent实例：主实例提交180帧，副实例提交90帧后删除；每帧更新transform，主实例中途执行一次history reset。结束日志只有两条实例telemetry和一条完整draw family汇总，验证`DuplicateFrameSubmissions=0`、history reset至少两次（首次与显式reset）、temporal advance持续发生、删除后的副实例停止增长，以及完整draw数与实例submission规模一致。
+
+方向随后再次收紧：上述soak只会证明不可见command可重复执行，不能替代肉眼或像素证据，因此暂不要求采集。旧 `TransparentDrawCorrelationTracer` 与 `MaterialSubmissionContainerProbe` 已从运行时代码删除，相关按钮和大段draw/command日志也已移除。新 `NativeOpaquePreviewController` 只维护一个camera-facing persistent quad；其world中心先通过当前scene camera的View×Projection clip测试，geometry同时包含正反绕序并提供完整UV。下一次实机的唯一问题是该原生quad能否实际显示；若仍不可见，剩余范围只在material discard、depth/GBuffer输出和vertex semantic，不再混入提交链路或生命周期工程化。

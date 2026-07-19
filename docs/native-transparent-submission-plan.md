@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/Model/SHPK selection/角色实例常量及pass/view mask均已脱离；canonical scene keys、受限mask和最小Model facade均已实机通过。Context恢复已集中为单一scope，并已建立internal持续rigid实例与frame/view去重。当前构建加入双实例共享geometry的180-frame持续提交soak，等待实机验收。正式API的主要阻塞是通用view policy和可靠延迟回收边界。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/Model/SHPK selection/角色实例常量及pass/view mask均已脱离；canonical scene keys、受限mask和最小Model facade均已实机通过。当前优先级已经纠正为先取得可肉眼确认的原生不透明预览：新构建使用经当前View×Projection验证的camera-facing世界矩阵、正反双绕序quad和完整UV，等待实机验收。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 
@@ -363,3 +363,5 @@ mask重建实机已经通过：`0x01C00000->0x01C00000`与`3->3`仍生成一条O
 最小Model facade实机通过。source Model的`+0x28=0xFFFFFF81`、Material callback和Skeleton均为非零，但owned facade把它们及renderer variant全部置零后，目标Material仍生成`Flags=0x15`，输出保持一条Opaque和五条辅助完整`Count=3` draw，没有透明family。source object/Model wrapper语义依赖据此关闭。
 
 当前测试入口进一步改为internal持续rigid soak：两个实例共享同一owned geometry，分别维护独立128-byte current/previous World CB；主实例目标180次提交，副实例90次后删除，主实例中途执行一次显式history reset。每个实例记录submission、history reset、temporal advance、同frame重复提交及首末frame，D3D侧只汇总同时匹配owned slot0和IB的完整draw family。它用于一次实测覆盖多实例、同geometry复用、逐帧history、frame/view去重和删除后停止提交，不恢复通用command tracer。
+
+但command执行并不等于可见像素，且此前实机从未肉眼看到原生三角形，因此持续soak暂缓。当前构建删除旧透明capture、native duplicate、一次性triangle和soak UI，以及对应的container/consumer/command日志控制器。唯一保留的debug入口是 `Show native opaque preview`：它创建带0..1 UV的双面quad，利用当前scene camera的逆View矩阵构造距离镜头3米的world transform，并用View×Projection预检其中心确实位于clip volume。该预览通过后才恢复持续实例和生命周期验证。
