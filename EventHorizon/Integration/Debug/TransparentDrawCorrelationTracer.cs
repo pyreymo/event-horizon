@@ -17,6 +17,8 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
 {
     private const string LogSource = "TransparentDrawCorrelation";
     private const int DonorSlot = 1;
+    private const long ContinuousPrimaryTargetSubmissions = 180;
+    private const long ContinuousSecondaryTargetSubmissions = 90;
     private static readonly TimeSpan CaptureTimeout = TimeSpan.FromSeconds(15);
     private readonly ITargetManager targetManager;
     private readonly UnderpaintRenderer? underpaint;
@@ -24,11 +26,16 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
     private readonly Lock stateLock = new();
     private DonorSnapshot? donor;
     private NativeGeometry? standaloneGeometry;
+    private NativeRigidInstance? continuousPrimary;
+    private NativeRigidInstance? continuousSecondary;
+    private NativeRigidInstanceTelemetry? completedSecondaryTelemetry;
     private long captureStarted;
     private string state = "Idle";
     private bool capturing;
     private bool standaloneCapture;
     private bool standaloneSubmissionSeen;
+    private bool continuousCapture;
+    private bool continuousHistoryReset;
     private bool disposed;
 
     public TransparentDrawCorrelationTracer(
@@ -102,6 +109,50 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         DebugFileLog.Information(LogSource, "Standalone native geometry armed; no character, equipment slot, or material filter is active");
     }
 
+    public void ArmContinuousNativeGeometry()
+    {
+        if (underpaint == null)
+        {
+            SetState("Unavailable: Underpaint failed to initialize");
+            return;
+        }
+
+        standaloneGeometry ??= underpaint.CreateNativeGeometry([new(-0.75f, 0f, 0f), new(0.75f, 0f, 0f), new(0f, 1.5f, 0f)], [0, 1, 2]);
+        var primary = underpaint.CreateNativeRigidInstance(standaloneGeometry, Matrix4x4.CreateTranslation(-1f, 0f, 5f));
+        NativeRigidInstance? secondary = null;
+        try
+        {
+            secondary = underpaint.CreateNativeRigidInstance(standaloneGeometry, Matrix4x4.CreateTranslation(1f, 0f, 5f));
+            underpaint.BeginNativeGeometryDrawCapture(standaloneGeometry);
+        }
+        catch
+        {
+            secondary?.Dispose();
+            primary.Dispose();
+            throw;
+        }
+
+        lock (stateLock)
+        {
+            donor = null;
+            continuousPrimary = primary;
+            continuousSecondary = secondary;
+            completedSecondaryTelemetry = null;
+            continuousCapture = true;
+            continuousHistoryReset = false;
+            standaloneCapture = false;
+            captureStarted = Stopwatch.GetTimestamp();
+            state = "Running two-instance native rigid soak";
+            capturing = true;
+        }
+        DebugFileLog.Information(
+            LogSource,
+            "Continuous native rigid soak armed Instances=2 SharedGeometry=true PrimaryTarget={PrimaryTarget} SecondaryRemoval={SecondaryRemoval}",
+            ContinuousPrimaryTargetSubmissions,
+            ContinuousSecondaryTargetSubmissions
+        );
+    }
+
     private void Arm(bool duplicateMainSubmission, bool customGeometrySubmission = false)
     {
         if (underpaint == null)
@@ -142,12 +193,30 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
 
     public void Cancel(string reason = "manual-cancel")
     {
+        NativeRigidInstance? primary;
+        NativeRigidInstance? secondary;
+        bool wasContinuous;
         lock (stateLock)
         {
             if (!capturing)
                 return;
+            wasContinuous = continuousCapture;
+            primary = continuousPrimary;
+            secondary = continuousSecondary;
+            continuousPrimary = null;
+            continuousSecondary = null;
+            continuousCapture = false;
             capturing = false;
             state = $"Cancelled: {reason}";
+        }
+        if (wasContinuous)
+        {
+            primary?.Dispose();
+            secondary?.Dispose();
+            underpaint?.CompleteNativeGeometryDrawCapture(reason);
+            underpaint?.TryTakeNativeGeometryDrawCapture(out _);
+            DebugFileLog.Information(LogSource, "Continuous native rigid soak cancelled: {Reason}", reason);
+            return;
         }
         underpaint?.Diagnostics.CancelTransparentDrawCapture(reason);
         underpaint?.CancelNativeGeometrySubmission(reason);
@@ -159,6 +228,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
     {
         DonorSnapshot? currentDonor;
         bool currentStandaloneCapture;
+        bool currentContinuousCapture;
         long started;
         lock (stateLock)
         {
@@ -166,7 +236,14 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
                 return;
             currentDonor = donor;
             currentStandaloneCapture = standaloneCapture;
+            currentContinuousCapture = continuousCapture;
             started = captureStarted;
+        }
+
+        if (currentContinuousCapture)
+        {
+            UpdateContinuousNativeGeometry(started);
+            return;
         }
 
         if (!currentStandaloneCapture && (currentDonor == null || !DonorStillValid(currentDonor)))
@@ -202,6 +279,126 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         Cancel("dispose");
         standaloneGeometry?.Dispose();
         submissionProbe.Dispose();
+    }
+
+    private void UpdateContinuousNativeGeometry(long started)
+    {
+        NativeRigidInstance? primary;
+        NativeRigidInstance? secondary;
+        lock (stateLock)
+        {
+            primary = continuousPrimary;
+            secondary = continuousSecondary;
+        }
+        if (primary == null)
+            return;
+
+        var elapsed = Stopwatch.GetElapsedTime(started);
+        var phase = (float)elapsed.TotalSeconds;
+        var primaryTelemetry = primary.GetTelemetry();
+        if (!continuousHistoryReset && primaryTelemetry.SubmissionCount >= 60)
+        {
+            primary.UpdateWorldView(Matrix4x4.CreateTranslation(2.5f, 0f, 5f), true);
+            continuousHistoryReset = true;
+        }
+        else
+        {
+            primary.UpdateWorldView(Matrix4x4.CreateTranslation(-1f + MathF.Sin(phase) * 0.25f, 0f, 5f));
+        }
+        secondary?.UpdateWorldView(Matrix4x4.CreateTranslation(1f + MathF.Cos(phase) * 0.25f, 0f, 5f));
+
+        if (secondary != null && secondary.GetTelemetry().SubmissionCount >= ContinuousSecondaryTargetSubmissions)
+        {
+            secondary.Dispose();
+            completedSecondaryTelemetry = secondary.GetTelemetry();
+            lock (stateLock)
+                continuousSecondary = null;
+        }
+
+        if (primary.GetTelemetry().SubmissionCount >= ContinuousPrimaryTargetSubmissions)
+        {
+            CompleteContinuousNativeGeometry("target-reached");
+            return;
+        }
+        if (elapsed >= CaptureTimeout)
+            CompleteContinuousNativeGeometry("timeout");
+    }
+
+    private void CompleteContinuousNativeGeometry(string reason)
+    {
+        NativeRigidInstance? primary;
+        NativeRigidInstance? secondary;
+        lock (stateLock)
+        {
+            primary = continuousPrimary;
+            secondary = continuousSecondary;
+            continuousPrimary = null;
+            continuousSecondary = null;
+            continuousCapture = false;
+            capturing = false;
+        }
+
+        primary?.Dispose();
+        secondary?.Dispose();
+        var primaryTelemetry = primary?.GetTelemetry() ?? default;
+        var secondaryTelemetry = completedSecondaryTelemetry ?? secondary?.GetTelemetry() ?? default;
+        underpaint?.CompleteNativeGeometryDrawCapture(reason);
+        NativeGeometryDrawCapture? capture = null;
+        if (underpaint?.TryTakeNativeGeometryDrawCapture(out var completedCapture) == true)
+            capture = completedCapture;
+
+        var fullDraws =
+            capture
+                ?.Draws.Where(draw =>
+                    draw.IndexBuffer == capture.TargetIndexBuffer
+                    && draw.VertexBuffers.Any(binding =>
+                        binding.Slot == 0 && binding.Buffer == capture.TargetVertexBuffer && binding.Stride == 20
+                    )
+                )
+                .ToArray()
+            ?? [];
+        var families = string.Join(
+            ',',
+            fullDraws
+                .GroupBy(draw => $"{draw.Pass}/{draw.DrawType}/{draw.ElementCount}")
+                .OrderBy(group => group.Key)
+                .Select(group => $"{group.Key}:{group.Count()}")
+        );
+        LogRigidTelemetry("Primary", primaryTelemetry);
+        LogRigidTelemetry("Secondary", secondaryTelemetry);
+        DebugFileLog.Information(
+            LogSource,
+            "ContinuousNativeRigidComplete Reason={Reason} FullDraws={FullDraws} CapturedMatches={CapturedMatches} Families={Families}",
+            reason,
+            fullDraws.Length,
+            capture?.Draws.Count ?? 0,
+            families
+        );
+        SetState(
+            $"Continuous rigid complete: {primaryTelemetry.SubmissionCount}+{secondaryTelemetry.SubmissionCount} submissions, {fullDraws.Length} full draws ({reason})"
+        );
+    }
+
+    private static void LogRigidTelemetry(string name, NativeRigidInstanceTelemetry telemetry)
+    {
+        DebugFileLog.Information(
+            LogSource,
+            "ContinuousNativeRigidInstance Name={Name} Submissions={Submissions} HistoryResets={HistoryResets} TemporalAdvances={TemporalAdvances} DuplicateFrameSubmissions={DuplicateFrameSubmissions} Frames={FirstFrame}->{LastFrame} Removed={Removed} CurrentTranslation=({CurrentX},{CurrentY},{CurrentZ}) PreviousTranslation=({PreviousX},{PreviousY},{PreviousZ})",
+            name,
+            telemetry.SubmissionCount,
+            telemetry.HistoryResetSubmissionCount,
+            telemetry.TemporalAdvanceSubmissionCount,
+            telemetry.DuplicateFrameSubmissionCount,
+            telemetry.FirstSubmittedFrame,
+            telemetry.LastSubmittedFrame,
+            telemetry.Removed,
+            telemetry.LastCurrentWorldView.M41,
+            telemetry.LastCurrentWorldView.M42,
+            telemetry.LastCurrentWorldView.M43,
+            telemetry.LastPreviousWorldView.M41,
+            telemetry.LastPreviousWorldView.M42,
+            telemetry.LastPreviousWorldView.M43
+        );
     }
 
     private void Complete(TransparentDrawCapture capture)

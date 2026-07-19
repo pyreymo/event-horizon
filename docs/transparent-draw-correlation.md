@@ -563,3 +563,7 @@ mask重建实机验收通过：`PassMask=0x01C00000->0x01C00000`、`AuxViews=0x0
 随后静态复核了最后的Model wrapper。FFCS签名对应 `ModelRenderer.OnRenderMaterial = ffxiv_dx11.exe+0x281540`；IDA确认它只从Model读取 `+0x28`的条件flag和`+0x50 RenderMaterialCallback`，并读取`OnRenderModelParams+0x18`的角色专用条件位。`0x283320`自身只额外读取 `Model+0x40 Skeleton`（仅一个特殊分支，允许为空）和`Model+0x178`（在两套renderer key偏移之间选择）；四个pass helper不再读取Model。
 
 当前构建因此不复制完整Model，也不修改共享对象，而是在同一原生调用栈上创建一个0x180-byte、全零的最小调用facade，并从零构造0x20-byte `OnRenderModelParams`：`+0x00`指向facade，`+0x10`指向owned `g_InstanceParameter`，其余字段为零。这样目标Material的flags不会再经过Character callback，builder也看不到source Skeleton或renderer variant。日志会显示 `Model=source->OwnedFacade`，并把source `+0x28/+0x50/+0x40/+0x178`明确记录为`->0`。下一次实测只需确认owned flags仍为目标opaque结果、六条完整owned draw不退化；通过后source object/model wrapper语义即全部关闭，现场只剩当前render thread、TLS Context、view/subview和command arena这些正式后端本来就要借用的frame/view公共环境。
+
+实机结果关闭了该边界：source Model为`Flags0x28=0xFFFFFF81`，Material callback与Skeleton均非零；最小facade全部置零且`RendererVariant=0`。builder仍返回成功，owned Material flags为`0x15`，并生成一条Opaque与五条辅助完整`Count=3` draw，无透明family。至此原生不透明提交不再依赖source object、Model、Skeleton或角色callback，只把任意兼容的main-view调用当作render rendezvous。
+
+下一轮不再增加参数追踪。新增的 `Run continuous native rigid soak` 会创建两个共享geometry的persistent实例：主实例提交180帧，副实例提交90帧后删除；每帧更新transform，主实例中途执行一次history reset。结束日志只有两条实例telemetry和一条完整draw family汇总，验证`DuplicateFrameSubmissions=0`、history reset至少两次（首次与显式reset）、temporal advance持续发生、删除后的副实例停止增长，以及完整draw数与实例submission规模一致。

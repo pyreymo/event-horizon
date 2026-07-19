@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/SHPK selection/角色实例常量及pass/view mask均已脱离，canonical renderer/subview scene keys与受限mask重建已实机通过；Context恢复已集中为单一scope，并已建立internal持续rigid实例与frame/view去重。当前构建用调用栈上的最小零值Model facade替换最后的source Model wrapper，等待实机验收。正式API的主要阻塞是通用view policy和可靠延迟回收边界。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/Model/SHPK selection/角色实例常量及pass/view mask均已脱离；canonical scene keys、受限mask和最小Model facade均已实机通过。Context恢复已集中为单一scope，并已建立internal持续rigid实例与frame/view去重。当前构建加入双实例共享geometry的180-frame持续提交soak，等待实机验收。正式API的主要阻塞是通用view policy和可靠延迟回收边界。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 
@@ -359,3 +359,7 @@ owned instance constant实机验收通过：source/owned ConstantBuffer、backin
 同次样本的source pass mask从上一轮 `0x01C00000` 变化为 `0x03C00000`，但最终command集合完全相同。IDA确认 `+0x38 & 0x03000000`只是主提交gate，`& 0x00C00000`是View 32+辅助提交gate，低10 bits按五组bit-pair请求当前第一版不支持的额外环境/view family；`+0x44`仅作为View 32+i枚举mask，builder还会检查对应SubView camera。当前构建不再复制二者，而是为internal第一版明确请求已验证的主gate、辅助gate和Views 32/33。日志改为 `PassMask=source->owned`、`AuxViews=source->owned`；这些值是受限实现策略，不是公开API或通用原生协议。
 
 mask重建实机已经通过：`0x01C00000->0x01C00000`与`3->3`仍生成一条Opaque和五条辅助owned draw，故该source依赖关闭。最后的wrapper审计确认 `OnRenderMaterial(0x281540)`只需要Model `+0x28/+0x50`和model params `+0x18`，`0x283320`只额外需要Model `+0x40/+0x178`。当前构建不再浅复制source model params，而是创建调用栈内的零值最小Model facade与从零初始化的0x20-byte model params，仅安装owned `g_InstanceParameter`。它不伪造完整Model、不调用角色callback、不接触Skeleton，也不修改任何共享对象。下一次实机若仍得到目标opaque flags与相同六条完整owned draw，source object/model wrapper即可正式关闭。
+
+最小Model facade实机通过。source Model的`+0x28=0xFFFFFF81`、Material callback和Skeleton均为非零，但owned facade把它们及renderer variant全部置零后，目标Material仍生成`Flags=0x15`，输出保持一条Opaque和五条辅助完整`Count=3` draw，没有透明family。source object/Model wrapper语义依赖据此关闭。
+
+当前测试入口进一步改为internal持续rigid soak：两个实例共享同一owned geometry，分别维护独立128-byte current/previous World CB；主实例目标180次提交，副实例90次后删除，主实例中途执行一次显式history reset。每个实例记录submission、history reset、temporal advance、同frame重复提交及首末frame，D3D侧只汇总同时匹配owned slot0和IB的完整draw family。它用于一次实测覆盖多实例、同geometry复用、逐帧history、frame/view去重和删除后停止提交，不恢复通用command tracer。

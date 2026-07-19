@@ -187,6 +187,9 @@ internal sealed class DemoWindow : Window, IDisposable
             ImGui.SameLine();
             if (ImGui.Button("Arm custom native triangle"))
                 transparentDrawTracer.ArmCustomNativeGeometry();
+            ImGui.SameLine();
+            if (ImGui.Button("Run continuous native rigid soak"))
+                transparentDrawTracer.ArmContinuousNativeGeometry();
         }
         else if (ImGui.Button("Cancel transparent capture"))
         {
@@ -200,7 +203,7 @@ internal sealed class DemoWindow : Window, IDisposable
         if (clearDebugLogState.Length != 0)
             ImGui.TextDisabled(clearDebugLogState);
         ImGui.TextDisabled(
-            "Custom triangle uses the next compatible 20/24 main-view submission site; no character or equipment filter is required."
+            "Native triangle tests use the next compatible main-view submission site; no character or equipment filter is required."
         );
     }
 #endif
