@@ -339,3 +339,5 @@ World输入实测已经通过：六条有效 `DrawIndexed Count=3` 统一绑定�
 修正版两次实测已通过：日志中原缩写字段 `Captured=true/false`、owned resource/SHPK/path稳定、`ConstantId=25`，两次均生成六条有效 `Count=3`。日志标签现已改为 `MaterialCaptured`。根据resource handle确认的真实路径与键，当前版本进一步使用 `ResourceManager.GetResourceSync(Chara, 0x6D74726C, 0x56D3AB97, path)` 显式加载该不透明材质；第一次预期 `MaterialCaptured=false/MaterialLoaded=true`，之后为 `false/false`。验证通过后，剩余工作是让scene keys和material constant ID也脱离source material，再放宽source vertex ABI过滤。
 
 显式加载实测已经通过，仍生成六条有效 `Count=3`。下一版已移除source Material关联hook和 `20/24` source ABI过滤：原生material helper调用后直接从64个Context constant槽识别目标CB所在ID，并整体恢复全部槽位；目标SHPK selector只按CRC吸收当前view共有scene keys，然后强制non-skinned。当前唯一仍借用的高层数据是 `0x283320` 调度现场的params/model wrapper及其中与view/pass相关的flags；geometry、material resource/keys/constants/textures、World current/previous均已独立。
+
+无stride过滤的第一次实测仍命中 `20/24`，功能成功但对ABI独立性没有新增判别力。当前构建临时强制等待 `20/28` source现场；它正是早期borrowed-material版本调用builder却不生成command的对照条件。下一次只需arm一次，若日志为 `SourceStrides=20/28` 且仍出现六条有效 `Count=3`，即可删除临时过滤并把source geometry/material ABI视为已脱离。

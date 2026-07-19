@@ -499,3 +499,5 @@ retained MaterialResourceHandle -> Render::Material -> ShaderPackage
 显式加载实测通过：`MaterialCaptured=false / MaterialLoaded=true / ConstantId=25`，路径为无装饰的真实游戏路径，仍生成六条有效 `DrawIndexed Count=3`。目标material resource的来源已经与现场完全解耦。
 
 下一版删除窄 `OnRenderMaterial` 关联hook和source Material参数。material helper调用前保存全部64个Context constant槽，调用后直接按目标 `MaterialParameterCBuffer*` 识别其真实运行时ID，再在提交结束后整体恢复；因此不再需要source material帮助定位ID。source vertex stride的 `20/24` 限制也已删除：当前只等待View 30/SubView 11且具有可复制176-byte model wrapper的调度现场，独立material selector、geometry ABI和World输入均由Underpaint提供。source shader selection只作为本view共有scene-key values的CRC映射来源；它可以是不同SHPK，也不再要求包含或选择skinned model-type key。
+
+首次无stride过滤实测仍成功生成六条有效 `Count=3`，但调度顺序碰巧仍首先命中 `SourceStrides=20/24`，所以这次不能单独证明source ABI无关。下一版暂时强制只消费 `SourceStrides=20/28` 的View 30/SubView 11现场，直接复测此前在borrowed-material版本中无法生成command的条件。若独立material版本在该现场仍生成六条 `Count=3`，source geometry/material ABI依赖即可闭环；通过后删除这一临时测试过滤。
