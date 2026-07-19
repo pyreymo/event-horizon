@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/Model/SHPK selection/角色实例常量及pass/view mask均已脱离；canonical scene keys、受限mask和最小Model facade均已实机通过。原生材质像素现已首次肉眼出现，但上一版每帧重建屏幕中心World，造成整屏贴脸且闪烁。当前预览改为点击时在中心射线三米处固定一个小型World面板，后续只用当前View更新WorldView；正反面分离0.03米，避免共面深度竞争。清理日志按钮同时恢复。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/Model/SHPK selection/角色实例常量及pass/view mask均已脱离；canonical scene keys、受限mask和最小Model facade均已实机通过。原生材质像素现已首次肉眼出现，World锚点和尺寸也已稳定；剩余闪烁表现为黑白正面与红色反面无规律交替，直接对应预览同时提交的两层双向表面。当前版本只保留面向创建时相机的单层正面，index count为6；UI显示builder submission计数，Hide时写一条同名汇总日志，但不把它误称为GPU DrawIndexed计数。清理日志按钮保留。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 
@@ -364,4 +364,4 @@ mask重建实机已经通过：`0x01C00000->0x01C00000`与`3->3`仍生成一条O
 
 当前测试入口进一步改为internal持续rigid soak：两个实例共享同一owned geometry，分别维护独立128-byte current/previous World CB；主实例目标180次提交，副实例90次后删除，主实例中途执行一次显式history reset。每个实例记录submission、history reset、temporal advance、同frame重复提交及首末frame，D3D侧只汇总同时匹配owned slot0和IB的完整draw family。它用于一次实测覆盖多实例、同geometry复用、逐帧history、frame/view去重和删除后停止提交，不恢复通用command tracer。
 
-屏幕射线版本首次产生了肉眼可见的原生材质图案，关闭了“command是否有像素”的问题；但它错误地在每个framework update重新把World锚定到中心射线，而且一米距离配合过大基向量几乎覆盖整屏。正反两组索引还完全共面，存在深度竞争。修正版只在点击Show时取一次中心射线，在三米处建立固定World锚点，缩小right/up基到0.5米；之后相机移动只更新`FixedWorld * CurrentView`，物体不再像HUD贴住屏幕。正反面改为相隔0.03米的两个面，保留双向可见性但消除共面竞争。`Clear EventHorizon logs`也已恢复，后续每轮可从干净日志开始。
+屏幕射线版本首次产生了肉眼可见的原生材质图案，关闭了“command是否有像素”的问题；固定World与缩小尺寸随后也通过。剩余闪烁明确表现为黑白正面和红色反面交替，说明为双向可见而同时提交两层表面本身就是错误设计，0.03米间隔没有消除它们在多pass/depth流程中的竞争。当前预览删除反面和第二层顶点，只保留面向创建时相机的单层6-index正面。为了恢复必要但不扩张的诊断，`NativeRigidInstance`只累计builder submission次数；UI实时显示，Hide时记录`BuilderSubmissions`和`IndexCount=6`。这不是实际GPU draw count，若单面仍异常才增加一次性owned VB/IB DrawIndexed计数。`Clear EventHorizon logs`保持可用。

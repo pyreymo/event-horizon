@@ -568,4 +568,4 @@ mask重建实机验收通过：`PassMask=0x01C00000->0x01C00000`、`AuxViews=0x0
 
 下一轮不再增加参数追踪。新增的 `Run continuous native rigid soak` 会创建两个共享geometry的persistent实例：主实例提交180帧，副实例提交90帧后删除；每帧更新transform，主实例中途执行一次history reset。结束日志只有两条实例telemetry和一条完整draw family汇总，验证`DuplicateFrameSubmissions=0`、history reset至少两次（首次与显式reset）、temporal advance持续发生、删除后的副实例停止增长，以及完整draw数与实例submission规模一致。
 
-屏幕射线版本随后首次显示出带纹理的原生材质图案，证明owned geometry、material、WorldView和Opaque像素输出已经闭环。该版视觉异常来自预览自身：每帧重算中心射线使World锚点跟随镜头，表现为不随视角变化的HUD；一米距离和过大的基向量使其覆盖整屏；完全共面的正反三角形还可能造成闪烁。当前版本只在Show时于中心射线三米处建立固定World和0.5米right/up基，后续逐帧仅计算`FixedWorld * CurrentView`。双向面分离0.03米以消除共面竞争，同时恢复`Clear EventHorizon logs`按钮。这里不重新引入command tracer；用户肉眼确认稳定小面板后即可回到持续实例和生命周期工程化。
+屏幕射线版本随后首次显示出带纹理的原生材质图案，证明owned geometry、material、WorldView和Opaque像素输出已经闭环。固定World与缩小尺寸也已实机通过，但分离0.03米的双向面仍使黑白正面和红色反面无规律交替，说明两层表面会在原生多pass/depth流程中竞争，不能作为通用“双面”方案。当前预览只保留创建时朝向相机的单层正面，index count从12降为6。必要诊断只恢复builder submission累计值：UI显示次数，Hide写一条`BuilderSubmissions/IndexCount`汇总；它明确不是GPU DrawIndexed计数。若单面稳定，就不恢复executor tracer；若仍闪烁，再只对owned VB/IB增加一次性实际draw计数。`Clear EventHorizon logs`保持可用。

@@ -39,18 +39,9 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
             return;
         }
         geometry ??= underpaint.CreateNativeGeometry(
-            [
-                new(-0.8f, -0.8f, -0.015f),
-                new(0.8f, -0.8f, -0.015f),
-                new(0.8f, 0.8f, -0.015f),
-                new(-0.8f, 0.8f, -0.015f),
-                new(-0.8f, -0.8f, 0.015f),
-                new(0.8f, -0.8f, 0.015f),
-                new(0.8f, 0.8f, 0.015f),
-                new(-0.8f, 0.8f, 0.015f),
-            ],
-            [new(0f, 1f), new(1f, 1f), new(1f, 0f), new(0f, 0f), new(0f, 1f), new(1f, 1f), new(1f, 0f), new(0f, 0f)],
-            [0, 1, 2, 2, 3, 0, 6, 5, 4, 4, 7, 6]
+            [new(-0.8f, -0.8f, 0f), new(0.8f, -0.8f, 0f), new(0.8f, 0.8f, 0f), new(-0.8f, 0.8f, 0f)],
+            [new(0f, 1f), new(1f, 1f), new(1f, 0f), new(0f, 0f)],
+            [0, 1, 2, 2, 3, 0]
         );
         instance = underpaint.CreateNativeRigidInstance(geometry, previewWorld * view);
         state = "Waiting for the native render rendezvous";
@@ -62,10 +53,15 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
         var current = instance;
         instance = null;
         previewWorld = default;
+        var submissionCount = current?.SubmissionCount ?? 0;
         current?.Dispose();
         state = "Hidden";
         if (current != null)
-            DebugFileLog.Information(LogSource, "Native opaque preview hidden");
+            DebugFileLog.Information(
+                LogSource,
+                "Native opaque preview hidden; BuilderSubmissions={BuilderSubmissions} IndexCount=6",
+                submissionCount
+            );
     }
 
     public void Update()
@@ -84,7 +80,7 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
             if (TryGetView(out var view))
                 current.UpdateWorldView(previewWorld * view);
             if (current.HasSubmitted)
-                state = "Submitted: camera-facing native opaque quad";
+                state = $"Submitted: native opaque panel ({current.SubmissionCount} builder calls)";
         }
         catch (Exception exception)
         {
