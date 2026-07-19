@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/Model/SHPK selection/角色实例常量及pass/view mask均已脱离；canonical scene keys、受限mask和最小Model facade均已实机通过。逐帧Opaque capture确认shader、layout和材质主纹理稳定，也没有重复主视图draw。提交端与实际Draw端的World CB完整hash已经一致，排除了builder修改和延迟覆盖；真正错误是把游戏的3x4 affine view storage当成普通4x4参与托管矩阵乘法。原生`0x338870`忽略索引3/7/11/15，`0x266DD0`显式写入齐次列`(0,0,0,1)`，而这些storage slot在运行时包含未初始化值。后端现已在乘法前补齐隐式齐次列，同时继续使用原生View 30/SubView 12 camera。清理日志和窄capture暂保留用于最终实机关闭。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/Model/SHPK selection/角色实例常量及pass/view mask均已脱离；canonical scene keys、受限mask和最小Model facade均已实机通过。逐帧Opaque capture确认shader、layout和材质主纹理稳定，也没有重复主视图draw。提交端与实际Draw端的World CB完整hash已经一致，排除了builder修改和延迟覆盖；3x4 affine view的隐式齐次列也已按原生`0x338870`/`0x266DD0`语义修正，但实机闪烁仍存在。随后直接解析目标材质对应的`c0101e0378_top.mdl`，确认owned `20/24` declaration虽正确，默认vertex payload却提供了非法weights、normal W、bitangent和错误UV1 sentinel。当前已按目标资源的真实ABI为平面补齐有效语义，等待实机验证。清理日志和窄capture暂保留用于最终关闭。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 
