@@ -425,3 +425,41 @@ IDA进一步确认了资源构造方式：`CharacterBase.Initialize` 以 `Create
 5. 若现场存在previous instancing，则从current复制同一偏移作为previous，确保首次提交 `Current == Previous`；当前已知现场为空时保持为空。
 
 日志现在同时输出donor和offset constant的地址、source、hash及三行float值。下一次采集要验证：builder仍产生六条 `Count=3`；donor object/instancing hash不变；offset object内容相同但buffer身份独立；offset instancing仅第一行W相差2；最终六条draw的VS constant hash相对donor发生一致变化。肉眼位置变化是辅助证据，不作为唯一判据。
+
+### 结果：48-byte instancing 假设被否定
+
+实机采集显示donor `g_InstancingMatrix` 的三行全部为零；副本第一行W确实变为2，但没有形成可证明的物体位移。该buffer不是这个skinned现场可独立控制的world输入。上一节保留为失败实验记录，不再作为后端设计依据。
+
+当前CN客户端的静态反向追踪给出了真实分界：
+
+- `0x281DD0` 的non-skinned分支把 `Model+0x38` transform object拥有的constant buffer绑定到 `ModelRenderer.ConstantSamplerIds[1]`，即运行时World槽；同时把model-type scene key设为non-skinned值。
+- 该transform object的更新函数 `0x266DD0` 填充128 bytes：64-byte current world/view矩阵和64-byte previous world/view矩阵；首次有效提交令previous等于current。
+- `0x281DD0` 的skinned分支改设同一scene key的skinned值，并绑定 `BoneList` current/previous joint palettes。Human callback绑定的176-byte constant属于角色数据，不是world矩阵。
+- `0x283320` 本身不读取Model、BoneList或transform object；它消费已经准备好的shader selection与TLS Context，把当前状态展开为各view/pass command。因此无需继续向角色job上移，B的独立输入可以直接安装在这个同步pass-builder边界。
+
+## 2026-07-19 non-skinned world 输入 PoC
+
+Underpaint现在在一次性arm命中的兼容 `20/24` 现场执行以下最小替换：
+
+```text
+保留 donor 原提交
+  -> 复制 OnRenderModelParams (0x20)
+  -> 复制 OnRenderMaterialParams2 (0x48)
+  -> 复制 shader selection (0x28) 与 key values
+  -> model-type key: skinned value -> non-skinned value
+  -> Context World slot: donor -> Underpaint-owned 128-byte World CB
+       current  = view-space translation Z +5
+       previous = current
+  -> 安装 Underpaint-owned VB/IB/VertexDeclaration
+  -> 同步调用 0x283320(3, 0, 3)
+  -> 无条件恢复 geometry 与 World槽
+```
+
+这一步不修改共享Model、Material、角色constant、Skeleton、BoneList、palette或history。复制的params、shader selection和key array只在原hook栈内存活；World CB和native geometry由Underpaint持有，不异步解引用frame/job指针。当前仍借用donor material和其他pass状态，所以它是“独立geometry + 独立non-skinned transform边界”的验证，不是最终独立material后端。
+
+新日志记录：原/副本shader-selection地址、model-type key CRC、donor skinned value、副本non-skinned value、World槽ID、独立World CB资源/源内存/hash，以及current矩阵前三行。下一次实机采集可以验证两件事：
+
+1. 当前material是否存在可由non-skinned key选中的shader permutation，并仍自动生成六条 `Count=3` command；
+2. 这些command是否统一消费独立128-byte world输入，而不再依赖角色joint palette。
+
+若builder不再生成command，唯一直接缺口就是当前借用material缺少non-skinned permutation；此时应进入独立不透明material加载/params构造，不应回到角色Model工厂、骨骼链或command packet patching。

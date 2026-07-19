@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-19 状态：原生 builder 已证实能让插件自有 VB/IB 自动生成完整 Stage A、两族 Stage C 和辅助 view command。资源创建、生命周期、线程 Context 几何绑定与恢复现已迁入独立 `ffxiv-underpaint` 仓库。迁移后的实测仍稳定出现四条绑定插件 VB/IB 的 `Count=3` draw。入口随后下移到实际 pass builder `ffxiv_dx11.exe+0x283320`。第一次无目标实测暴露出一个必要约束：不能消费任意首个主视图调用；该调用的原 geometry 使用 `20/28` streams，而插件 geometry 是已验证的 `20/24` ABI，结果虽执行 `3/0/3` builder 调用却没有生成命令。现在 Underpaint 只消费下一次 `20/24` 兼容现场，并记录源 vertex declaration、streams 和 range；仍不要求目标角色、Slot、MaterialIndex 或指定 SHPK。该修正版待实机验收。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实能让插件自有 VB/IB 自动生成一条 Opaque 和五条辅助 view command，均为 `Count=3`。资源创建、生命周期、线程 Context 几何绑定与恢复现已迁入独立 `ffxiv-underpaint` 仓库；该路径不要求目标角色、装备槽或指定 SHPK，只等待一个 `20/24` vertex ABI 兼容现场。上一版把全零的 48-byte `g_InstancingMatrix` 当成 world transform，实测和当前客户端静态分析已否定该假设。当前 PoC 改为在 pass builder 边界切换 copied shader selection 的 model-type key，并绑定 Underpaint 自有 128-byte current/previous world constant，从角色 skinned palette 路径切到 non-skinned world 路径。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 
@@ -308,18 +308,24 @@ A/C 是两份 pass-specific packet
 
 当前已经实机确认：Underpaint自有Kernel VB/IB/VertexDeclaration在任意命中的兼容 `20/24` 原生现场重复调用 `ffxiv_dx11.exe+0x283320` 时，游戏会自动生成一条Opaque和五条辅助view draw，六条全部 `Count=3`。该路径不依赖目标角色、Slot、MaterialIndex或 `charactertransparency.shpk`，证明高层原生command展开入口成立。
 
-尚未独立拥有的是该现场的material/per-instance输入。最新静态和运行时证据把transform边界收窄到：
+尚未独立拥有的是该现场的material/per-instance输入。上一版把现场中全零的48-byte `g_InstancingMatrix` 当作transform；实测副本虽按预期变化，但没有形成有效world变换，因此该判断已经撤回。当前客户端静态分析确认真正的分支是：
 
 ```text
-复制的 OnRenderMaterialParams2 (72 bytes)
-  -> 复制的 OnRenderModelParams (32 bytes)
-     -> Underpaint-owned object ConstantBuffer (176 bytes, flags 2/0)
+0x281DD0 skinned branch
+  -> shader model-type scene key = skinned
+  -> BoneList current/previous joint palettes
 
-当前线程 Context
-  -> Underpaint-owned g_InstancingMatrix (48 bytes, flags 1/7)
-  -> optional g_PrevInstancingMatrix (首次提交与 current 相同)
+0x281DD0 non-skinned branch
+  -> shader model-type scene key = non-skinned
+  -> Context World slot = Model+0x38 transform object 的 128-byte CB
+     -> current world/view matrix (64 bytes)
+     -> previous world/view matrix (64 bytes; 首次等于 current)
+
+0x283320
+  -> 不再读取 Model、BoneList 或 transform object
+  -> 从 copied shader selection 与当前线程 Context 快照生成各 pass command
 ```
 
-builder会把上述输入重新打包为各pass自己的上传constant，最终command不直接引用donor buffer。当前提交实现已据此复制全部调用级wrapper和constant内容，只在副本矩阵增加小偏移，并在原hook/线程/context内同步调用后恢复Context。它不修改共享Model、Material、角色、骨骼或history，也不跨帧保存临时native指针。
+因此 B 的最小验证边界就在 `0x283320`：完整复制 `OnRenderModelParams`、`OnRenderMaterialParams2`、shader selection及其key value数组，把副本的model-type key由skinned改为non-skinned，并仅在同步重复调用期间把Context的World槽替换为Underpaint自有128-byte constant。该constant的current和previous都设置为同一个向前5单位的矩阵；几何、World槽和所有Context借用状态都在 `finally` 中恢复。实现不修改共享Model、Material、角色、骨骼、palette或history，也不跨帧保存临时native指针。
 
-下一次实机采集只需点击一次 `Arm custom native triangle`。需要确认六条 `Count=3` 仍存在、donor hash不变、offset buffer身份独立、48-byte矩阵仅第一行W增加2，并观察六条最终draw是否一致采用新transform。若这一项通过，transform边界可视为完成；正式后端剩余唯一主线是独立material/per-pass输入的所有权和生命周期，而不是继续追衣服或command packet。
+下一次实机采集只需点击一次 `Arm custom native triangle`。日志应显示不同的原/副本shader-selection地址、同一个model-type key、donor为skinned value而副本为non-skinned value，以及独立的128-byte World CB；其前三行预期为单位矩阵并在第三行W包含 `5`。需要确认六条 `Count=3` 是否仍生成并统一采用新world输入。若没有生成command，结论也很明确：当前借用material没有non-skinned permutation，下一步应换独立不透明material，而不是再追角色transform。
