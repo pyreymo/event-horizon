@@ -235,6 +235,8 @@ candidate-name/
 
 静态定位到BG的对应链路：`0x290520`准备view、sorting和1至2个pass descriptor，随后调用`0x290E10`；后者遍历BG batch中的LOD/mesh/submesh/material，安装geometry/material bindings，调用同一个`0x1417E5700` resolver，再通过`0x23B920`生成command。它不是一个只接收VB/IB和Material的简单入口：当前输入仍包含BGInstancingRenderer、BG batch、resource tables和submesh记录。下一阶段只沿这条链向上确认是否存在可复制的per-instance/batch item；若必须伪造完整BgParts资源对象，则终止“复用BG builder”路线，基本图形继续使用Underpaint自有opaque backend，而不是退回Character材质。
 
+继续向上追踪后，`0x290520`没有普通直接caller；它由BG renderer初始化函数`0x28EAC0`注册到全局render callback表。回调边界为五个参数，除renderer和view/index外，一个参数持有实例位置/排序所需数据（函数直接读其间接数据的`+0x20..+0x28`世界位置并与当前camera origin计算sort depth），另一个参数持有scene-key descriptor/value map。这说明可复制边界若存在，应在render job生成该回调记录的一层，而不是`0x290E10`内部。
+
 ### Phase 3：收敛internal后端
 
 - 将提交核心与 `OpaquePrimitiveProfile` 分离。
@@ -291,3 +293,4 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 | 2026-07-19 | BG builder崩溃隔离 | 两次修正后第三次仍在同一空VS读取处崩溃；停止推测式提交，改为resolver probe-only | 安全采集实际descriptor的16个pass槽，确定缺失shader的精确原因 |
 | 2026-07-19 | BG current shader输入补齐 | probe确认active pass 1的VS/PS均有效；崩溃位于同一builder生成的第二条command snapshot，owned路径缺少`Context+0x878/+0x880`回退输入 | 实机验证两条command均生成、Context恢复且三角形可见 |
 | 2026-07-19 | Model/BG协议错配确认 | 安全闸门捕获builder内部`ActivePass=6`；离线SHPK对照确认BG全家族只有三类pass，`0x283320`属于六类pass的ModelRenderer协议 | 停止`bg.shpk -> 0x283320`；静态审计BG的`0x290520 -> 0x290E10`最小batch边界 |
+| 2026-07-19 | BG callback边界 | `0x290520`由`0x28EAC0`注册到render callback表；它在进入batch builder前已从实例记录和camera计算sort depth，并接收scene-key map | 定位生成该回调记录的render job，判断其是否可脱离完整BgParts对象构造 |
