@@ -301,3 +301,25 @@ A/C 是两份 pass-specific packet
 ```
 
 透明排序、motion vector、TAA、水体、雾和阴影投射都必须逐项实测。进入原生 submission 会提高继承正确行为的概率，但不保证具体透明材质原本就参加所有 pass。
+
+## 2026-07-19 路线修正后的当前状态
+
+本计划最初以透明衣服作为探针寻找共同builder；它不是Underpaint正式后端的目标载体。主线现已纠正为“给Underpaint提供自有几何、材质和transform的原生不透明提交”。旧近似后端保持冻结，透明Stage A/C命名和通用command tracer均不再扩建。
+
+当前已经实机确认：Underpaint自有Kernel VB/IB/VertexDeclaration在任意命中的兼容 `20/24` 原生现场重复调用 `ffxiv_dx11.exe+0x283320` 时，游戏会自动生成一条Opaque和五条辅助view draw，六条全部 `Count=3`。该路径不依赖目标角色、Slot、MaterialIndex或 `charactertransparency.shpk`，证明高层原生command展开入口成立。
+
+尚未独立拥有的是该现场的material/per-instance输入。最新静态和运行时证据把transform边界收窄到：
+
+```text
+复制的 OnRenderMaterialParams2 (72 bytes)
+  -> 复制的 OnRenderModelParams (32 bytes)
+     -> Underpaint-owned object ConstantBuffer (176 bytes, flags 2/0)
+
+当前线程 Context
+  -> Underpaint-owned g_InstancingMatrix (48 bytes, flags 1/7)
+  -> optional g_PrevInstancingMatrix (首次提交与 current 相同)
+```
+
+builder会把上述输入重新打包为各pass自己的上传constant，最终command不直接引用donor buffer。当前提交实现已据此复制全部调用级wrapper和constant内容，只在副本矩阵增加小偏移，并在原hook/线程/context内同步调用后恢复Context。它不修改共享Model、Material、角色、骨骼或history，也不跨帧保存临时native指针。
+
+下一次实机采集只需点击一次 `Arm custom native triangle`。需要确认六条 `Count=3` 仍存在、donor hash不变、offset buffer身份独立、48-byte矩阵仅第一行W增加2，并观察六条最终draw是否一致采用新transform。若这一项通过，transform边界可视为完成；正式后端剩余唯一主线是独立material/per-pass输入的所有权和生命周期，而不是继续追衣服或command packet。

@@ -1,5 +1,6 @@
 #if DEBUG
 using System.Diagnostics;
+using System.Numerics;
 using System.Threading;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
@@ -279,7 +280,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         var submission = item.Submission;
         DebugFileLog.Information(
             LogSource,
-            "StandaloneNativeSubmission BuilderInvoked={BuilderInvoked} Failure={Failure} ModelRenderer=0x{ModelRenderer:X} MaterialParams=0x{MaterialParams:X} ModelParams=0x{ModelParams:X} Model=0x{Model:X} RenderModelCallback=0x{RenderModelCallback:X}/0x{RenderModelCallbackFunction:X} ModelField38=0x{ModelField38:X} OnRenderModelCB={OnRenderModelCB} WorldCB[{WorldId}]={WorldCB} InstancingCB[{InstancingId}]={InstancingCB} PreviousInstancingCB[{PreviousInstancingId}]={PreviousInstancingCB} View={View} SubView={SubView} SourceVB=0x{SourceVB:X} SourceIB=0x{SourceIB:X} SourceVertexDeclaration=0x{SourceVertexDeclaration:X} SourceStrides={SourceStream0Stride}/{SourceStream1Stride} SourceRange={SourceVertices}/{SourceStart}/{SourceIndices} Context=0x{Context:X} VB=0x{VB:X} VBResource=0x{VBResource:X} IB=0x{IB:X} IBResource=0x{IBResource:X} VertexDeclaration=0x{VertexDeclaration:X} Range={Vertices}/0/{Indices} Result=0x{Result:X}",
+            "StandaloneNativeSubmission BuilderInvoked={BuilderInvoked} Failure={Failure} ModelRenderer=0x{ModelRenderer:X} MaterialParams=0x{MaterialParams:X} ModelParams=0x{ModelParams:X} Model=0x{Model:X} RenderModelCallback=0x{RenderModelCallback:X}/0x{RenderModelCallbackFunction:X} ModelField38=0x{ModelField38:X} OnRenderModelCB={OnRenderModelCB} WorldCB[{WorldId}]={WorldCB} InstancingCB[{InstancingId}]={InstancingCB} PreviousInstancingCB[{PreviousInstancingId}]={PreviousInstancingCB} OffsetModelCB={OffsetModelCB} OffsetInstancingCB={OffsetInstancingCB} OffsetPreviousInstancingCB={OffsetPreviousInstancingCB} View={View} SubView={SubView} SourceVB=0x{SourceVB:X} SourceIB=0x{SourceIB:X} SourceVertexDeclaration=0x{SourceVertexDeclaration:X} SourceStrides={SourceStream0Stride}/{SourceStream1Stride} SourceRange={SourceVertices}/{SourceStart}/{SourceIndices} Context=0x{Context:X} VB=0x{VB:X} VBResource=0x{VBResource:X} IB=0x{IB:X} IBResource=0x{IBResource:X} VertexDeclaration=0x{VertexDeclaration:X} Range={Vertices}/0/{Indices} Result=0x{Result:X}",
             item.Succeeded,
             item.Failure ?? "",
             item.ModelRenderer,
@@ -296,6 +297,9 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             FormatConstantBuffer(item.InstancingConstant),
             item.PreviousInstancingConstantId,
             FormatConstantBuffer(item.PreviousInstancingConstant),
+            FormatConstantBuffer(item.OffsetModelConstant),
+            FormatConstantBuffer(item.OffsetInstancingConstant),
+            FormatConstantBuffer(item.OffsetPreviousInstancingConstant),
             item.View,
             item.SubView,
             item.SourceVertexBuffer,
@@ -361,8 +365,13 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         }
     }
 
-    private static string FormatConstantBuffer(NativeConstantBufferProbe item) =>
-        $"0x{item.Buffer:X}/Size={item.ByteSize}/Source=0x{item.SourcePointer:X}/Hash={item.ContentHash:X16}";
+    private static string FormatConstantBuffer(NativeConstantBufferProbe item)
+    {
+        var value = $"0x{item.Buffer:X}/Size={item.ByteSize}/Source=0x{item.SourcePointer:X}/Hash={item.ContentHash:X16}";
+        return item.ByteSize == 48 ? $"{value}/Rows={FormatVector(item.Row0)};{FormatVector(item.Row1)};{FormatVector(item.Row2)}" : value;
+    }
+
+    private static string FormatVector(Vector4 value) => FormattableString.Invariant($"({value.X:R},{value.Y:R},{value.Z:R},{value.W:R})");
 
     private DonorSnapshot? TryCaptureDonor()
     {

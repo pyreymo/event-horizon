@@ -411,3 +411,17 @@ EventHorizon 只创建测试三角形并 arm
 第三次实测得到 `Matches=6`：一条明确的 `Opaque` 和五条辅助 draw全部为 `Count=3`，统一绑定插件自有VB/IB。这已经闭环“无目标、无指定衣服、无材质过滤的兼容原生现场可以自动展开不透明及辅助命令”。当前主线转到实例输入。静态追踪确认 `0x281AE0` 会先调用 `Model.RenderModelCallback`，由回调写入 `OnRenderModelParams+0x10` 并准备 Context常量绑定，然后才进入builder；因此不能只浅拷贝 `OnRenderMaterialParams2`。下一版只为该次standalone提交记录 `OnRenderModelParams+0x10`、Model callback、`WorldViewMatrix/InstancingMatrix/PrevInstancingMatrix` native ConstantBuffer，以及六条最终draw的VS constant buffer和内容hash，用于确定可独立替换的最小transform边界。
 
 这一步解决的是“谁负责找到可用原生提交现场”：现在由 Underpaint 自己负责。它尚未解决“材质和实例状态完全由插件独立拥有”；当前仍借用命中现场已经准备好的 material/per-instance context。正式公开后端前的剩余主线是把独立加载的 `MaterialResourceHandle/Render::Material` 接到可复制的最小 params 状态，或找到为非 skinned primitive 准备该状态的更高层原生入口。
+
+## 2026-07-19 standalone transform 副本 PoC
+
+上一轮实测把 standalone 现场的实例输入收窄为两块数据：`OnRenderModelParams+0x10` 指向176-byte object constant，Context 的 `g_InstancingMatrix`槽指向48-byte、三行 `float4` 矩阵；该现场没有 `g_WorldViewMatrix` 和 `g_PrevInstancingMatrix`。六条最终draw没有直接引用这两个donor buffer，而是由builder重新打包到各pass的上传constant中。
+
+IDA进一步确认了资源构造方式：`CharacterBase.Initialize` 以 `CreateConstantBuffer(176, 2, 0)` 创建两块角色object constant；`ModelRenderer` 初始化以 `CreateConstantBuffer(48, 1, 7)` 创建并清零 `g_InstancingMatrix`。因此本轮不修改共享Model、角色constant或Context中原buffer内容，而是在同一hook、线程和生命周期内：
+
+1. 完整复制32-byte `OnRenderModelParams` 和72-byte `OnRenderMaterialParams2`，只让后者副本指向前者副本；
+2. 创建Underpaint自有的176-byte和48-byte native ConstantBuffer并复制donor内容；
+3. 让model params副本指向独立176-byte buffer，在48-byte矩阵副本第一行W分量增加 `+2.0`；
+4. 仅在重复调用builder期间将Context的instancing槽替换为副本，并在 `finally` 中与几何绑定一起恢复；
+5. 若现场存在previous instancing，则从current复制同一偏移作为previous，确保首次提交 `Current == Previous`；当前已知现场为空时保持为空。
+
+日志现在同时输出donor和offset constant的地址、source、hash及三行float值。下一次采集要验证：builder仍产生六条 `Count=3`；donor object/instancing hash不变；offset object内容相同但buffer身份独立；offset instancing仅第一行W相差2；最终六条draw的VS constant hash相对donor发生一致变化。肉眼位置变化是辅助证据，不作为唯一判据。
