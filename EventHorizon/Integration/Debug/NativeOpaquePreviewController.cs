@@ -1,4 +1,5 @@
 #if DEBUG
+using System.Numerics;
 using Underpaint;
 using Underpaint.Internal;
 
@@ -34,8 +35,8 @@ internal sealed class NativeOpaquePreviewController : IDisposable
             [new(0f, 1f), new(1f, 1f), new(1f, 0f), new(0f, 0f)],
             [0, 1, 2, 2, 3, 0, 2, 1, 0, 0, 3, 2]
         );
-        instance = underpaint.CreateCameraFacingNativeRigidInstance(geometry, 3f);
-        state = "Waiting for the main-view render camera";
+        instance = underpaint.CreateNativeRigidInstance(geometry, Matrix4x4.CreateTranslation(0f, 0f, 5f));
+        state = "Waiting for the native render rendezvous";
         DebugFileLog.Information(LogSource, "Native opaque preview shown");
     }
 
