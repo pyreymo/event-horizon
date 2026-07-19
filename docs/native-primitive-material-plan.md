@@ -218,6 +218,13 @@ candidate-name/
 - 已删除source `stride=20`和source 176-byte constant的rendezvous过滤，当前只借用main-view render thread、TLS Context和builder调用时机；
 - 176-byte default object constant仍是Underpaint-owned `OnRenderModelParams+0x10`兼容输入，但不再按`g_InstanceParameter`查找或绑定到目标SHPK。它是否可完全删除，需要一次BG材质callback实机结果；这不是角色donor依赖。
 
+2026-07-19第二次BG实机在builder内部崩溃于`ffxiv_dx11.exe+0x23BB50`。dump证明command snapshot正在读取空VS指针；静态回溯确认这是两个旧PoC错误叠加，而不是`bg.shpk`或0517材质本身不合法：
+
+1. `Params2+0x38`由`OnRenderModelParams`上层调用传入，是当前render invocation的view/pass输入；代码却把它强制改成衣服实验的`0x01C00000`，要求BG node生成并不存在的command family。现在保留同步现场原值，只继续清零callback/pass输出`+0x40`。
+2. `Params2+0x30`指向shader-selection对象；该对象首字段才是selection descriptor。旧代码少解引用一层，把source selection对象地址当成descriptor。现在复制`**(Params2+0x30)`，与游戏原生stack selection初始化的字段语义一致。
+
+这次修复收紧了合法输入边界：目标材质、keys、bindings和geometry仍为owned；`+0x38`被明确归入当前frame/view调用级公共输入，不能写成某个材质profile的固定mask。
+
 ### Phase 3：收敛internal后端
 
 - 将提交核心与 `OpaquePrimitiveProfile` 分离。
@@ -270,3 +277,4 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 | 2026-07-19 | Phase 0完成 | 离线枚举、`.mdl/.mtrl/.shpk`解析和三候选对照完成；选定0517 `bg.shpk` profile，无需用户导出 | 实机验证BG profile的material callback、permutation和稳定可见性 |
 | 2026-07-19 | Phase 2实现中 | 衣服材质/vertex ABI和carrier过滤已从提交路径移除；Debug/Release构建通过 | 用户显示preview并采集一次bounded draw capture |
 | 2026-07-19 | BG scene-key修正 | 首次实机在提交前失败：旧代码强制向`bg.shpk`写入角色model-type key；已改为只覆盖目标SHPK声明的canonical keys | 再次实机验证material callback和实际opaque draw |
+| 2026-07-19 | BG builder崩溃修正 | dump定位空VS；根因为衣服pass mask覆盖`Params2+0x38`及selection descriptor少解引用一层 | 构建后再次验证；若仍无合法descriptor则安全停止而不扩建tracer |
