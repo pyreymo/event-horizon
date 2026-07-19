@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/SHPK selection/角色实例常量均已脱离，canonical renderer/subview scene keys已实机通过；Context恢复已集中为单一scope，并已建立internal持续rigid实例与frame/view去重。当前构建进一步按第一版受限view策略重建 `Params2+0x38/+0x44`，等待实机验收。正式API的主要阻塞是剩余Model wrapper、通用view policy和可靠延迟回收边界。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/SHPK selection/角色实例常量及pass/view mask均已脱离，canonical renderer/subview scene keys与受限mask重建已实机通过；Context恢复已集中为单一scope，并已建立internal持续rigid实例与frame/view去重。当前构建用调用栈上的最小零值Model facade替换最后的source Model wrapper，等待实机验收。正式API的主要阻塞是通用view policy和可靠延迟回收边界。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 
@@ -357,3 +357,5 @@ source shader selection依赖已删除。owned selection现在直接按CRC查询
 owned instance constant实机验收通过：source/owned ConstantBuffer、backing storage和hash均不同，owned前三个`float4`为显式neutral值；六条完整owned indexed draw仍是一条Opaque加五条辅助draw，无异常或透明family。176-byte carrier实例输入据此关闭。
 
 同次样本的source pass mask从上一轮 `0x01C00000` 变化为 `0x03C00000`，但最终command集合完全相同。IDA确认 `+0x38 & 0x03000000`只是主提交gate，`& 0x00C00000`是View 32+辅助提交gate，低10 bits按五组bit-pair请求当前第一版不支持的额外环境/view family；`+0x44`仅作为View 32+i枚举mask，builder还会检查对应SubView camera。当前构建不再复制二者，而是为internal第一版明确请求已验证的主gate、辅助gate和Views 32/33。日志改为 `PassMask=source->owned`、`AuxViews=source->owned`；这些值是受限实现策略，不是公开API或通用原生协议。
+
+mask重建实机已经通过：`0x01C00000->0x01C00000`与`3->3`仍生成一条Opaque和五条辅助owned draw，故该source依赖关闭。最后的wrapper审计确认 `OnRenderMaterial(0x281540)`只需要Model `+0x28/+0x50`和model params `+0x18`，`0x283320`只额外需要Model `+0x40/+0x178`。当前构建不再浅复制source model params，而是创建调用栈内的零值最小Model facade与从零初始化的0x20-byte model params，仅安装owned `g_InstanceParameter`。它不伪造完整Model、不调用角色callback、不接触Skeleton，也不修改任何共享对象。下一次实机若仍得到目标opaque flags与相同六条完整owned draw，source object/model wrapper即可正式关闭。

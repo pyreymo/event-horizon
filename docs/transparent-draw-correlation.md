@@ -557,3 +557,9 @@ Human+0xBF0 CustomizeParameterCBuffer
 实机结果已经关闭这项依赖：source为 `0x2474A85F2B0`、hash `1DF145870B8B5921`，owned为 `0x243D9E396B0`、hash `A4754D0D1120A645`，backing storage也不同；owned前三组均为显式neutral `(1,1,1,1)`。六条完整 `Count=3` indexed draw保持一条Opaque加五条辅助draw，无透明family。其后六条只匹配到owned stream1或IB，不是完整owned geometry。
 
 该样本还提供了pass-mask判别：source `+0x38` 为 `0x03C00000`，上一轮为 `0x01C00000`，但command集合相同。`0x283320`只以 `0x03000000`判断主入口是否启用，以 `0x00C00000`判断辅助View 32+入口；五组低位bit-pair会生成当前第一版不承诺支持的额外环境/view family。四个实际command helper不再读取 `+0x38/+0x44`。因此当前版本把wrapper字段重建为internal受限policy：一个已验证主gate、辅助gate和Views 32/33 allowlist。下一次日志会显示source→owned mask，验证结果应仍为相同六条完整draw；固定值不会进入公开API。
+
+mask重建实机验收通过：`PassMask=0x01C00000->0x01C00000`、`AuxViews=0x00000003->0x00000003`，仍生成六条完整owned draw（一条Opaque、五条辅助），且owned `g_InstanceParameter`继续与source资源及内容分离。`Params2+0x38/+0x44`的source依赖据此关闭。
+
+随后静态复核了最后的Model wrapper。FFCS签名对应 `ModelRenderer.OnRenderMaterial = ffxiv_dx11.exe+0x281540`；IDA确认它只从Model读取 `+0x28`的条件flag和`+0x50 RenderMaterialCallback`，并读取`OnRenderModelParams+0x18`的角色专用条件位。`0x283320`自身只额外读取 `Model+0x40 Skeleton`（仅一个特殊分支，允许为空）和`Model+0x178`（在两套renderer key偏移之间选择）；四个pass helper不再读取Model。
+
+当前构建因此不复制完整Model，也不修改共享对象，而是在同一原生调用栈上创建一个0x180-byte、全零的最小调用facade，并从零构造0x20-byte `OnRenderModelParams`：`+0x00`指向facade，`+0x10`指向owned `g_InstanceParameter`，其余字段为零。这样目标Material的flags不会再经过Character callback，builder也看不到source Skeleton或renderer variant。日志会显示 `Model=source->OwnedFacade`，并把source `+0x28/+0x50/+0x40/+0x178`明确记录为`->0`。下一次实测只需确认owned flags仍为目标opaque结果、六条完整owned draw不退化；通过后source object/model wrapper语义即全部关闭，现场只剩当前render thread、TLS Context、view/subview和command arena这些正式后端本来就要借用的frame/view公共环境。
