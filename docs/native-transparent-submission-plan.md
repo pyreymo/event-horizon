@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/Model/SHPK selection/角色实例常量及pass/view mask均已脱离；canonical scene keys、受限mask和最小Model facade均已实机通过。当前优先级已经纠正为先取得可肉眼确认的原生不透明预览：新构建使用经当前View×Projection验证的camera-facing世界矩阵、正反双绕序quad和完整UV，等待实机验收。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/Model/SHPK selection/角色实例常量及pass/view mask均已脱离；canonical scene keys、受限mask和最小Model facade均已实机通过。当前优先级已经纠正为先取得可肉眼确认的原生不透明预览。第一次预览被 framework 线程上的 `Scene.CameraManager.CurrentCamera == null` 提前挡住；修正版把相机解析移入原生 render rendezvous，直接读取本次 `Render.Manager.Views[view].SubViews[subView].Camera`，再生成经当前View×Projection验证的camera-facing世界矩阵。正反双绕序quad和完整UV不变，等待实机验收。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 
@@ -364,4 +364,4 @@ mask重建实机已经通过：`0x01C00000->0x01C00000`与`3->3`仍生成一条O
 
 当前测试入口进一步改为internal持续rigid soak：两个实例共享同一owned geometry，分别维护独立128-byte current/previous World CB；主实例目标180次提交，副实例90次后删除，主实例中途执行一次显式history reset。每个实例记录submission、history reset、temporal advance、同frame重复提交及首末frame，D3D侧只汇总同时匹配owned slot0和IB的完整draw family。它用于一次实测覆盖多实例、同geometry复用、逐帧history、frame/view去重和删除后停止提交，不恢复通用command tracer。
 
-但command执行并不等于可见像素，且此前实机从未肉眼看到原生三角形，因此持续soak暂缓。当前构建删除旧透明capture、native duplicate、一次性triangle和soak UI，以及对应的container/consumer/command日志控制器。唯一保留的debug入口是 `Show native opaque preview`：它创建带0..1 UV的双面quad，利用当前scene camera的逆View矩阵构造距离镜头3米的world transform，并用View×Projection预检其中心确实位于clip volume。该预览通过后才恢复持续实例和生命周期验证。
+但command执行并不等于可见像素，且此前实机从未肉眼看到原生三角形，因此持续soak暂缓。当前构建删除旧透明capture、native duplicate、一次性triangle和soak UI，以及对应的container/consumer/command日志控制器。唯一保留的debug入口是 `Show native opaque preview`：它创建带0..1 UV的双面quad。第一次实现从framework线程读取scene camera，实测只得到 `Unavailable: no active world camera`，证明该入口和时机不能作为预览依赖。修正版让实例先进入等待状态，在View 30/SubView 11的原生render rendezvous中读取当前`RenderCamera`，在同一线程构造距离镜头3米且通过View×Projection中心clip检查的world transform；builder实际接受后UI才显示`Submitted`。该预览通过肉眼验收后才恢复持续实例和生命周期验证。

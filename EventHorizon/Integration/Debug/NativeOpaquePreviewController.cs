@@ -1,12 +1,10 @@
 #if DEBUG
-using System.Numerics;
-using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
 using Underpaint;
 using Underpaint.Internal;
 
 namespace EventHorizon.Integration.Debug;
 
-internal sealed unsafe class NativeOpaquePreviewController : IDisposable
+internal sealed class NativeOpaquePreviewController : IDisposable
 {
     private const string LogSource = "NativeOpaquePreview";
     private readonly UnderpaintRenderer? underpaint;
@@ -31,19 +29,13 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
             state = "Unavailable: Underpaint failed to initialize";
             return;
         }
-        if (!TryGetCameraFacingWorld(out var world))
-        {
-            state = "Unavailable: no active world camera";
-            return;
-        }
-
         geometry ??= underpaint.CreateNativeGeometry(
             [new(-0.8f, -0.8f, 0f), new(0.8f, -0.8f, 0f), new(0.8f, 0.8f, 0f), new(-0.8f, 0.8f, 0f)],
             [new(0f, 1f), new(1f, 1f), new(1f, 0f), new(0f, 0f)],
             [0, 1, 2, 2, 3, 0, 2, 1, 0, 0, 3, 2]
         );
-        instance = underpaint.CreateNativeRigidInstance(geometry, world);
-        state = "Visible: camera-facing native opaque quad";
+        instance = underpaint.CreateCameraFacingNativeRigidInstance(geometry, 3f);
+        state = "Waiting for the main-view render camera";
         DebugFileLog.Information(LogSource, "Native opaque preview shown");
     }
 
@@ -68,11 +60,10 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
             state = $"Stopped: {failure}";
             return;
         }
-        if (!TryGetCameraFacingWorld(out var world))
-            return;
         try
         {
-            current.UpdateWorldView(world);
+            if (current.HasSubmitted)
+                state = "Submitted: camera-facing native opaque quad";
         }
         catch (Exception exception)
         {
@@ -87,39 +78,6 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
         Hide();
         geometry?.Dispose();
         geometry = null;
-    }
-
-    private static bool TryGetCameraFacingWorld(out Matrix4x4 world)
-    {
-        world = default;
-        var manager = CameraManager.Instance();
-        var camera = manager == null ? null : manager->CurrentCamera;
-        if (camera == null || camera->RenderCamera == null)
-            return false;
-
-        var view = *(Matrix4x4*)&camera->ViewMatrix;
-        var projection = *(Matrix4x4*)&camera->RenderCamera->ProjectionMatrix;
-        if (!Matrix4x4.Invert(view, out var cameraWorld))
-            return false;
-
-        for (var index = 0; index < 2; index++)
-        {
-            var depth = index == 0 ? 3f : -3f;
-            var candidate = Matrix4x4.CreateTranslation(0f, 0f, depth) * cameraWorld;
-            var center = Vector3.Transform(Vector3.Zero, candidate);
-            var clip = Vector4.Transform(new Vector4(center, 1f), view * projection);
-            if (clip.W <= 0.001f)
-                continue;
-            var inverseW = 1f / clip.W;
-            var x = clip.X * inverseW;
-            var y = clip.Y * inverseW;
-            var z = clip.Z * inverseW;
-            if (MathF.Abs(x) > 0.8f || MathF.Abs(y) > 0.8f || z is < 0f or > 1f)
-                continue;
-            world = candidate;
-            return true;
-        }
-        return false;
     }
 }
 #endif
