@@ -183,7 +183,7 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
             {
                 DebugFileLog.Information(
                     LogSource,
-                    "Native preview builder {Phase} Sequence={Sequence} Frame={Frame} Context={Context} View={View}/{SubView} Thread={Thread} WorldCB={WorldCB} Source={Source} Flags={Flags} Hash={Hash} CurrentHash={CurrentHash} PreviousHash={PreviousHash} Equal={Equal} Current={Current} Previous={Previous}",
+                    "Native preview builder {Phase} Sequence={Sequence} Frame={Frame} Context={Context} View={View}/{SubView} Thread={Thread} WorldCB={WorldCB} SourcePointer={SourcePointer} Flags={Flags} Hash={Hash} CurrentHash={CurrentHash} PreviousHash={PreviousHash} Equal={Equal} Current={Current} Previous={Previous}",
                     submission.Phase,
                     submission.Sequence,
                     submission.Frame,
