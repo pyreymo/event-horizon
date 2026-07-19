@@ -104,7 +104,7 @@ runtime renderer/view keys + primitive instance inputs
 - vertex inputs尽可能少，优先Position + Normal + Color/UV；
 - material constants少且有明确default；
 - 纹理可以由简单neutral纹理替代，或允许纯色结果；
-- SHPK key空间和opaque node数量足够小，可以穷举并解释；
+- 能从material defaults和runtime canonical keys锁定实际opaque node；不要求穷举整个通用SHPK；
 - 主view与辅助view行为由native builder自动产生，不要求伪造完整场景Model。
 
 候选优先级：简单静态BgParts/场景道具 > 通用地面或建筑材质 > 复杂环境材质。角色、装备和带特殊效果的材质不进入候选集。
@@ -124,6 +124,8 @@ C:\Program Files (x86)\上海数龙科技有限公司\最终幻想XIV\game\sqpac
 - SHPK node/key/resource解析与DXBC反汇编能力。
 
 因此，只要知道游戏虚拟路径，文件提取和分析不需要用户进入游戏。离线索引若不能方便地从海量资源中发现合适候选，才请求一次Penumbra Resource Tree协助。
+
+候选发现已经使用 ResLogger2 `CurrentPathList.gz` 完成。SqPack索引本身只有hash，不能反查完整虚拟路径；路径列表提供名称，Lumina负责验证文件确实存在，Penumbra.GameData负责解析。当前不需要用户从Penumbra导出文件。
 
 若需要用户导出，最小交付清单为：
 
@@ -149,6 +151,45 @@ candidate-name/
 
 完成条件：给定文件闭包后，不启动游戏也能回答“这个submesh为什么选择这个opaque permutation，它要求什么输入”。
 
+### Phase 0结果（2026-07-19）
+
+离线比较集固定为以下三个普通室内家具模型：
+
+| 模型 | LOD/mesh/material | 顶点/索引 | vertex contract | material |
+|---|---:|---:|---|---|
+| `bgcommon/hou/indoor/general/0517/bgparts/fun_b0_m0517a.mdl` | 1/1/1 | 184/564 | streams `8/12`，Half4 Position、Half4 Normal、Half2 UV | `fun_b0_m0517_0a.mtrl` |
+| `bgcommon/hou/indoor/general/1015/bgparts/fun_b0_m1015.mdl` | 2/1/1 | — | 同一 `8/12` contract | `bg.shpk` opaque material |
+| `bgcommon/hou/indoor/general/0393/bgparts/fun_b0_m0393_0a.mdl` | 2/1/1 | — | 同一 `8/12` contract | `bg.shpk` opaque material |
+
+三者均为rigid，`BoneTableIndex=255`，不需要Skeleton、角色Model或装备数据。第一套profile选用0517：
+
+```text
+.mdl
+  stream 0: Half4 Position, stride 8
+  stream 1: Half4 Normal + Half2 UV, stride 12
+  index: UInt16
+
+.mtrl
+  bgcommon/hou/indoor/general/0517/material/fun_b0_m0517_0a.mtrl
+  Shader: bg.shpk
+  Flags: 0x0000000D
+  Material keys: none (use SHPK defaults)
+  Material constants: 18, 188 bytes of supplied defaults
+  Textures: diffuse + specular + shared dummy normal
+
+.shpk
+  shader/sm5/shpk/bg.shpk
+  material parameter: 23 float4 / 368 bytes
+  scene keys: 10
+  material keys: 4
+  subview keys: 2
+  passes: 3
+```
+
+`bg.shpk`是大型通用包（56 VS、3850 PS、9244 nodes），但这不意味着需要先解释全部node。0517没有material-key override；实际提交只需把当前renderer/view canonical keys填入owned selection，再观察被选择的opaque node。若选择不能稳定复现，才对该一个node和对应VS/PS做进一步反汇编。
+
+原生 `ResourceManager.GetResourceSync` 的hash也已静态确认：`Crc32.FromBuffer`对完整虚拟路径执行标准反射CRC32并返回最终按位取反结果。0517 `.mtrl` 的hash为 `0x5D6A7B3E`，category为`BgCommon`；不再沿用运行时捕获的衣服资源常量。
+
 ### Phase 1：选择 `OpaquePrimitiveProfile`
 
 - 只选一个最小候选。
@@ -167,6 +208,13 @@ candidate-name/
 - 肉眼稳定显示，并用有界日志确认native opaque draw连续执行。
 
 完成条件：静止和移动镜头下连续数百帧稳定；不依赖角色是否可见、穿什么装备或当前场景是否恰好绘制20-byte角色stream。
+
+当前实现状态：
+
+- 已把运行时材质从 `e0378/characterlegacy.shpk` 改为0517 `bg.shpk`；
+- owned geometry改为Half4 Position、Half4 Normal和UV；首个PoC把文件中的Half2 UV扩为已验证的Half4 runtime declaration，等待实机后再决定是否补Half2 runtime format映射；
+- 已删除source `stride=20`和source 176-byte constant的rendezvous过滤，当前只借用main-view render thread、TLS Context和builder调用时机；
+- 176-byte default object constant仍是Underpaint-owned `OnRenderModelParams+0x10`兼容输入，但不再按`g_InstanceParameter`查找或绑定到目标SHPK。它是否可完全删除，需要一次BG材质callback实机结果；这不是角色donor依赖。
 
 ### Phase 3：收敛internal后端
 
@@ -217,4 +265,5 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 | 日期 | 阶段 | 结论 | 下一步 |
 |---|---|---|---|
 | 2026-07-19 | 方向重置 | 原生提交入口和owned实例链保留；衣服材质不再是后端验收条件 | 建立离线contract analyzer并筛选2至3个static opaque候选 |
-
+| 2026-07-19 | Phase 0完成 | 离线枚举、`.mdl/.mtrl/.shpk`解析和三候选对照完成；选定0517 `bg.shpk` profile，无需用户导出 | 实机验证BG profile的material callback、permutation和稳定可见性 |
+| 2026-07-19 | Phase 2实现中 | 衣服材质/vertex ABI和carrier过滤已从提交路径移除；Debug/Release构建通过 | 用户显示preview并采集一次bounded draw capture |
