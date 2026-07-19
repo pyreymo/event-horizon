@@ -517,7 +517,7 @@ flags重建后的首次实测得到 `Flags=0x15->0x15`，并恢复为当前测�
 | 字段 | 分类 | 当前结论 |
 |---|---|---|
 | `OnRenderModelParams+0x00` | source object语义污染 | 指向source `Model`；`OnRenderMaterial`读取其flags/callback，`0x283320`的条件分支只额外读取少量Model字段。尚未独立。 |
-| `OnRenderModelParams+0x10` | owned instance候选 / 当前source污染 | 176-byte object constant由source `Model.RenderModelCallback`提供。当前仅复制到Underpaint-owned CB，内容仍继承carrier。CPU builder不解释其字段，实际消费由目标shader决定。 |
+| `OnRenderModelParams+0x10` | owned instance输入 | 已确认为 `CharacterBase+0x270 CharacterDataCBuffer`，目标SHPK中为CRC `0x20A30B34`、ID 34、11个`float4`的 `g_InstanceParameter`。当前改为Underpaint-owned neutral constant，并显式安装到Context；不再复制carrier内容。 |
 | `OnRenderMaterialParams2+0x00` | scratch wrapper | 改指向调用栈内复制的model params。 |
 | `+0x08` | source geometry/resource | `0x283320`与`OnRenderMaterial`均不需要；当前版本清零。 |
 | `+0x10..+0x2F` | scratch/output | 原生material callback的可选输出；提交前清零，由owned Material调用重新生成。 |
@@ -533,4 +533,23 @@ Underpaint内部已增加受限的持续rigid实例：每个实例拥有128-byte
 
 所有Context修改现集中到一个scope：统一保存/恢复IB、VertexDeclaration、四个stream binding、64个constant slot、目标material涉及的resource/sampler/flags槽以及`OnRenderMaterial`修改的rasterizer字段。selection/key storage为调用栈owned数据，不写入Context；当前路径不修改recording Context的topology，因此没有伪造未知topology offset。异常与正常返回共享同一恢复边界。
 
-资源生命周期采用保守策略：active instance移除后立即停止提交，但其World CB进入retired集合，直到backend teardown才释放；builder返回不视为frame/GPU完成边界。正式API前仍需找到可靠的frame-completion/延迟回收边界，并为geometry/material建立相同的引用与退休规则。当前持续后端还没有宣称完成多material、source-independent object constant、source-independent `+0x38/+0x44`、场景切换与数百帧实机验证。
+资源生命周期采用保守策略：active instance移除后立即停止提交，但其World CB进入retired集合，直到backend teardown才释放；builder返回不视为frame/GPU完成边界。正式API前仍需找到可靠的frame-completion/延迟回收边界，并为geometry/material建立相同的引用与退休规则。当前持续后端还没有宣称完成多material、source-independent `+0x38/+0x44`、剩余Model wrapper清理、场景切换与数百帧实机验证。
+
+最新实机日志验证了canonical selector替换：`CanonicalKeys=6+0`、`Flags=0x15->0x15`、`PassMask=0x01C00000`、`AuxViews=3`，六条完整owned indexed draw仍为一条Opaque加五条辅助view，没有Semitransparent家族。source shader selection依赖据此关闭；flags路径功能正常，但仍缺source/owned flags不同的判别样本。
+
+随后对176-byte输入的静态追踪纠正了此前的“object constant”叫法：
+
+```text
+OnRenderModelParams+0x10
+  -> CharacterBase+0x270 CharacterDataCBuffer
+  -> Character render callback 0x433270
+  -> Context constant ID 34
+  -> target SHPK Constants: CRC 0x20A30B34, Size=11
+  -> g_InstanceParameter (176 bytes)
+
+Human+0xBF0 CustomizeParameterCBuffer
+  -> callback virtual +0x1F8
+  -> separate Context slot
+```
+
+因此 `+0x10` 是carrier的per-instance外观/环境输入，不是world transform，也不是可长期借用的view公共状态。旧实现虽然把它复制到一个owned CB，却没有把目标constant ID显式替换到Context，`0x283320`仍可能从当前Context继承source角色值。新实现从目标SHPK按CRC取得runtime ID并校验176-byte大小，写入Underpaint-owned neutral `g_InstanceParameter`，在同一Context scope内安装、提交并恢复。日志字段改为 `InstanceCB[id/CRC]=Source/Owned`，176-byte探针同时输出前三个`float4`，下一次采集可以直接验证command中的source角色实例常量已消失。

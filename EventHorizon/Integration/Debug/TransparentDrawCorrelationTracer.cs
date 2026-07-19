@@ -280,7 +280,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
         var submission = item.Submission;
         DebugFileLog.Information(
             LogSource,
-            "StandaloneNativeSubmission BuilderInvoked={BuilderInvoked} Failure={Failure} ModelRenderer=0x{ModelRenderer:X} MaterialParams=0x{MaterialParams:X} ModelParams=0x{ModelParams:X} Model=0x{Model:X} RenderModelCallback=0x{RenderModelCallback:X}/0x{RenderModelCallbackFunction:X} ModelField38=0x{ModelField38:X} OnRenderModelCB={OnRenderModelCB} WorldCB[{WorldId}]={WorldCB} InstancingCB[{InstancingId}]={InstancingCB} PreviousInstancingCB[{PreviousInstancingId}]={PreviousInstancingCB} OffsetModelCB={OffsetModelCB} OffsetWorldCB={OffsetWorldCB} OffsetInstancingCB={OffsetInstancingCB} OffsetPreviousInstancingCB={OffsetPreviousInstancingCB} ShaderSelection=0x{ShaderSelection:X}/Offset=0x{OffsetShaderSelection:X} ModelTypeKey=0x{ModelTypeKey:X8}/Source=0x{DonorModelType:X8}/Owned=0x{OffsetModelType:X8} Material=Owned=0x{OwnedMaterial:X}/Resource=0x{OwnedMaterialResource:X}/SHPK=0x{OwnedShaderPackage:X}/ConstantId={OwnedMaterialConstantId}/MaterialCaptured={MaterialCaptured}/MaterialLoaded={MaterialLoaded}/Path={OwnedMaterialPath}/Flags=0x{SourceMaterialFlags:X8}->0x{OwnedMaterialFlags:X8}/OwnedMaterialIndex={OwnedMaterialIndex}/PassMask=0x{SourcePassMask:X8}/AuxViews=0x{SourceAuxiliaryViewMask:X8}/CanonicalKeys={RendererSceneKeyCount}+{SubViewSceneKeyCount} View={View} SubView={SubView} SourceVB=0x{SourceVB:X} SourceIB=0x{SourceIB:X} SourceVertexDeclaration=0x{SourceVertexDeclaration:X} SourceStrides={SourceStream0Stride}/{SourceStream1Stride} SourceRange={SourceVertices}/{SourceStart}/{SourceIndices} Context=0x{Context:X} VB=0x{VB:X} VBResource=0x{VBResource:X} IB=0x{IB:X} IBResource=0x{IBResource:X} VertexDeclaration=0x{VertexDeclaration:X} Range={Vertices}/0/{Indices} Result=0x{Result:X}",
+            "StandaloneNativeSubmission BuilderInvoked={BuilderInvoked} Failure={Failure} ModelRenderer=0x{ModelRenderer:X} MaterialParams=0x{MaterialParams:X} ModelParams=0x{ModelParams:X} Model=0x{Model:X} RenderModelCallback=0x{RenderModelCallback:X}/0x{RenderModelCallbackFunction:X} ModelField38=0x{ModelField38:X} InstanceCB[{InstanceId}/CRC=0x20A30B34]=Source={SourceInstanceCB}/Owned={OwnedInstanceCB} WorldCB[{WorldId}]={WorldCB} InstancingCB[{InstancingId}]={InstancingCB} PreviousInstancingCB[{PreviousInstancingId}]={PreviousInstancingCB} OffsetWorldCB={OffsetWorldCB} OffsetInstancingCB={OffsetInstancingCB} OffsetPreviousInstancingCB={OffsetPreviousInstancingCB} ShaderSelection=0x{ShaderSelection:X}/Offset=0x{OffsetShaderSelection:X} ModelTypeKey=0x{ModelTypeKey:X8}/Source=0x{DonorModelType:X8}/Owned=0x{OffsetModelType:X8} Material=Owned=0x{OwnedMaterial:X}/Resource=0x{OwnedMaterialResource:X}/SHPK=0x{OwnedShaderPackage:X}/ConstantId={OwnedMaterialConstantId}/MaterialCaptured={MaterialCaptured}/MaterialLoaded={MaterialLoaded}/Path={OwnedMaterialPath}/Flags=0x{SourceMaterialFlags:X8}->0x{OwnedMaterialFlags:X8}/OwnedMaterialIndex={OwnedMaterialIndex}/PassMask=0x{SourcePassMask:X8}/AuxViews=0x{SourceAuxiliaryViewMask:X8}/CanonicalKeys={RendererSceneKeyCount}+{SubViewSceneKeyCount} View={View} SubView={SubView} SourceVB=0x{SourceVB:X} SourceIB=0x{SourceIB:X} SourceVertexDeclaration=0x{SourceVertexDeclaration:X} SourceStrides={SourceStream0Stride}/{SourceStream1Stride} SourceRange={SourceVertices}/{SourceStart}/{SourceIndices} Context=0x{Context:X} VB=0x{VB:X} VBResource=0x{VBResource:X} IB=0x{IB:X} IBResource=0x{IBResource:X} VertexDeclaration=0x{VertexDeclaration:X} Range={Vertices}/0/{Indices} Result=0x{Result:X}",
             item.Succeeded,
             item.Failure ?? "",
             item.ModelRenderer,
@@ -290,14 +290,15 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
             item.RenderModelCallback,
             item.RenderModelCallbackFunction,
             item.ModelField38,
-            FormatConstantBuffer(item.OnRenderModelConstant),
+            item.InstanceConstantId,
+            FormatConstantBuffer(item.SourceInstanceConstant),
+            FormatConstantBuffer(item.OwnedInstanceConstant),
             item.WorldConstantId,
             FormatConstantBuffer(item.WorldConstant),
             item.InstancingConstantId,
             FormatConstantBuffer(item.InstancingConstant),
             item.PreviousInstancingConstantId,
             FormatConstantBuffer(item.PreviousInstancingConstant),
-            FormatConstantBuffer(item.OffsetModelConstant),
             FormatConstantBuffer(item.OffsetWorldConstant),
             FormatConstantBuffer(item.OffsetInstancingConstant),
             FormatConstantBuffer(item.OffsetPreviousInstancingConstant),
@@ -388,7 +389,7 @@ internal sealed unsafe class TransparentDrawCorrelationTracer : IDisposable
     private static string FormatConstantBuffer(NativeConstantBufferProbe item)
     {
         var value = $"0x{item.Buffer:X}/Size={item.ByteSize}/Source=0x{item.SourcePointer:X}/Hash={item.ContentHash:X16}";
-        return item.ByteSize is 48 or 128
+        return item.ByteSize is 48 or 128 or 176
             ? $"{value}/Rows={FormatVector(item.Row0)};{FormatVector(item.Row1)};{FormatVector(item.Row2)}"
             : value;
     }

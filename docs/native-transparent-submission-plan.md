@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB和owned shader selection。source geometry/material/SHPK selection已脱离；Context恢复已集中为单一scope，并已建立internal持续rigid实例与frame/view去重。当前待实机验证canonical renderer/subview scene keys与不同source flags覆盖；正式API的主要阻塞是source 176-byte object constant、`Params2+0x38/+0x44`及可靠延迟回收边界。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB和owned shader selection。source geometry/material/SHPK selection已脱离，canonical renderer/subview scene keys已实机通过；Context恢复已集中为单一scope，并已建立internal持续rigid实例与frame/view去重。176-byte输入已确认为 `g_InstanceParameter`，当前构建改为按目标SHPK CRC安装Underpaint-owned neutral constant，等待实机验收。正式API的主要阻塞是 `Params2+0x38/+0x44`、剩余Model wrapper和可靠延迟回收边界。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 
@@ -348,4 +348,8 @@ World输入实测已经通过：六条有效 `DrawIndexed Count=3` 统一绑定�
 
 首次flags重建实测为 `0x15->0x15`，输出为当前测试material/view对应的一条Opaque与五条辅助draw，无Semitransparent；功能正确但仍缺source/owned不相同的判别样本。静态审计进一步确认 `Params2+0x38` low dword是上层pass/view request mask，`+0x3C/+0x3E`是source geometry index/alternate-builder dispatch，`+0x44`是辅助view bitmask。当前版本清掉后两项source geometry字段，暂时保留 `+0x38/+0x44`并明确记录；它们是下一阶段的source object/view边界，而不是材质协议。
 
-source shader selection依赖已删除。owned selection现在直接按CRC查询canonical `ModelRenderer.SceneKeys[20]`与`SubViewKeys[5]`，然后强制non-skinned model type；目标SHPK构造器default覆盖尚未解析的camera keys。Context保存/恢复已集中为单一scope。Underpaint同时增加internal持续rigid实例和 `FrameCounter+Context+view+subview` rendezvous去重，实例持有独立current/previous World CB并支持history reset；该能力仍受固定ABI、测试material、source 176-byte object constant以及 `+0x38/+0x44`限制，尚未公开。
+source shader selection依赖已删除。owned selection现在直接按CRC查询canonical `ModelRenderer.SceneKeys[20]`与`SubViewKeys[5]`，然后强制non-skinned model type；目标SHPK构造器default覆盖尚未解析的camera keys。实机得到 `CanonicalKeys=6+0`，仍生成一条Opaque与五条辅助draw，故当前目标material的canonical key替换已经关闭。Context保存/恢复已集中为单一scope。Underpaint同时增加internal持续rigid实例和 `FrameCounter+Context+view+subview` rendezvous去重，实例持有独立current/previous World CB并支持history reset；该能力仍受固定ABI、测试material、剩余Model wrapper以及 `+0x38/+0x44`限制，尚未公开。
+
+`OnRenderModelParams+0x10` 的真实身份也已定位。角色回调 `0x433270` 把该指针绑定到CharacterUtility登记的Context constant ID 34；目标SHPK的constant表把ID 34映射为CRC `0x20A30B34`、size 11，即176-byte `g_InstanceParameter`。现场回调对象的同一指针也等于 `CharacterBase+0x270 CharacterDataCBuffer`。Human自己的 `CustomizeParameterCBuffer` 位于 `+0xBF0`，由另一虚函数单独绑定，因此二者不能再统称为object constant。`g_InstanceParameter`是颜色、环境、角色灯光、wetness、wind/previous wind、眼部及头部等per-instance语义，不是transform或frame/view公共输入。
+
+当前构建不再复制carrier的176 bytes。它从目标ShaderPackage按CRC查询canonical runtime constant ID并校验11个`float4`，创建Underpaint-owned neutral `g_InstanceParameter`，显式初始化白色乘色/环境/角色灯光、无wetness的范围参数和默认head-up，其余扩展字段清零。在调用 `0x283320` 前，该constant同时写入复制的model params并安装到当前Context ID；统一Context scope会无条件恢复原值。下一次采集的验收点是日志 `InstanceCB[34/CRC=0x20A30B34]=Source=.../Owned=...` 两者资源与hash不同，所有有效 `Count=3` command绑定owned constant，且Opaque/辅助draw集合不退化。
