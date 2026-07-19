@@ -38,6 +38,7 @@ internal sealed class DemoWindow : Window, IDisposable
     private bool diagnosticForceOpaqueAlpha = true;
     private NativeDrawSnapshot? diagnosticSnapshot;
 #if DEBUG
+    private NativeOpaquePreviewController? nativeOpaquePreview;
     private string clearDebugLogState = "";
 #endif
     private bool boundaryStabilityTestEnabled;
@@ -73,6 +74,10 @@ internal sealed class DemoWindow : Window, IDisposable
         icon = null;
     }
 
+#if DEBUG
+    public void AttachNativeOpaquePreview(NativeOpaquePreviewController preview) => nativeOpaquePreview = preview;
+#endif
+
     public void StopWorldDraw()
     {
         if (underpaint is null)
@@ -107,6 +112,9 @@ internal sealed class DemoWindow : Window, IDisposable
         else
         {
             DrawDiagnostics();
+#if DEBUG
+            DrawNativeOpaquePreviewUi();
+#endif
         }
 
         ImGui.SliderFloat("Height offset (m)", ref heightOffset, -10f, 10f, "%.3f");
@@ -160,6 +168,29 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.TextUnformatted($"Spawned objects ({demoObjects.Count}):");
         DrawObjectList(position);
     }
+
+#if DEBUG
+    private void DrawNativeOpaquePreviewUi()
+    {
+        if (nativeOpaquePreview == null || !ImGui.CollapsingHeader("Native opaque preview"))
+            return;
+
+        ImGui.TextDisabled(nativeOpaquePreview.State);
+        if (!nativeOpaquePreview.IsVisible)
+        {
+            if (ImGui.Button("Show native opaque preview"))
+                nativeOpaquePreview.Show();
+        }
+        else if (ImGui.Button("Hide native opaque preview"))
+            nativeOpaquePreview.Hide();
+        ImGui.SameLine();
+        if (ImGui.Button("Clear EventHorizon logs"))
+            clearDebugLogState = DebugFileLog.Clear();
+        if (clearDebugLogState.Length != 0)
+            ImGui.TextDisabled(clearDebugLogState);
+        ImGui.TextDisabled("Show places a small native panel at a fixed world position three metres ahead.");
+    }
+#endif
 
     public void DrawWorld()
     {
@@ -240,13 +271,6 @@ internal sealed class DemoWindow : Window, IDisposable
 
         if (!ImGui.CollapsingHeader("Projection diagnostics"))
             return;
-
-#if DEBUG
-        if (ImGui.Button("Clear EventHorizon logs"))
-            clearDebugLogState = DebugFileLog.Clear();
-        if (clearDebugLogState.Length != 0)
-            ImGui.TextDisabled(clearDebugLogState);
-#endif
 
         ImGui.Checkbox("Force opaque alpha = 1", ref diagnosticForceOpaqueAlpha);
         ImGui.SliderFloat2("Jitter pixels", ref diagnosticJitterPixels, -1f, 1f, "%.3f");
