@@ -1,6 +1,6 @@
 # Underpaint 原生基本图形材质契约计划
 
-> 当前状态（2026-07-19）：本计划取代“继续适配透明衣服材质”作为 Underpaint 原生提交后端的主线。owned geometry、owned current/previous World CB、独立 shader selection和Context恢复边界继续保留；装备 `e0378` 只保留为历史半透明管线证据。实机已经证明`OnRenderMaterial -> 0x283320`是ModelRenderer的六类pass协议，不能承载只有三类pass的`bg.shpk`；原生BG路线改为评估`BGInstancingRenderer -> 0x290520 -> 0x290E10`，不再修补错误的builder/profile组合。
+> 当前状态（2026-07-19）：“复用游戏Model/BG material builder绘制基本图形”路线已终止。`0x283320`要求ModelRenderer六类pass协议，与三类pass的`bg.shpk`不兼容；匹配的`0x290520 -> 0x290E10`又会深度遍历完整BgParts资源图，不是独立primitive提交边界。Underpaint不伪造Model、BgParts或MDL运行时对象；主线回到已实机验证的Underpaint-owned G-buffer opaque backend。装备`e0378`和相关builder仅保留为历史管线证据。
 
 ## 目标
 
@@ -237,15 +237,17 @@ candidate-name/
 
 继续向上追踪后，`0x290520`没有普通直接caller；它由BG renderer初始化函数`0x28EAC0`注册到全局render callback表。回调边界为五个参数，除renderer和view/index外，一个参数持有实例位置/排序所需数据（函数直接读其间接数据的`+0x20..+0x28`世界位置并与当前camera origin计算sort depth），另一个参数持有scene-key descriptor/value map。这说明可复制边界若存在，应在render job生成该回调记录的一层，而不是`0x290E10`内部。
 
-### Phase 3：收敛internal后端
+对`0x290E10`的完整读集审计否定了这个候选：回调记录的首指针是多态BG对象（存在虚表调用），其`+0x30`再指向完整resource table。builder直接读该table的LOD ranges、36-byte submesh记录、vertex/index bindings、material数组和每LOD资源，再继续解引material resource、shader package、material constants、textures和samplers。这不是可从Underpaint的positions/indices/material独立构造的render item；伪造最小调用图实质上就是伪造整个BgParts/MDL运行时对象。按本计划的终止条件，BG builder路线到此关闭，不增加运行时probe。
 
-- 将提交核心与 `OpaquePrimitiveProfile` 分离。
-- 移除source stride=20和176-byte角色constant的rendezvous过滤。
-- 保留frame/view/TLS Context和command arena作为合法原生运行环境。
-- 完成多实例、同geometry复用、transform history、场景切换、删除及延迟释放。
-- 删除衣服专用capture、日志和按钮。
+### Phase 3：收敛Underpaint-owned opaque后端
 
-完成条件：内部API只表达geometry、profile、instance和transform。
+- 保留`D3D11GBufferBackend`已验证的原生G-buffer/depth提交时机、明确shader和owned资源。
+- 删除Model/BG builder、native-preview、专用draw capture及其所有角色/BgParts资源逻辑。
+- 保留可见的triangle、quad、fan、sphere和textured quad作为基本图形验收面。
+- 聚焦多draw list、纹理引用计数、快照替换、场景切换和插件卸载的稳定性。
+- 将motion/history、shadow caster和特殊透明层排序保留为后续独立课题，不阻塞opaque基本图形API。
+
+完成条件：公开API只表达geometry、G-buffer material tuple和texture，不暴露游戏Model、Material、SHPK、BgParts或command packet。
 
 ### Phase 4：单独研究半透明primitive profile
 
@@ -256,31 +258,29 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 | 部分 | 决策 |
 |---|---|
 | `0x283320` ModelRenderer pass builder | 仅保留为角色/模型协议研究成果；从BG primitive profile淘汰 |
-| `0x290520 -> 0x290E10` BG builder | 新的静态候选；先确认是否存在最小可复制batch input |
-| 同线程、同Context、同view时机 | 保留 |
-| owned VB/IB/VertexDeclaration | 保留，改由profile定义布局 |
-| owned current/previous World CB | 保留 |
-| shader selection与canonical keys | 保留，改由profile/SHPK报告驱动 |
-| Context集中保存恢复 | 保留 |
+| `0x290520 -> 0x290E10` BG builder | 淘汰；强依赖完整BgParts/MDL resource graph |
+| 原生G-buffer/depth rendezvous | 保留；这是当前opaque基本图形的合法frame/view环境 |
+| Underpaint-owned D3D geometry/shaders/textures | 保留；由后端明确创建和延迟释放 |
+| ModelRenderer scene keys / SHPK selection | 删除；不再是基本图形API的输入 |
+| `Graphics::Kernel::Context` 临时替换 | 删除；正式后端不修改该native Context |
 | `e0378`衣服 `.mtrl` | 删除 |
 | 衣服 `20/24` vertex payload | 删除 |
-| 固定176-byte角色 `g_InstanceParameter` | 从通用核心删除；只有profile实际声明才创建对应constant |
-| source stride/角色constant rendezvous过滤 | Phase 3删除 |
+| 176-byte角色 `g_InstanceParameter` | 删除 |
+| source stride/角色constant rendezvous过滤 | 删除 |
 | 同步G-buffer Copy+Map readback | 永久禁止 |
 
 ## 验收标准
 
-第一版 `OpaquePrimitiveProfile` 完成必须满足：
+第一版opaque基本图形后端完成必须满足：
 
-- 文件contract可由离线报告完整复现；
 - Underpaint不修改任何共享Model、Material、角色或场景对象；
-- 基本图形使用owned geometry、transform和所有per-instance可变数据；
-- commands由原生builder生成，不patch packet；
+- 基本图形使用Underpaint-owned geometry、shader、texture和不可变published snapshot；
+- 不调用Model/BG builder，不patch game command packet；
 - quad/cube肉眼稳定显示数百帧；
-- 相机运动、首次出现、瞬移和重新出现时current/previous正确；
-- 场景切换、隐藏、删除和插件卸载无资源提前释放或Context污染；
+- 原生场景几何能按depth正确遮挡，提交结果正常参与deferred lighting；
+- 场景切换、隐藏、删除和插件卸载无资源提前释放或D3D状态污染；
 - Debug/Release和现有tests通过；
-- 文档记录profile的精确支持边界，不宣称任意Material或vertex layout。
+- 文档明确记录motion vectors、shadow caster和特殊透明排序尚未支持。
 
 ## 进度记录
 
@@ -294,3 +294,4 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 | 2026-07-19 | BG current shader输入补齐 | probe确认active pass 1的VS/PS均有效；崩溃位于同一builder生成的第二条command snapshot，owned路径缺少`Context+0x878/+0x880`回退输入 | 实机验证两条command均生成、Context恢复且三角形可见 |
 | 2026-07-19 | Model/BG协议错配确认 | 安全闸门捕获builder内部`ActivePass=6`；离线SHPK对照确认BG全家族只有三类pass，`0x283320`属于六类pass的ModelRenderer协议 | 停止`bg.shpk -> 0x283320`；静态审计BG的`0x290520 -> 0x290E10`最小batch边界 |
 | 2026-07-19 | BG callback边界 | `0x290520`由`0x28EAC0`注册到render callback表；它在进入batch builder前已从实例记录和camera计算sort depth，并接收scene-key map | 定位生成该回调记录的render job，判断其是否可脱离完整BgParts对象构造 |
+| 2026-07-19 | BG builder路线终止 | `0x290E10`的完整读集包含多态BG对象、LOD/submesh/material/resource tables及其深层资源；不存在独立primitive input | 删除native-preview实验路径；以已验证的Underpaint-owned G-buffer opaque backend继续基本图形工程化 |
