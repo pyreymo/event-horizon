@@ -39,6 +39,7 @@ internal sealed class DemoWindow : Window, IDisposable
     private NativeDrawSnapshot? diagnosticSnapshot;
 #if DEBUG
     private NativeOpaquePreviewController? nativeOpaquePreview;
+    private string clearDebugLogState = "";
 #endif
     private bool boundaryStabilityTestEnabled;
     private Vector3 boundaryStabilityTestPosition;
@@ -182,7 +183,12 @@ internal sealed class DemoWindow : Window, IDisposable
         }
         else if (ImGui.Button("Hide native opaque preview"))
             nativeOpaquePreview.Hide();
-        ImGui.TextDisabled("The native quad stays three metres in front of the active camera.");
+        ImGui.SameLine();
+        if (ImGui.Button("Clear EventHorizon logs"))
+            clearDebugLogState = DebugFileLog.Clear();
+        if (clearDebugLogState.Length != 0)
+            ImGui.TextDisabled(clearDebugLogState);
+        ImGui.TextDisabled("Show places a small native panel at a fixed world position three metres ahead.");
     }
 #endif
 

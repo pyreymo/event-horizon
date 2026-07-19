@@ -13,6 +13,7 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
     private readonly UnderpaintRenderer? underpaint;
     private NativeGeometry? geometry;
     private NativeRigidInstance? instance;
+    private Matrix4x4 previewWorld;
     private string state = "Hidden";
 
     public NativeOpaquePreviewController(UnderpaintRenderer? underpaint)
@@ -32,13 +33,26 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
             state = "Unavailable: Underpaint failed to initialize";
             return;
         }
+        if (!TryCreatePreviewWorld(out previewWorld) || !TryGetView(out var view))
+        {
+            state = "Unavailable: no active world camera";
+            return;
+        }
         geometry ??= underpaint.CreateNativeGeometry(
-            [new(-0.8f, -0.8f, 0f), new(0.8f, -0.8f, 0f), new(0.8f, 0.8f, 0f), new(-0.8f, 0.8f, 0f)],
-            [new(0f, 1f), new(1f, 1f), new(1f, 0f), new(0f, 0f)],
-            [0, 1, 2, 2, 3, 0, 2, 1, 0, 0, 3, 2]
+            [
+                new(-0.8f, -0.8f, -0.015f),
+                new(0.8f, -0.8f, -0.015f),
+                new(0.8f, 0.8f, -0.015f),
+                new(-0.8f, 0.8f, -0.015f),
+                new(-0.8f, -0.8f, 0.015f),
+                new(0.8f, -0.8f, 0.015f),
+                new(0.8f, 0.8f, 0.015f),
+                new(-0.8f, 0.8f, 0.015f),
+            ],
+            [new(0f, 1f), new(1f, 1f), new(1f, 0f), new(0f, 0f), new(0f, 1f), new(1f, 1f), new(1f, 0f), new(0f, 0f)],
+            [0, 1, 2, 2, 3, 0, 6, 5, 4, 4, 7, 6]
         );
-        var worldView = TryGetPreviewWorldView(out var currentWorldView) ? currentWorldView : Matrix4x4.CreateTranslation(0f, 0f, 1f);
-        instance = underpaint.CreateNativeRigidInstance(geometry, worldView);
+        instance = underpaint.CreateNativeRigidInstance(geometry, previewWorld * view);
         state = "Waiting for the native render rendezvous";
         DebugFileLog.Information(LogSource, "Native opaque preview shown");
     }
@@ -47,6 +61,7 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
     {
         var current = instance;
         instance = null;
+        previewWorld = default;
         current?.Dispose();
         state = "Hidden";
         if (current != null)
@@ -66,8 +81,8 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
         }
         try
         {
-            if (TryGetPreviewWorldView(out var worldView))
-                current.UpdateWorldView(worldView);
+            if (TryGetView(out var view))
+                current.UpdateWorldView(previewWorld * view);
             if (current.HasSubmitted)
                 state = "Submitted: camera-facing native opaque quad";
         }
@@ -86,34 +101,35 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
         geometry = null;
     }
 
-    private static bool TryGetPreviewWorldView(out Matrix4x4 worldView)
+    private static bool TryCreatePreviewWorld(out Matrix4x4 world)
     {
-        worldView = default;
+        world = default;
         var control = Control.Instance();
         var camera = control == null ? null : control->CameraManager.GetActiveCamera();
         var device = Device.Instance();
         if (camera == null || device == null)
             return false;
 
-        var center = GetScreenRayPoint(camera, device->Width, device->Height, 0.5f, 0.48f);
+        const float distance = 3f;
+        var center = GetScreenRayPoint(camera, device->Width, device->Height, 0.5f, 0.48f, distance);
         var right = Vector3.Normalize(
-            GetScreenRayPoint(camera, device->Width, device->Height, 0.6f, 0.48f)
-                - GetScreenRayPoint(camera, device->Width, device->Height, 0.4f, 0.48f)
+            GetScreenRayPoint(camera, device->Width, device->Height, 0.6f, 0.48f, distance)
+                - GetScreenRayPoint(camera, device->Width, device->Height, 0.4f, 0.48f, distance)
         );
         var up = Vector3.Normalize(
-            GetScreenRayPoint(camera, device->Width, device->Height, 0.5f, 0.38f)
-                - GetScreenRayPoint(camera, device->Width, device->Height, 0.5f, 0.58f)
+            GetScreenRayPoint(camera, device->Width, device->Height, 0.5f, 0.38f, distance)
+                - GetScreenRayPoint(camera, device->Width, device->Height, 0.5f, 0.58f, distance)
         );
         var cameraPosition = new Vector3(camera->SceneCamera.Position.X, camera->SceneCamera.Position.Y, camera->SceneCamera.Position.Z);
         var forward = Vector3.Normalize(center - cameraPosition);
-        var world = new Matrix4x4(
-            right.X * 1.5f,
-            right.Y * 1.5f,
-            right.Z * 1.5f,
+        world = new Matrix4x4(
+            right.X * 0.5f,
+            right.Y * 0.5f,
+            right.Z * 0.5f,
             0f,
-            up.X,
-            up.Y,
-            up.Z,
+            up.X * 0.5f,
+            up.Y * 0.5f,
+            up.Z * 0.5f,
             0f,
             forward.X,
             forward.Y,
@@ -124,8 +140,17 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
             center.Z,
             1f
         );
-        var view = *(Matrix4x4*)&camera->SceneCamera.ViewMatrix;
-        worldView = world * view;
+        return true;
+    }
+
+    private static bool TryGetView(out Matrix4x4 view)
+    {
+        view = default;
+        var control = Control.Instance();
+        var camera = control == null ? null : control->CameraManager.GetActiveCamera();
+        if (camera == null)
+            return false;
+        view = *(Matrix4x4*)&camera->SceneCamera.ViewMatrix;
         return true;
     }
 
@@ -134,14 +159,15 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
         uint viewportWidth,
         uint viewportHeight,
         float normalizedX,
-        float normalizedY
+        float normalizedY,
+        float distance
     )
     {
         var point = new FFXIVClientStructs.FFXIV.Common.Math.Vector2(normalizedX * viewportWidth, normalizedY * viewportHeight);
         var ray = camera->SceneCamera.ScreenPointToRay(point);
         var origin = new Vector3(ray.Origin.X, ray.Origin.Y, ray.Origin.Z);
         var direction = Vector3.Normalize(new Vector3(ray.Direction.X, ray.Direction.Y, ray.Direction.Z));
-        return origin + direction;
+        return origin + direction * distance;
     }
 }
 #endif

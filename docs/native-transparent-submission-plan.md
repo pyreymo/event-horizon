@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/Model/SHPK selection/角色实例常量及pass/view mask均已脱离；canonical scene keys、受限mask和最小Model facade均已实机通过。当前优先级已经纠正为先取得可肉眼确认的原生不透明预览。固定view-space Z `+5`版本已经进入`Submitted`，但实机仍无可见像素；它只证明command成立，不能证明位置在当前相机前方且未被场景深度遮挡。当前版本复用旧近似预览已实机工作的`Control.CameraManager.GetActiveCamera().SceneCamera.ScreenPointToRay`，在屏幕中心近处构造camera-facing World，再逐帧乘真实View得到原生所需WorldView。正反双绕序quad和完整UV不变，等待实机验收。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/Model/SHPK selection/角色实例常量及pass/view mask均已脱离；canonical scene keys、受限mask和最小Model facade均已实机通过。原生材质像素现已首次肉眼出现，但上一版每帧重建屏幕中心World，造成整屏贴脸且闪烁。当前预览改为点击时在中心射线三米处固定一个小型World面板，后续只用当前View更新WorldView；正反面分离0.03米，避免共面深度竞争。清理日志按钮同时恢复。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 
@@ -364,4 +364,4 @@ mask重建实机已经通过：`0x01C00000->0x01C00000`与`3->3`仍生成一条O
 
 当前测试入口进一步改为internal持续rigid soak：两个实例共享同一owned geometry，分别维护独立128-byte current/previous World CB；主实例目标180次提交，副实例90次后删除，主实例中途执行一次显式history reset。每个实例记录submission、history reset、temporal advance、同frame重复提交及首末frame，D3D侧只汇总同时匹配owned slot0和IB的完整draw family。它用于一次实测覆盖多实例、同geometry复用、逐帧history、frame/view去重和删除后停止提交，不恢复通用command tracer。
 
-但command执行并不等于可见像素，且此前实机从未肉眼看到原生三角形，因此持续soak暂缓。当前构建删除旧透明capture、native duplicate、一次性triangle和soak UI，以及对应的container/consumer/command日志控制器。唯一保留的debug入口是 `Show native opaque preview`：它创建带0..1 UV的双面quad。前两版因错误camera入口持续等待；固定view-space Z `+5`版随后成功进入`Submitted`，但实机仍无可见像素。为消除Z方向、相机朝向和场景遮挡三个位置变量，当前实现直接复用旧近似预览已工作的`Control.CameraManager.GetActiveCamera().SceneCamera.ScreenPointToRay`：从屏幕中心及相邻射线构造近距离World位置和right/up基向量，再乘当前SceneCamera View写入owned current/previous WorldView，并逐帧更新。builder接受后UI显示`Submitted`。若该位置闭环后仍不可见，剩余范围才只在material discard/GBuffer输出和vertex semantic。
+屏幕射线版本首次产生了肉眼可见的原生材质图案，关闭了“command是否有像素”的问题；但它错误地在每个framework update重新把World锚定到中心射线，而且一米距离配合过大基向量几乎覆盖整屏。正反两组索引还完全共面，存在深度竞争。修正版只在点击Show时取一次中心射线，在三米处建立固定World锚点，缩小right/up基到0.5米；之后相机移动只更新`FixedWorld * CurrentView`，物体不再像HUD贴住屏幕。正反面改为相隔0.03米的两个面，保留双向可见性但消除共面竞争。`Clear EventHorizon logs`也已恢复，后续每轮可从干净日志开始。

@@ -41,6 +41,44 @@ internal static class DebugFileLog
 #endif
     }
 
+    public static string Clear()
+    {
+#if DEBUG
+        lock (StateLock)
+        {
+            if (PluginInterface == null || PluginLog == null)
+                return "Debug log is not initialized.";
+
+            var directory = Path.Combine(PluginInterface.ConfigDirectory.FullName, "debug-logs");
+            try
+            {
+                DisposeLogger();
+                var deleted = 0;
+                if (Directory.Exists(directory))
+                {
+                    foreach (var path in Directory.EnumerateFiles(directory, "event-horizon-*.log"))
+                    {
+                        File.Delete(path);
+                        deleted++;
+                    }
+                }
+
+                CreateLogger(PluginInterface, PluginLog);
+                return $"Cleared {deleted} EventHorizon debug log file(s).";
+            }
+            catch (Exception exception)
+            {
+                PluginLog.Warning(exception, "Failed to clear the debug file log.");
+                if (Logger == null)
+                    CreateLogger(PluginInterface, PluginLog);
+                return $"Clear failed: {exception.Message}";
+            }
+        }
+#else
+        return "Debug logging is unavailable in Release builds.";
+#endif
+    }
+
     [Conditional("DEBUG")]
     public static void Debug(string source, string messageTemplate, params object?[] propertyValues)
     {
