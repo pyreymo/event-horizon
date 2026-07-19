@@ -1,5 +1,7 @@
 # 原生透明提交逆向计划
 
+> Underpaint 原生基本图形后端的当前主计划已迁移至 [native-primitive-material-plan.md](native-primitive-material-plan.md)。本文保留为透明衣服管线研究和历史证据，不再指导基本图形的材质、vertex ABI或产品验收。
+>
 > 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/Model/SHPK selection/角色实例常量及pass/view mask均已脱离；canonical scene keys、受限mask和最小Model facade均已实机通过。逐帧Opaque capture确认shader、layout、材质资源、World CB以及RTV/DSV、viewport、blend/depth/rasterizer/topology均稳定，也没有重复主视图draw。按目标模型真实ABI修正vertex payload后肉眼闪烁仍存在。一次在Draw hook内同步复制并立即Map当前G-buffer输出的诊断尝试导致游戏硬卡死/崩溃，现已完整回退；此路径不得再次使用。后续若需要像素级证据，必须采用异步GPU完成边界或外部帧捕获，而不能阻塞当前render command链。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
