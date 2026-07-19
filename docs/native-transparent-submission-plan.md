@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/Model/SHPK selection/角色实例常量及pass/view mask均已脱离；canonical scene keys、受限mask和最小Model facade均已实机通过。原生材质像素现已首次肉眼出现，World锚点和尺寸也已稳定；剩余闪烁表现为黑白正面与红色反面无规律交替，直接对应预览同时提交的两层双向表面。当前版本只保留面向创建时相机的单层正面，index count为6；UI显示builder submission计数，Hide时写一条同名汇总日志，但不把它误称为GPU DrawIndexed计数。清理日志按钮保留。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实可消费Underpaint-owned geometry、显式加载的不透明Material、non-skinned current/previous World CB、owned `g_InstanceParameter`和owned shader selection。source geometry/material/Model/SHPK selection/角色实例常量及pass/view mask均已脱离；canonical scene keys、受限mask和最小Model facade均已实机通过。原生材质像素、固定World锚点、尺寸和单面几何均已实机成立，但单面仍闪烁。日志显示11.9秒内1848次builder submission，约155次/秒，符合逐帧一次而非重复风暴。当前修正把`FixedWorld * CurrentView`从framework线程移入原生render rendezvous，在生成本帧current/previous CB前同线程采样；同时复用现有owned VB/IB过滤器自动捕获前四次submission的实际DrawIndexed汇总。清理日志按钮保留。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 
@@ -364,4 +364,4 @@ mask重建实机已经通过：`0x01C00000->0x01C00000`与`3->3`仍生成一条O
 
 当前测试入口进一步改为internal持续rigid soak：两个实例共享同一owned geometry，分别维护独立128-byte current/previous World CB；主实例目标180次提交，副实例90次后删除，主实例中途执行一次显式history reset。每个实例记录submission、history reset、temporal advance、同frame重复提交及首末frame，D3D侧只汇总同时匹配owned slot0和IB的完整draw family。它用于一次实测覆盖多实例、同geometry复用、逐帧history、frame/view去重和删除后停止提交，不恢复通用command tracer。
 
-屏幕射线版本首次产生了肉眼可见的原生材质图案，关闭了“command是否有像素”的问题；固定World与缩小尺寸随后也通过。剩余闪烁明确表现为黑白正面和红色反面交替，说明为双向可见而同时提交两层表面本身就是错误设计，0.03米间隔没有消除它们在多pass/depth流程中的竞争。当前预览删除反面和第二层顶点，只保留面向创建时相机的单层6-index正面。为了恢复必要但不扩张的诊断，`NativeRigidInstance`只累计builder submission次数；UI实时显示，Hide时记录`BuilderSubmissions`和`IndexCount=6`。这不是实际GPU draw count，若单面仍异常才增加一次性owned VB/IB DrawIndexed计数。`Clear EventHorizon logs`保持可用。
+屏幕射线版本首次产生了肉眼可见的原生材质图案，固定World、缩小尺寸和单层6-index正面随后也通过，但单面仍闪烁，故双层竞争不是唯一根因。干净日志的`BuilderSubmissions=1848`覆盖11.9秒，约155次/秒，支持每游戏帧一次而非重复提交。当前最直接风险是framework线程按自己的更新时机计算WorldView，而render线程稍后按另一时机生成current/previous CB。新internal入口只保存不可变FixedWorld；在`0x283320` rendezvous所在render线程取得`Control.CameraManager`当前View，同线程计算WorldView、推进previous并提交。实际draw统计不新增hook：复用D3D后端已有的owned VB/IB精确过滤 capture，Show后自动收集前四次builder submission并输出`Pass/DrawType/Count:xN`汇总。`Clear EventHorizon logs`保持可用。

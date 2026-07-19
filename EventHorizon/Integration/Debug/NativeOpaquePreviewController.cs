@@ -14,6 +14,7 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
     private NativeGeometry? geometry;
     private NativeRigidInstance? instance;
     private Matrix4x4 previewWorld;
+    private bool drawCaptureActive;
     private string state = "Hidden";
 
     public NativeOpaquePreviewController(UnderpaintRenderer? underpaint)
@@ -33,7 +34,7 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
             state = "Unavailable: Underpaint failed to initialize";
             return;
         }
-        if (!TryCreatePreviewWorld(out previewWorld) || !TryGetView(out var view))
+        if (!TryCreatePreviewWorld(out previewWorld))
         {
             state = "Unavailable: no active world camera";
             return;
@@ -43,7 +44,9 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
             [new(0f, 1f), new(1f, 1f), new(1f, 0f), new(0f, 0f)],
             [0, 1, 2, 2, 3, 0]
         );
-        instance = underpaint.CreateNativeRigidInstance(geometry, previewWorld * view);
+        instance = underpaint.CreateNativeWorldRigidInstance(geometry, previewWorld);
+        underpaint.BeginNativeGeometryDrawCapture(geometry);
+        drawCaptureActive = true;
         state = "Waiting for the native render rendezvous";
         DebugFileLog.Information(LogSource, "Native opaque preview shown");
     }
@@ -53,6 +56,7 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
         var current = instance;
         instance = null;
         previewWorld = default;
+        CompleteDrawCapture("preview-hidden");
         var submissionCount = current?.SubmissionCount ?? 0;
         current?.Dispose();
         state = "Hidden";
@@ -77,8 +81,8 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
         }
         try
         {
-            if (TryGetView(out var view))
-                current.UpdateWorldView(previewWorld * view);
+            if (drawCaptureActive && current.SubmissionCount >= 4)
+                CompleteDrawCapture("four-builder-submissions");
             if (current.HasSubmitted)
                 state = $"Submitted: native opaque panel ({current.SubmissionCount} builder calls)";
         }
@@ -139,15 +143,25 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
         return true;
     }
 
-    private static bool TryGetView(out Matrix4x4 view)
+    private void CompleteDrawCapture(string reason)
     {
-        view = default;
-        var control = Control.Instance();
-        var camera = control == null ? null : control->CameraManager.GetActiveCamera();
-        if (camera == null)
-            return false;
-        view = *(Matrix4x4*)&camera->SceneCamera.ViewMatrix;
-        return true;
+        if (!drawCaptureActive || underpaint == null)
+            return;
+        drawCaptureActive = false;
+        underpaint.CompleteNativeGeometryDrawCapture(reason);
+        if (!underpaint.TryTakeNativeGeometryDrawCapture(out var capture))
+            return;
+
+        var groups = capture
+            .Draws.GroupBy(draw => $"{draw.Pass}/{draw.DrawType}/Count={draw.ElementCount}")
+            .Select(group => $"{group.Key}:x{group.Count()}");
+        DebugFileLog.Information(
+            LogSource,
+            "Native preview actual draw capture Reason={Reason} Draws={Draws} Groups={Groups}",
+            capture.Reason,
+            capture.Draws.Count,
+            string.Join(",", groups)
+        );
     }
 
     private static Vector3 GetScreenRayPoint(
