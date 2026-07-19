@@ -227,6 +227,10 @@ candidate-name/
 
 当前版本已硬性切换为selection probe-only：调用与builder相同的原生SHPK resolver，记录解析后的descriptor、当前active pass以及16个pass槽对应的VS/PS索引和对象指针，然后主动停止实例，绝不进入`0x283320`。探针只读取resolver和command snapshot在空VS解引用之前已经读取成功的descriptor/table，不解引用选出的shader对象。只有probe证明当前实际请求的pass有合法shader后，才允许重新开放builder。
 
+2026-07-19安全probe实机结果为`ActivePass=1`，slot 0解析到非空`VS4/PS0`；pass 2的`VS5/PS3`也非空。这排除了目标BG材质、builder入口主pass permutation和resolver失败。反汇编显示`sub_140283AC0`先直接snapshot并push第一条command，随后在`0x283E73`通过`sub_1402EFBE0`生成第二条command；历史崩溃恰好发生在第二条snapshot。该snapshot既可能在selection状态被消费后回退到`Context+0x878/+0x880`的current VS/PS，也可能在builder内部切换pass后遇到descriptor空槽；入口probe本身不能区分二者。owned路径此前只安装了descriptor，没有安装current shader槽，这是需要先补齐的明确调用边界缺口。
+
+当前实现因此不再停留于probe-only：在resolver证明active pass有效后，将同一slot的VS、PS和descriptor一起安装到TLS Context，再调用builder；三者都由统一Context scope保存并无条件恢复。这补齐的是原生builder的调用级shader输入，不是材质特判，也不通过裁掉builder生成的第二条command规避问题。另增加一个仅在Underpaint自己的同步提交期间生效的snapshot安全闸门：builder内任意command若仍将以空VS/PS进入`sub_14023B920`，就走该函数原有的失败返回并在builder返回后报告实际active pass；其他游戏提交完全透传。这样本轮验证即使推翻current-shader假设，也不会再触发同一native AV。
+
 ### Phase 3：收敛internal后端
 
 - 将提交核心与 `OpaquePrimitiveProfile` 分离。
@@ -280,3 +284,4 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 | 2026-07-19 | Phase 2实现中 | 衣服材质/vertex ABI和carrier过滤已从提交路径移除；Debug/Release构建通过 | 用户显示preview并采集一次bounded draw capture |
 | 2026-07-19 | BG scene-key修正 | 首次实机在提交前失败：旧代码强制向`bg.shpk`写入角色model-type key；已改为只覆盖目标SHPK声明的canonical keys | 再次实机验证material callback和实际opaque draw |
 | 2026-07-19 | BG builder崩溃隔离 | 两次修正后第三次仍在同一空VS读取处崩溃；停止推测式提交，改为resolver probe-only | 安全采集实际descriptor的16个pass槽，确定缺失shader的精确原因 |
+| 2026-07-19 | BG current shader输入补齐 | probe确认active pass 1的VS/PS均有效；崩溃位于同一builder生成的第二条command snapshot，owned路径缺少`Context+0x878/+0x880`回退输入 | 实机验证两条command均生成、Context恢复且三角形可见 |
