@@ -463,3 +463,29 @@ Underpaint现在在一次性arm命中的兼容 `20/24` 现场执行以下最小�
 2. 这些command是否统一消费独立128-byte world输入，而不再依赖角色joint palette。
 
 若builder不再生成command，唯一直接缺口就是当前借用material缺少non-skinned permutation；此时应进入独立不透明material加载/params构造，不应回到角色Model工厂、骨骼链或command packet patching。
+
+### 实机结果
+
+non-skinned world PoC成功。donor的World槽为空，而Underpaint自有128-byte World CB为单位矩阵加view-space Z `+5`；model-type key从skinned `0x9C14C8E9` 切为non-skinned `0x4123B1A3`。builder生成六条有效 `DrawIndexed Count=3`，全部绑定插件VB/IB，并统一出现同一个新的128-byte VS constant。目标材质具有可用的non-skinned shader permutation，B边界成立。
+
+## 2026-07-19 owned material selection PoC
+
+IDA确认 `0x281DD0` 中有两段可以直接复用、无需Model carrier的原生职责：
+
+- `0x17E2E10 / 0x17E2FC0`：从 `ShaderPackage` 构造/销毁一次调用级shader selection。scene-key values来自当前frame arena，SHPK本身采用引用计数。
+- `0x2F9940`：接收shader selection和 `Render::Material`，把material shader-key values接入selection，并把 `MaterialParameterCBuffer`、texture resources及sampler flags安装到当前TLS Context。
+
+Underpaint现在只增加一个窄的 `OnRenderMaterial` 关联hook，用同一栈上params地址把当前 `Material*` 传到紧随其后的 `0x283320`；不记录跨帧临时指针。首次arm为该Material的 `MaterialResourceHandle` 增加Underpaint自己的引用并记录资源路径。实际重复提交执行：
+
+```text
+retained MaterialResourceHandle -> Render::Material -> ShaderPackage
+  -> 原生构造独立 shader selection
+  -> 按CRC复制当前view共有的scene-key values
+  -> model-type key = non-skinned
+  -> 原生material helper绑定material CB/textures/sampler flags
+  -> Underpaint geometry + World CB -> 0x283320
+  -> 恢复material constant、每个texture slot、World和geometry
+  -> 销毁selection
+```
+
+这版仍在第一次arm时从现场捕获material resource，目的是先验证resource lifetime、独立selection和精确Context恢复。第二次arm会复用Underpaint已经持有的resource，不再采用当次source Material作为目标。日志输出source/owned Material、resource、SHPK、路径和 `MaterialCaptured`；连续两次arm应分别为 `true/false`，owned身份稳定且两次都生成六条有效 `Count=3`。通过后用日志中的稳定路径调用 `ResourceManager.GetResourceSync`，即可把首次捕获替换为显式材质加载，并随后放宽 `20/24` source过滤。

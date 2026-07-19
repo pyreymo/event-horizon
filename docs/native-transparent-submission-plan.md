@@ -1,6 +1,6 @@
 # 原生透明提交逆向计划
 
-> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实能让插件自有 VB/IB 自动生成一条 Opaque 和五条辅助 view command，均为 `Count=3`。资源创建、生命周期、线程 Context 几何绑定与恢复现已迁入独立 `ffxiv-underpaint` 仓库；该路径不要求目标角色、装备槽或指定 SHPK，只等待一个 `20/24` vertex ABI 兼容现场。上一版把全零的 48-byte `g_InstancingMatrix` 当成 world transform，实测和当前客户端静态分析已否定该假设。当前 PoC 改为在 pass builder 边界切换 copied shader selection 的 model-type key，并绑定 Underpaint 自有 128-byte current/previous world constant，从角色 skinned palette 路径切到 non-skinned world 路径。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
+> 2026-07-19 状态：原生 pass builder `ffxiv_dx11.exe+0x283320` 已证实能让插件自有 VB/IB 和128-byte current/previous World CB自动生成一条Opaque和五条辅助view command，均为 `Count=3`；shader model-type key已从角色skinned路径成功切到non-skinned。当前PoC继续拆除material donor：Underpaint在首次arm时为命中材质的 `MaterialResourceHandle` 持有独立引用，此后每次从该材质SHPK重新构造shader selection、迁入当前view的同名scene keys，并调用游戏原生material helper绑定材质constant和textures；所有Context槽位均同步恢复。该版本待实机验证。旧近似后端保持冻结且行为未改。完整证据见 [transparent-draw-correlation.md](transparent-draw-correlation.md)。
 
 ## 文档目的
 
@@ -329,3 +329,7 @@ A/C 是两份 pass-specific packet
 因此 B 的最小验证边界就在 `0x283320`：完整复制 `OnRenderModelParams`、`OnRenderMaterialParams2`、shader selection及其key value数组，把副本的model-type key由skinned改为non-skinned，并仅在同步重复调用期间把Context的World槽替换为Underpaint自有128-byte constant。该constant的current和previous都设置为同一个向前5单位的矩阵；几何、World槽和所有Context借用状态都在 `finally` 中恢复。实现不修改共享Model、Material、角色、骨骼、palette或history，也不跨帧保存临时native指针。
 
 下一次实机采集只需点击一次 `Arm custom native triangle`。日志应显示不同的原/副本shader-selection地址、同一个model-type key、donor为skinned value而副本为non-skinned value，以及独立的128-byte World CB；其前三行预期为单位矩阵并在第三行W包含 `5`。需要确认六条 `Count=3` 是否仍生成并统一采用新world输入。若没有生成command，结论也很明确：当前借用material没有non-skinned permutation，下一步应换独立不透明material，而不是再追角色transform。
+
+World输入实测已经通过：六条有效 `DrawIndexed Count=3` 统一绑定插件VB/IB及同一128-byte VS constant，目标材质也确实存在non-skinned permutation。当前material PoC不再复制donor shader-selection作为最终选择器，而是调用原生selection构造/销毁函数，以Underpaint持有的SHPK创建独立key存储；只按CRC迁入当前view共有的scene key，随后强制non-skinned。游戏的material helper负责安装 `MaterialParameterCBuffer`、textures和sampler flags，Underpaint在调用后逐槽恢复。
+
+首次arm仍从同步 `OnRenderMaterial -> 0x283320` 链取得一个有效 `Material*`，并给其resource handle增加自己的ref；这一步用于验证生命周期、selector重建和material binding，而不是最终API。日志新增source/owned Material、resource、SHPK、路径及 `MaterialCaptured`。第一次应为 `Captured=true`，同一插件生命周期再次arm应为 `false` 且owned身份/路径稳定。验证通过后，下一步将该已记录路径改由 `ResourceManager.GetResourceSync` 显式加载，届时可移除对source material和 `20/24` donor selector的要求。
