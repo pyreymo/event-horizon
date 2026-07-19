@@ -179,6 +179,12 @@ candidate-name/
 
 成功判据不是“代码走到builder”，而是同一次有界采集中同时出现：selection `+0x00`保持零且resolver返回非零descriptor、builder command数量/SortKey/view/shader合理、最终owned geometry draw执行、current/previous World相同。若失败，按最先失败的明确边界回退一个变量；不由一次失败推导完整render job必需。
 
+2026-07-19实机已经越过resolver并稳定执行owned quad：一次有界捕获得到4条Opaque `DrawIndexed Count=6`和15条辅助draw，四条Opaque的VS、PS、input layout及7个SRV地址完全一致，证明零seed selection、resolver、`0x283320`和固定目标Material纹理均能独立工作。`OnRenderMaterial`传入的`materialIndex=0`不是装备slot；静态上它只会被转交给`Model.RenderMaterialCallback`，而owned零值Model facade没有该callback，因此当前路径中这个0没有选择头部或身体装备。
+
+肉眼对照同时暴露了下一项残留：裸体时为白色发光方块，只穿头或身体时出现同一固定`e0378` atlas的不同着色，叠穿时可能在白色与atlas之间切换，头+身时稳定采用头部对应外观。这说明当前rendezvous的TLS Context不只是frame/view公共状态，还残留当前carrier已经安装的Character SHPK常量。owned路径已经替换World、`g_InstanceParameter`、目标material constant和目标material textures，但selected character permutation还会消费其他per-character绑定，例如customize/stain/character-lighting一类constant；当前每帧由哪个geometry/material调用先命中rendezvous，决定了这些未覆盖槽的来源。
+
+这项结果不要求恢复装备slot追踪，也不要求先构造完整render item。下一步只反射当前selected VS/PS实际使用的constant/resource binding，将其分类为frame/view公共输入和Character专属输入；前者保留，后者用Underpaint-owned neutral constant完整覆盖。若所有实际使用的非view绑定均可独立提供，则继续保留`0x283320`最小边界；只有存在无法从Character之外表达的必需输入时才上移。
+
 ### Phase 0：离线契约分析器
 
 - 复用Penumbra.GameData解析 `.mdl/.mtrl/.shpk`，不重新发明文件格式。
@@ -343,3 +349,4 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 | 2026-07-19 | 决策纠正 | BG当前边界需要完整resource graph，但尚未审计renderer之间的共用pass/render-item层，不能由此判死原生提交路线 | 恢复研究实现；横向对比Model/BG/Figure等renderer的尾部call graph |
 | 2026-07-19 | 乐观边界实验 | 暂停横向renderer调查；以已知合法的ModelRenderer fixture直接验证显式参数+当前view/TLS是否充分 | selection零seed、Params2零构造，采集builder commands与最终draw |
 | 2026-07-19 | selection判据修正 | 首次实机在resolver前被本地检查拦截；静态确认`OnRenderMaterial`从不写selection `+0x00`，resolver也不读取该字段 | 删除错误前置检查，以resolver返回值验证独立selection |
+| 2026-07-19 | 最小builder成立、Character常量仍污染 | owned quad稳定生成4条Opaque与15条辅助draw；shader/layout/SRV稳定，但外观随裸体/头/身体carrier改变，`materialIndex=0`并非装备slot | 只枚举selected permutation实际使用的绑定，owned覆盖剩余非view Character constants |
