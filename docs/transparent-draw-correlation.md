@@ -489,3 +489,5 @@ retained MaterialResourceHandle -> Render::Material -> ShaderPackage
 ```
 
 这版仍在第一次arm时从现场捕获material resource，目的是先验证resource lifetime、独立selection和精确Context恢复。第二次arm会复用Underpaint已经持有的resource，不再采用当次source Material作为目标。日志输出source/owned Material、resource、SHPK、路径和 `MaterialCaptured`；连续两次arm应分别为 `true/false`，owned身份稳定且两次都生成六条有效 `Count=3`。通过后用日志中的稳定路径调用 `ResourceManager.GetResourceSync`，即可把首次捕获替换为显式材质加载，并随后放宽 `20/24` source过滤。
+
+首次实机调用在提交前安全停止，错误为 `owned shader package has no material constant slot`。原因是把SHPK `Constants[].Slot`误当成TLS Context的运行时constant ID；原生material helper实际使用renderer/camera初始化后注册的另一套ID。修正版不再从SHPK猜编号，而是在首次source material已经完成原生绑定的Context constant数组中，以 `MaterialParameterCBuffer*` 精确反查真实ID并持久保存；Context的constant区域边界是 `0x940..0x1140`，共64槽。日志新增 `ConstantId` 用于实机确认。失败发生在调用material helper和builder之前，没有留下Context修改。

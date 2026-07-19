@@ -333,3 +333,5 @@ A/C 是两份 pass-specific packet
 World输入实测已经通过：六条有效 `DrawIndexed Count=3` 统一绑定插件VB/IB及同一128-byte VS constant，目标材质也确实存在non-skinned permutation。当前material PoC不再复制donor shader-selection作为最终选择器，而是调用原生selection构造/销毁函数，以Underpaint持有的SHPK创建独立key存储；只按CRC迁入当前view共有的scene key，随后强制non-skinned。游戏的material helper负责安装 `MaterialParameterCBuffer`、textures和sampler flags，Underpaint在调用后逐槽恢复。
 
 首次arm仍从同步 `OnRenderMaterial -> 0x283320` 链取得一个有效 `Material*`，并给其resource handle增加自己的ref；这一步用于验证生命周期、selector重建和material binding，而不是最终API。日志新增source/owned Material、resource、SHPK、路径及 `MaterialCaptured`。第一次应为 `Captured=true`，同一插件生命周期再次arm应为 `false` 且owned身份/路径稳定。验证通过后，下一步将该已记录路径改由 `ResourceManager.GetResourceSync` 显式加载，届时可移除对source material和 `20/24` donor selector的要求。
+
+第一次实机在material helper调用前暴露一个编号错误：SHPK constant slot不是Context运行时constant ID。修正版改为在source material已绑定完成的64个Context constant槽中按 `MaterialParameterCBuffer*` 反查真实ID，记录为 `ConstantId`，并以该ID保存/恢复。失败路径没有执行material helper或builder，也没有修改Context。
