@@ -495,3 +495,7 @@ retained MaterialResourceHandle -> Render::Material -> ShaderPackage
 修正版连续两次实测成功。日志标签实际曾缩写为 `Captured`（现已改为明确的 `MaterialCaptured`）：第一次为true、第二次为false；两次owned Material/resource/SHPK/path完全相同，运行时material constant ID稳定为25，两次各生成六条有效 `DrawIndexed Count=3`。因此独立resource引用、selection重建、material helper绑定和Context恢复已经通过。
 
 持有资源给出的真实游戏路径为 `chara/equipment/e0378/material/v0002/mt_c0101e0378_top_a.mtrl`。从运行中handle确认资源键为category `Chara`、file type `0x6D74726C` (`mtrl`) 和path CRC `0x56D3AB97`。当前版本改用 `ResourceManager.GetResourceSync` 以这组键显式加载，不再从source Material取得目标resource；日志新增 `MaterialLoaded`。首次应为 `MaterialCaptured=false/MaterialLoaded=true`，后续为 `false/false`。当前source Material仅剩两个临时用途：提供本次view的scene-key values，以及在Context中反查全局material constant ID。
+
+显式加载实测通过：`MaterialCaptured=false / MaterialLoaded=true / ConstantId=25`，路径为无装饰的真实游戏路径，仍生成六条有效 `DrawIndexed Count=3`。目标material resource的来源已经与现场完全解耦。
+
+下一版删除窄 `OnRenderMaterial` 关联hook和source Material参数。material helper调用前保存全部64个Context constant槽，调用后直接按目标 `MaterialParameterCBuffer*` 识别其真实运行时ID，再在提交结束后整体恢复；因此不再需要source material帮助定位ID。source vertex stride的 `20/24` 限制也已删除：当前只等待View 30/SubView 11且具有可复制176-byte model wrapper的调度现场，独立material selector、geometry ABI和World输入均由Underpaint提供。source shader selection只作为本view共有scene-key values的CRC映射来源；它可以是不同SHPK，也不再要求包含或选择skinned model-type key。

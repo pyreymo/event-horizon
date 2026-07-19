@@ -337,3 +337,5 @@ World输入实测已经通过：六条有效 `DrawIndexed Count=3` 统一绑定�
 第一次实机在material helper调用前暴露一个编号错误：SHPK constant slot不是Context运行时constant ID。修正版改为在source material已绑定完成的64个Context constant槽中按 `MaterialParameterCBuffer*` 反查真实ID，记录为 `ConstantId`，并以该ID保存/恢复。失败路径没有执行material helper或builder，也没有修改Context。
 
 修正版两次实测已通过：日志中原缩写字段 `Captured=true/false`、owned resource/SHPK/path稳定、`ConstantId=25`，两次均生成六条有效 `Count=3`。日志标签现已改为 `MaterialCaptured`。根据resource handle确认的真实路径与键，当前版本进一步使用 `ResourceManager.GetResourceSync(Chara, 0x6D74726C, 0x56D3AB97, path)` 显式加载该不透明材质；第一次预期 `MaterialCaptured=false/MaterialLoaded=true`，之后为 `false/false`。验证通过后，剩余工作是让scene keys和material constant ID也脱离source material，再放宽source vertex ABI过滤。
+
+显式加载实测已经通过，仍生成六条有效 `Count=3`。下一版已移除source Material关联hook和 `20/24` source ABI过滤：原生material helper调用后直接从64个Context constant槽识别目标CB所在ID，并整体恢复全部槽位；目标SHPK selector只按CRC吸收当前view共有scene keys，然后强制non-skinned。当前唯一仍借用的高层数据是 `0x283320` 调度现场的params/model wrapper及其中与view/pass相关的flags；geometry、material resource/keys/constants/textures、World current/previous均已独立。
