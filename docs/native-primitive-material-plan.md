@@ -215,6 +215,34 @@ scope统一恢复TLS Context
 
 首次resource-map结果只包含rendezvous当时active auxiliary pass的VS资源（CB0 `id=24/CRC=F0BAD919`、CB1 `id=5/CRC=76BB3DC0`），PS不使用资源；它没有覆盖builder随后为main opaque及shadow切换的descriptor pass。探针已修正为遍历同一descriptor的全部16个pass，按实际VS/PS组合去重，并通过preview capture对象写入同一个debug文件。这样仍是一条有界记录，但能够覆盖最终draw使用的CB3、CB4和SRV4，而不是把active-pass局部信息误当成整个permutation契约。
 
+完整映射确认剩余三项为：VS CB3 `id=35/CRC=4E0A5472`即`g_ModelParameter`，PS CB4 `id=37/CRC=5B0F708C`即`g_DecalColor`，PS texture register 4 `id=64/CRC=2005679F`即`g_SamplerTable`。离线反汇编确认当前VS只读取`g_ModelParameter.m_Params.x`；运行中原生值为`x=1`，因此owned默认为`(1,0,0,0)`。`g_DecalColor`的原生中性值为`(1,1,1,1)`。目标MaterialResourceHandle自身含color table，使用游戏原生`PrepareColorTable(0,0)`生成owned table texture；不再复制carrier的table。
+
+这项工作的架构位置是**native material profile的shader-input装配层**，不是新的draw入口，也不是render-item层：
+
+```text
+Underpaint API / draw requests
+        |
+        v
+owned geometry + instance transform + material profile
+        |
+        v
+render rendezvous（只借当前thread/view/arena）
+        |
+        v
+[当前层] 安装该profile声明的全部owned shader inputs
+        |  material CB / instance CB / model CB / decal CB / textures / table
+        v
+0x283320 native pass builder
+        |
+        +-- main opaque
+        +-- auxiliary views
+        +-- shadow
+        v
+native commands -> GPU
+```
+
+它的项目价值是闭合一个primitive profile的运行时依赖：只拥有VB/IB、World和`.mtrl`还不够，selected SHPK会从TLS按native Id读取额外资源；若没有这一层，API表面上是自定义绘制，实际颜色、闪烁甚至pass结果仍取决于当时碰巧作为rendezvous carrier的角色装备。完成这一层后，carrier只提供frame/view公共环境，不再提供物体语义；后续新增profile也可以由离线contract明确列出并安装所需binding，而不必重新逆向整条command链。
+
 ### Phase 0：离线契约分析器
 
 - 复用Penumbra.GameData解析 `.mdl/.mtrl/.shpk`，不重新发明文件格式。
@@ -382,3 +410,4 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 | 2026-07-19 | 最小builder成立、Character常量仍污染 | owned quad稳定生成4条Opaque与15条辅助draw；shader/layout/SRV稳定，但外观随裸体/头/身体carrier改变，`materialIndex=0`并非装备slot | 只枚举selected permutation实际使用的绑定，owned覆盖剩余非view Character constants |
 | 2026-07-20 | TLS污染收敛 | 两组draw仅有VS CB3、PS CB4和SRV4随carrier变化；owned方块可投影阴影，确认builder自动生成辅助/阴影视图commands | 用selected shader resource map反查native Id/CRC，随后在builder前安装owned neutral绑定并由统一scope恢复 |
 | 2026-07-20 | resource-map探针修正 | 首次输出只反射rendezvous active auxiliary pass，无法解释最终opaque draw；同时Underpaint插件日志未进入专用debug文件 | 遍历descriptor全部有效pass并随preview capture导出，下一次采集直接获得完整native Id/CRC映射 |
+| 2026-07-20 | Character profile输入闭合 | 完整descriptor映射确认污染为`g_ModelParameter`、`g_DecalColor`和`g_SamplerTable`；shader反汇编及原生值给出中性常量，目标MTRL可原生创建自己的color table | 实机确认外观不再随carrier变化，draw中的CB3/CB4/SRV4稳定且TLS在提交后恢复 |
