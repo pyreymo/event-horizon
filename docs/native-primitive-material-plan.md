@@ -153,7 +153,7 @@ candidate-name/
         +-- Underpaint-owned VB / IB / VertexDeclaration
         +-- Underpaint-owned current World == previous World
         +-- 显式加载的合法 ModelRenderer Material / SHPK
-        +-- selection 从全零初始化，不复制 donor descriptor
+        +-- selection 从全零初始化，不复制 donor descriptor/cache
         +-- Params2 从全零构造，只写明确的 main/aux view masks
         +-- owned 176-byte instance constant和最小零值Model facade
         |
@@ -172,12 +172,12 @@ candidate-name/
 
 历史版本已经证明同一 `e0378` fixture、20/24 geometry ABI、owned World和instance constant能生成完整command集合。本次只验证剩余donor语义是否必要：
 
-1. shader-selection首字段不再从source selection复制；初始化为零，要求`OnRenderMaterial`自行选择descriptor；
+1. shader-selection首字段不再从source selection复制。静态复核确认`OnRenderMaterial`只生成flags和可选callback输出，不负责选择descriptor；selection的`+0x00`可以保持为零，真正的descriptor由后续SHPK resolver根据`+0x08/+0x10/+0x18/+0x20/+0x24`返回；
 2. `OnRenderMaterialParams2`不再复制source 0x48-byte wrapper；`+0x38/+0x44`使用当前实验明确允许的main/aux masks，其余输入和callback输出从零开始；
 3. 不读取source Model、source geometry、source Material、bounds、LOD、history、sort record或object identity；
 4. sort只观察builder在当前view环境生成的结果，第一版不另建culling/sort/history对象。
 
-成功判据不是“代码走到builder”，而是同一次有界采集中同时出现：selection由零seed得到非零descriptor、builder command数量/SortKey/view/shader合理、最终owned geometry draw执行、current/previous World相同。若失败，按最先失败的明确边界回退一个变量；不由一次失败推导完整render job必需。
+成功判据不是“代码走到builder”，而是同一次有界采集中同时出现：selection `+0x00`保持零且resolver返回非零descriptor、builder command数量/SortKey/view/shader合理、最终owned geometry draw执行、current/previous World相同。若失败，按最先失败的明确边界回退一个变量；不由一次失败推导完整render job必需。
 
 ### Phase 0：离线契约分析器
 
@@ -342,3 +342,4 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 | 2026-07-19 | BG callback边界 | `0x290520`由`0x28EAC0`注册到render callback表；它在进入batch builder前已从实例记录和camera计算sort depth，并接收scene-key map | 定位生成该回调记录的render job，判断其是否可脱离完整BgParts对象构造 |
 | 2026-07-19 | 决策纠正 | BG当前边界需要完整resource graph，但尚未审计renderer之间的共用pass/render-item层，不能由此判死原生提交路线 | 恢复研究实现；横向对比Model/BG/Figure等renderer的尾部call graph |
 | 2026-07-19 | 乐观边界实验 | 暂停横向renderer调查；以已知合法的ModelRenderer fixture直接验证显式参数+当前view/TLS是否充分 | selection零seed、Params2零构造，采集builder commands与最终draw |
+| 2026-07-19 | selection判据修正 | 首次实机在resolver前被本地检查拦截；静态确认`OnRenderMaterial`从不写selection `+0x00`，resolver也不读取该字段 | 删除错误前置检查，以resolver返回值验证独立selection |
