@@ -369,6 +369,14 @@ native commands -> GPU
 
 完成条件：内部API只表达geometry、profile、instance和transform。
 
+### 当前收缩目标：纯色primitive（2026-07-20）
+
+阶段性产品目标不再是通用原生Material：调用者只提供geometry、transform、RGBA和`Opaque/Semitransparent`模式。底层允许使用游戏自带的1×1 stock texture满足现有SHPK采样协议，但纹理、`.mtrl`和shader key不进入公开API；为追求“shader完全不采样纹理”而自制SHPK不在当前范围。
+
+第一步只验证Opaque。现有compatible profile将`g_SamplerDecal`从透明默认改为显式加载的`chara/common/texture/white.tex`，并把`g_DecalColor`改为每实例16-byte owned Color CB。World CB和Color CB均归实例所有，geometry和其余immutable profile资源可共享。Debug preview用同一geometry同时创建红、绿、蓝三个实例，中间实例可实时改色；这一次验证同时覆盖纯色输出、动态颜色和多实例隔离。
+
+如果白色decal不能完全覆盖基础材质，只允许再测试`uniform index texture + 单色color-table row`这一种fallback；两者都失败后才重新选择stock shader，不继续扩展衣服材质输入。Opaque通过后再建立独立`SolidSemitransparentProfile`，不把两套native pass contract抽象成任意Material框架。
+
 ### Phase 4：单独研究半透明primitive profile
 
 Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择一个简单半透明contract。透明衣服只用于验证pass家族是否完整，不再提供运行时material、vertex ABI或实例输入。
@@ -426,3 +434,4 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 | 2026-07-20 | semantic TLS验证 | 三个owned绑定在多轮capture中稳定，白块和装备染色漂移消失；PS CB0仍在单次capture内变化并对应偶发黑闪 | 将完整`g_MaterialParameter`复制为owned native CB，覆盖ApplyMaterial安装的共享绑定 |
 | 2026-07-20 | material CB私有化 | target MTRL的material constant在首次装载时复制一次，后续提交不再重新导入共享buffer变化；Debug/Release构建通过 | 实机验证PS CB0 hash稳定、黑闪消失；随后单独定位小范围位置抖动 |
 | 2026-07-20 | 一次复制方案被否定 | 最终draw仍显示PS CB0 payload及底层buffer变化；SRV3也在两套资源间切换，离线确认其为缺省`g_SamplerDecal` | 保存managed immutable material payload并逐提交上传；显式绑定公共透明decal；串行保护共享upload源 |
+| 2026-07-20 | 纯色Opaque A/B实现 | profile显式加载stock white texture；每实例拥有独立16-byte `g_DecalColor` CB；preview共享geometry并显示RGB三实例，中心颜色可实时编辑 | 实机确认是否为稳定纯色、三实例颜色独立且装备无关；失败时只尝试uniform-index fallback |

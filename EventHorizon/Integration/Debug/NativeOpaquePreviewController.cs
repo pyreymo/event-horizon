@@ -12,8 +12,9 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
     private const string LogSource = "NativeOpaquePreview";
     private readonly UnderpaintRenderer? underpaint;
     private NativeGeometry? geometry;
-    private NativeRigidInstance? instance;
+    private NativeRigidInstance[] instances = [];
     private Matrix4x4 previewWorld;
+    private Vector3 centerColor = Vector3.UnitY;
     private bool drawCaptureActive;
     private string state = "Hidden";
 
@@ -22,12 +23,20 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
         this.underpaint = underpaint;
     }
 
-    public bool IsVisible => instance != null;
+    public bool IsVisible => instances.Length != 0;
     public string State => state;
+    public Vector3 CenterColor => centerColor;
+
+    public void SetCenterColor(Vector3 value)
+    {
+        centerColor = Vector3.Clamp(value, Vector3.Zero, Vector3.One);
+        if (instances.Length >= 2)
+            instances[1].UpdateColor(new Vector4(centerColor, 1f));
+    }
 
     public void Show()
     {
-        if (instance != null)
+        if (instances.Length != 0)
             return;
         if (underpaint == null)
         {
@@ -44,24 +53,38 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
             [new(0f, 1f), new(1f, 1f), new(1f, 0f), new(0f, 0f)],
             [0, 1, 2, 2, 3, 0]
         );
-        instance = underpaint.CreateNativeWorldRigidInstance(geometry, previewWorld);
-        instance.BeginSubmissionCapture(8);
+        var created = new List<NativeRigidInstance>(3);
+        try
+        {
+            created.Add(underpaint.CreateNativeWorldRigidInstance(geometry, OffsetWorld(previewWorld, -0.9f), new Vector4(1f, 0f, 0f, 1f)));
+            created.Add(underpaint.CreateNativeWorldRigidInstance(geometry, previewWorld, new Vector4(centerColor, 1f)));
+            created.Add(underpaint.CreateNativeWorldRigidInstance(geometry, OffsetWorld(previewWorld, 0.9f), new Vector4(0f, 0f, 1f, 1f)));
+            instances = created.ToArray();
+        }
+        catch
+        {
+            foreach (var item in created)
+                item.Dispose();
+            throw;
+        }
+        instances[0].BeginSubmissionCapture(8);
         underpaint.BeginNativeGeometryDrawCapture(geometry);
         drawCaptureActive = true;
-        state = "Waiting for the minimal ModelRenderer rendezvous";
-        DebugFileLog.Information(LogSource, "Minimal ModelRenderer preview shown; geometry/material/world/instance/selection are owned");
+        state = "Waiting for the native solid-color rendezvous";
+        DebugFileLog.Information(LogSource, "Native RGB solid preview shown; geometry/material/world/color/selection are owned");
     }
 
     public void Hide()
     {
-        var current = instance;
-        instance = null;
-        previewWorld = default;
+        var current = instances;
         CompleteDrawCapture("preview-hidden");
-        var submissionCount = current?.SubmissionCount ?? 0;
-        current?.Dispose();
+        instances = [];
+        previewWorld = default;
+        var submissionCount = current.Sum(item => item.SubmissionCount);
+        foreach (var item in current)
+            item.Dispose();
         state = "Hidden";
-        if (current != null)
+        if (current.Length != 0)
             DebugFileLog.Information(
                 LogSource,
                 "Native opaque preview hidden; BuilderSubmissions={BuilderSubmissions} IndexCount=6",
@@ -71,10 +94,10 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
 
     public void Update()
     {
-        var current = instance;
-        if (current == null)
+        var current = instances;
+        if (current.Length == 0)
             return;
-        if (current.Failure is { } failure)
+        if (current.FirstOrDefault(item => item.Failure != null)?.Failure is { } failure)
         {
             Hide();
             state = $"Stopped: {failure}";
@@ -82,10 +105,10 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
         }
         try
         {
-            if (drawCaptureActive && current.SubmissionCount >= 4)
+            if (drawCaptureActive && current[0].SubmissionCount >= 4)
                 CompleteDrawCapture("four-builder-submissions");
-            if (current.HasSubmitted)
-                state = $"Submitted: minimal ModelRenderer panel ({current.SubmissionCount} builder calls)";
+            if (current.All(item => item.HasSubmitted))
+                state = $"Submitted: native RGB solid panels ({current.Sum(item => item.SubmissionCount)} builder calls)";
         }
         catch (Exception exception)
         {
@@ -178,11 +201,11 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
                 draw.PipelineState
             );
         }
-        if (instance != null)
+        if (instances.Length != 0)
         {
-            if (instance.TakeSelectedBindingMapCapture() is { } bindingMap)
+            if (instances[0].TakeSelectedBindingMapCapture() is { } bindingMap)
                 DebugFileLog.Information(LogSource, "Native preview selected resource map {BindingMap}", bindingMap);
-            foreach (var submission in instance.TakeSubmissionCapture())
+            foreach (var submission in instances[0].TakeSubmissionCapture())
             {
                 DebugFileLog.Information(
                     LogSource,
@@ -206,6 +229,15 @@ internal sealed unsafe class NativeOpaquePreviewController : IDisposable
                 );
             }
         }
+    }
+
+    private static Matrix4x4 OffsetWorld(Matrix4x4 world, float rightOffset)
+    {
+        var right = Vector3.Normalize(new Vector3(world.M11, world.M12, world.M13));
+        world.M41 += right.X * rightOffset;
+        world.M42 += right.Y * rightOffset;
+        world.M43 += right.Z * rightOffset;
+        return world;
     }
 
     private static string FormatConstant(NativeGeometryConstantBufferBinding constant) =>

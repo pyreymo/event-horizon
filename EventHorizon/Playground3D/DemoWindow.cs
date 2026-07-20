@@ -186,9 +186,15 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.SameLine();
         if (ImGui.Button("Clear EventHorizon logs"))
             clearDebugLogState = DebugFileLog.Clear();
+        if (nativeOpaquePreview.IsVisible)
+        {
+            var centerColor = nativeOpaquePreview.CenterColor;
+            if (ImGui.ColorEdit3("Center panel color", ref centerColor))
+                nativeOpaquePreview.SetCenterColor(centerColor);
+        }
         if (clearDebugLogState.Length != 0)
             ImGui.TextDisabled(clearDebugLogState);
-        ImGui.TextDisabled("Show places a small native panel at a fixed world position three metres ahead.");
+        ImGui.TextDisabled("Show places native red, green, and blue solid-material panels three metres ahead.");
     }
 #endif
 
