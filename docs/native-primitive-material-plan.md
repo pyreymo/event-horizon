@@ -347,6 +347,12 @@ native commands -> GPU
 
 此前提出的“横向对比Model/BG/Figure尾部call graph”暂停。它是在最小ModelRenderer边界尚未被否定时过早扩大范围；只有本节实验给出明确反证后才恢复。
 
+2026-07-20的连续实机结果确认Character profile的三个额外语义绑定已经闭合：最终draw中的VS CB3 `g_ModelParameter`、PS CB4 `g_DecalColor`和PS SRV4 `g_SamplerTable`在穿脱装备后保持同一owned payload/resource。此前的白色方块和随装备变化的染色外观已经消失，方块保持世界位置并由builder自动进入阴影视图。
+
+同一批日志也暴露了最后一个仍共享的material输入：第三次capture内，PS CB0 `g_MaterialParameter`在相同目标MTRL、shader和textures下从hash `AE2A985B1F29D192`切换为`8AEE006A6135AF5A`。这与用户看到的偶发黑帧相符，且比继续猜测pass或装备slot更直接。后端现已在首次加载目标Material时完整复制其native material constant buffer，并在每次`ApplyMaterial`之后将对应TLS constant slot替换为Underpaint-owned副本；scope仍负责无条件恢复原绑定。下一次实机只验证该hash是否稳定以及黑帧是否消失。
+
+剩余的小范围位置抖动暂按独立问题处理。当前world数据本身稳定，提交会命中同一frame内不同view/Context rendezvous；抖动可能来自view时机与transform采样不一致，也可能包含TAA jitter。必须先关闭material constant黑闪，再用frame/view identity和最终world hash做一次有界对照，不把它与材质依赖混合修复。
+
 ### Phase 3：收敛internal后端
 
 - 将提交核心与 `OpaquePrimitiveProfile` 分离。
@@ -411,3 +417,5 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 | 2026-07-20 | TLS污染收敛 | 两组draw仅有VS CB3、PS CB4和SRV4随carrier变化；owned方块可投影阴影，确认builder自动生成辅助/阴影视图commands | 用selected shader resource map反查native Id/CRC，随后在builder前安装owned neutral绑定并由统一scope恢复 |
 | 2026-07-20 | resource-map探针修正 | 首次输出只反射rendezvous active auxiliary pass，无法解释最终opaque draw；同时Underpaint插件日志未进入专用debug文件 | 遍历descriptor全部有效pass并随preview capture导出，下一次采集直接获得完整native Id/CRC映射 |
 | 2026-07-20 | Character profile输入闭合 | 完整descriptor映射确认污染为`g_ModelParameter`、`g_DecalColor`和`g_SamplerTable`；shader反汇编及原生值给出中性常量，目标MTRL可原生创建自己的color table | 实机确认外观不再随carrier变化，draw中的CB3/CB4/SRV4稳定且TLS在提交后恢复 |
+| 2026-07-20 | semantic TLS验证 | 三个owned绑定在多轮capture中稳定，白块和装备染色漂移消失；PS CB0仍在单次capture内变化并对应偶发黑闪 | 将完整`g_MaterialParameter`复制为owned native CB，覆盖ApplyMaterial安装的共享绑定 |
+| 2026-07-20 | material CB私有化 | target MTRL的material constant在首次装载时复制一次，后续提交不再重新导入共享buffer变化；Debug/Release构建通过 | 实机验证PS CB0 hash稳定、黑闪消失；随后单独定位小范围位置抖动 |
