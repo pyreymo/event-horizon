@@ -351,6 +351,12 @@ native commands -> GPU
 
 同一批日志也暴露了最后一个仍共享的material输入：第三次capture内，PS CB0 `g_MaterialParameter`在相同目标MTRL、shader和textures下从hash `AE2A985B1F29D192`切换为`8AEE006A6135AF5A`。这与用户看到的偶发黑帧相符，且比继续猜测pass或装备slot更直接。后端现已在首次加载目标Material时完整复制其native material constant buffer，并在每次`ApplyMaterial`之后将对应TLS constant slot替换为Underpaint-owned副本；scope仍负责无条件恢复原绑定。下一次实机只验证该hash是否稳定以及黑帧是否消失。
 
+上述“复制一次native ConstantBuffer”实现经实机否定：最终draw的PS CB0仍在变化，且底层D3D buffer地址会轮换。至少可以确认，只替换TLS wrapper并向`ConstantBuffer.LoadSourcePointer`写一次不能形成持久immutable payload；该API参与按提交更新的native上传存储。修正后的所有权分成两层：首次从目标Material复制到managed immutable byte array，之后每次提交重新调用`LoadSourcePointer`并从该快照上传，绝不再次读取共享Material内容。
+
+同轮最终draw还显示SRV3在两套资源间切换。Penumbra离线解析确认selected register对应`g_SamplerDecal`（CRC `0x0237CB94`）；目标MTRL只声明normal、mask和index纹理，本身没有decal，因此这个槽此前一直继承carrier。后端现在从`CharacterUtility`取得游戏长期持有的透明公共纹理，并显式安装到目标SHPK的decal native Id；Context scope同时保存和恢复该槽。它是stock immutable default，不包含角色或装备实例语义。
+
+共享owned constants还可能被不同render worker同时调用`LoadSourcePointer`。当前internal PoC已将自定义提交临界区串行化；hook状态本身继续使用thread-static字段，因此不会把其他worker的原生command误判成当前自定义提交。这是当前规模下的安全约束，正式多实例后端应改为per-frame/per-worker upload ownership，而不是长期依赖全局串行化。
+
 剩余的小范围位置抖动暂按独立问题处理。当前world数据本身稳定，提交会命中同一frame内不同view/Context rendezvous；抖动可能来自view时机与transform采样不一致，也可能包含TAA jitter。必须先关闭material constant黑闪，再用frame/view identity和最终world hash做一次有界对照，不把它与材质依赖混合修复。
 
 ### Phase 3：收敛internal后端
@@ -419,3 +425,4 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 | 2026-07-20 | Character profile输入闭合 | 完整descriptor映射确认污染为`g_ModelParameter`、`g_DecalColor`和`g_SamplerTable`；shader反汇编及原生值给出中性常量，目标MTRL可原生创建自己的color table | 实机确认外观不再随carrier变化，draw中的CB3/CB4/SRV4稳定且TLS在提交后恢复 |
 | 2026-07-20 | semantic TLS验证 | 三个owned绑定在多轮capture中稳定，白块和装备染色漂移消失；PS CB0仍在单次capture内变化并对应偶发黑闪 | 将完整`g_MaterialParameter`复制为owned native CB，覆盖ApplyMaterial安装的共享绑定 |
 | 2026-07-20 | material CB私有化 | target MTRL的material constant在首次装载时复制一次，后续提交不再重新导入共享buffer变化；Debug/Release构建通过 | 实机验证PS CB0 hash稳定、黑闪消失；随后单独定位小范围位置抖动 |
+| 2026-07-20 | 一次复制方案被否定 | 最终draw仍显示PS CB0 payload及底层buffer变化；SRV3也在两套资源间切换，离线确认其为缺省`g_SamplerDecal` | 保存managed immutable material payload并逐提交上传；显式绑定公共透明decal；串行保护共享upload源 |
