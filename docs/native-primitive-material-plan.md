@@ -1,6 +1,6 @@
 # Underpaint 原生基本图形材质契约计划
 
-> 当前状态（2026-07-19）：优先验证最小 ModelRenderer 边界，不预设存在或必须构造统一 render item。当前实验只借用同步现场的 render thread、ModelRenderer、view/TLS Context 和 command arena；材质、SHPK selection、几何、World、instance constant 和 `OnRenderMaterialParams2` 均由 Underpaint 构造。`e0378` 暂时只作为已知能覆盖 `0x283320` 协议的测试 fixture，不是公开材质目标。只有该最小边界被明确否定后，才重新引入 bounds、LOD、history、object identity 或更高层 render job。
+> 当前状态（2026-07-20）：`0x281DD0 / 0x283320` 路线已冻结为 command/pass 观测与材质协议诊断工具，不再作为正式 primitive backend 补 binding、sort、history 或多实例生命周期。主线改为验证 `Client::Graphics::Scene::BgObject.Create` 能否成为 Underpaint-owned 原生宿主；先只加载游戏现有 rigid `.mdl`，闭合 transform、culling、visibility、native views 和销毁，再单点研究该宿主内的动态 VB/IB 注入。
 
 ## 目标
 
@@ -19,6 +19,31 @@ Underpaint positions / normals / colors / UV
 ```
 
 公开 API 仍以基本图形为中心，例如 triangle、quad、cube、sphere。`.mdl`、`.mtrl` 和 `.shpk` 只是实现 profile 时使用的资源协议，不进入第一版公开 API。
+
+## 2026-07-20 路线纠正：先获得原生宿主
+
+此前的实现从 command 输出端反向拼装一个原生物体：先拥有 VB/IB，再逐项补材质 binding、shader keys、World、view、pass 和辅助状态。它证明了 Underpaint-owned geometry 可以进入原生 command arena，也证明 `0x283320` 能自动展开主视图和阴影视图，但没有建立拥有 scene membership、culling、bounds、history 和生命周期的原生 renderable。RGB 多实例实验在首次 native command snapshot 中崩溃，说明不能继续把这条低层路径扩建成对象系统。
+
+新的产品分层固定为：
+
+```text
+Underpaint immediate-mode primitive API
+    -> CPU tessellation / batching
+    -> Underpaint-owned dynamic VB/IB
+    -> 少量 Underpaint-owned BgObject host
+    -> 游戏原生 transform / culling / material / pass / view / lifecycle
+```
+
+`BgObject.Create` 成功本身不是项目终点。第一阶段只实现极薄的 `NativeBgObjectHost` 验证层；决定 Underpaint 是否成立的关键实验，是能否让这个独占宿主的 model/mesh instance 稳定使用 Underpaint-owned dynamic VB/IB。若最终只能为每个固定 primitive 创建预制 `.mdl`，则重新评估独立底层库的价值，不把 Brio/Anyder/Intoner 已有的模型放置能力包装成 Underpaint 的核心成果。
+
+验证顺序固定为：
+
+1. `BgObject.Create(stock rigid mdl)`，验证加载、移动、隐藏/显示、culling、阴影、场景切换和 `CleanupRender -> Dtor(1)`；
+2. 通过 Penumbra temporary mod 依次验证 external mdl + native material、external material + native SHPK，最后才考虑 external SHPK；
+3. 固定 primitive catalog 足够时评估实例池；确实需要任意动态 geometry 时，只逆向 BgObject 私有 model instance 的 VB/IB、counts 和 bounds 注入；
+4. 一个 BgObject 对应一个 opaque/transparent/material-profile batch，不为每个三角形创建 scene object。
+
+当前 Debug PoC 使用游戏现有 `bgcommon/hou/indoor/general/0517/bgparts/fun_b0_m0517a.mdl`。实现只调用 `BgObject.Create`、写 transform、等待 `ModelResourceHandle.LoadState >= 7`、调用 `NotifyTransformChanged / UpdateTransforms / UpdateCulling / UpdateRender`，并以 `CleanupRender -> Dtor(1)` 销毁。它不调用 Underpaint 的 custom `0x283320` submission。
 
 ## 非目标
 
@@ -302,7 +327,7 @@ native commands -> GPU
 
 完成条件：profile不包含Character、Equipment、Skeleton、source Model或任意资产实例指针。
 
-### Phase 2：稳定基本图形PoC
+### 历史 Phase 2：低层 ModelRenderer PoC（已冻结）
 
 - 删除 `e0378` material和衣服vertex ABI硬编码。
 - 使用profile精确打包一个triangle/quad，随后增加cube。
@@ -385,8 +410,9 @@ Opaque稳定后，才根据已经确认的Stage A/后续重绘管线证据选择
 
 | 部分 | 决策 |
 |---|---|
-| `0x283320` ModelRenderer pass builder | 当前第一优先最小边界；先验证显式owned输入是否足够，不要求完整render item |
-| `0x290520 -> 0x290E10` BG builder | 不作为简单primitive API直接调用；保留其尾部callee作为共用pass层候选 |
+| `BgObject.Create` 原生宿主 | 当前主线；先闭合stock rigid model的原生生命周期，再验证独占宿主的dynamic geometry注入 |
+| `0x283320` ModelRenderer pass builder | 冻结为command/pass观测和材质协议诊断工具，不再扩建对象语义 |
+| `0x290520 -> 0x290E10` BG builder | 不再作为主线入口追踪；只有dynamic geometry宿主实验明确需要时才局部参考 |
 | 同线程、同Context、同view时机 | 保留 |
 | owned VB/IB/VertexDeclaration | 保留，改由profile定义布局 |
 | owned current/previous World CB | 保留 |

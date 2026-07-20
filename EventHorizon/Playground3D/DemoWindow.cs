@@ -38,7 +38,7 @@ internal sealed class DemoWindow : Window, IDisposable
     private bool diagnosticForceOpaqueAlpha = true;
     private NativeDrawSnapshot? diagnosticSnapshot;
 #if DEBUG
-    private NativeOpaquePreviewController? nativeOpaquePreview;
+    private NativeBgObjectPreviewController? nativeBgObjectPreview;
     private string clearDebugLogState = "";
 #endif
     private bool boundaryStabilityTestEnabled;
@@ -75,7 +75,7 @@ internal sealed class DemoWindow : Window, IDisposable
     }
 
 #if DEBUG
-    public void AttachNativeOpaquePreview(NativeOpaquePreviewController preview) => nativeOpaquePreview = preview;
+    public void AttachNativeBgObjectPreview(NativeBgObjectPreviewController preview) => nativeBgObjectPreview = preview;
 #endif
 
     public void StopWorldDraw()
@@ -113,7 +113,7 @@ internal sealed class DemoWindow : Window, IDisposable
         {
             DrawDiagnostics();
 #if DEBUG
-            DrawNativeOpaquePreviewUi();
+            DrawNativeBgObjectPreviewUi();
 #endif
         }
 
@@ -170,31 +170,36 @@ internal sealed class DemoWindow : Window, IDisposable
     }
 
 #if DEBUG
-    private void DrawNativeOpaquePreviewUi()
+    private void DrawNativeBgObjectPreviewUi()
     {
-        if (nativeOpaquePreview == null || !ImGui.CollapsingHeader("Native opaque preview"))
+        if (nativeBgObjectPreview == null || !ImGui.CollapsingHeader("Native BgObject host"))
             return;
 
-        ImGui.TextDisabled(nativeOpaquePreview.State);
-        if (!nativeOpaquePreview.IsVisible)
+        ImGui.TextDisabled(nativeBgObjectPreview.State);
+        if (!nativeBgObjectPreview.IsPresent)
         {
-            if (ImGui.Button("Show native opaque preview"))
-                nativeOpaquePreview.Show();
+            if (ImGui.Button("Create stock BgObject"))
+                nativeBgObjectPreview.Show();
         }
-        else if (ImGui.Button("Hide native opaque preview"))
-            nativeOpaquePreview.Hide();
+        else if (ImGui.Button("Destroy BgObject"))
+            nativeBgObjectPreview.Hide();
         ImGui.SameLine();
         if (ImGui.Button("Clear EventHorizon logs"))
             clearDebugLogState = DebugFileLog.Clear();
-        if (nativeOpaquePreview.IsVisible)
+        if (nativeBgObjectPreview.IsReady)
         {
-            var centerColor = nativeOpaquePreview.CenterColor;
-            if (ImGui.ColorEdit3("Center panel color", ref centerColor))
-                nativeOpaquePreview.SetCenterColor(centerColor);
+            if (ImGui.Button(nativeBgObjectPreview.IsVisible ? "Hide model" : "Show model"))
+                nativeBgObjectPreview.SetVisible(!nativeBgObjectPreview.IsVisible);
+            ImGui.SameLine();
+            if (ImGui.Button("Move +1m world X"))
+                nativeBgObjectPreview.MoveRight(1f);
+            ImGui.SameLine();
+            if (ImGui.Button("Reset position"))
+                nativeBgObjectPreview.ResetPosition();
         }
         if (clearDebugLogState.Length != 0)
             ImGui.TextDisabled(clearDebugLogState);
-        ImGui.TextDisabled("Show places native red, green, and blue solid-material panels three metres ahead.");
+        ImGui.TextDisabled("Creates one stock rigid model through BgObject.Create; the custom pass-builder backend is not used.");
     }
 #endif
 
