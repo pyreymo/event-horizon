@@ -1,3 +1,6 @@
+global using System;
+global using System.Collections.Generic;
+global using System.Linq;
 using System.IO;
 using Dalamud.Game.Chat;
 using Dalamud.Game.Command;
@@ -175,10 +178,7 @@ public sealed class Plugin : IDalamudPlugin
             );
             ConfigWindow = new ConfigWindow(this, DataManager, playerPreviewPanel, IsPlayerPreviewWindowOpen, TogglePlayerPreviewWindow);
             PlayerPreviewWindow = new PlayerPreviewWindow(playerPreviewPanel, OpenMainUi);
-            UnderpaintDemoWindow = new DemoWindow(UnderpaintRenderer, ObjectTable, TargetManager, TextureProvider);
-#if DEBUG
-            UnderpaintDemoWindow.AttachNativeBgObjectPreview(NativeBgObjectPreview);
-#endif
+            UnderpaintDemoWindow = new DemoWindow();
             DtrStatusBar = new DtrBar(DtrBar, Configuration, Culling.GetStatus, SetPlayerHidingEnabled, ToggleConfigUi);
             DtrBackground = new DtrBackground(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
             TargetingMarkerController = new TargetingMarkerController(
@@ -379,28 +379,6 @@ public sealed class Plugin : IDalamudPlugin
         catch (Exception ex)
         {
             Log.Error(ex, "WindowSystem.Draw threw.");
-        }
-
-        var demoOwnsOpaqueBackend =
-            UnderpaintDemoWindow.IsOpen && UnderpaintDemoWindow.WorldDrawEnabled && UnderpaintDemoWindow.UsesOpaqueBackend;
-        GBufferProbeController.PublishingEnabled = !demoOwnsOpaqueBackend;
-
-        DrawGBufferProbeWorldArrow();
-
-        if (UnderpaintRenderer is null || !UnderpaintDemoWindow.IsOpen || !UnderpaintDemoWindow.WorldDrawEnabled)
-        {
-            UnderpaintDemoWindow.StopWorldDraw();
-            return;
-        }
-
-        try
-        {
-            UnderpaintDemoWindow.DrawWorld();
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "Underpaint demo DrawWorld threw.");
-            UnderpaintDemoWindow.WorldDrawEnabled = false;
         }
     }
 
