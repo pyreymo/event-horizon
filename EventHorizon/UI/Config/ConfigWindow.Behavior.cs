@@ -2,7 +2,6 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.Keys;
 using EventHorizon.Localization;
-using Underpaint;
 
 namespace EventHorizon.UI.Config;
 
@@ -313,123 +312,6 @@ internal partial class ConfigWindow
             value => configuration.HideAll3DScene = value
         );
         DrawHelpMarker(Loc.Text("Config.HideAll3DScene.Help"));
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        ImGui.TextDisabled(Loc.Text("Config.GBufferProbe.Section"));
-        DrawSceneVisibilityCheckbox(
-            "EnableGBufferProbe",
-            Loc.Text("Config.EnableGBufferProbe"),
-            () => configuration.EnableGBufferProbe,
-            value => configuration.EnableGBufferProbe = value
-        );
-        DrawHelpMarker(Loc.Text("Config.EnableGBufferProbe.Help"));
-
-        if (configuration.EnableGBufferProbe)
-        {
-            ImGui.Indent();
-            DrawGBufferMaterialParameters();
-            ImGui.Unindent();
-        }
-    }
-
-    private void DrawGBufferMaterialParameters()
-    {
-        ImGui.TextDisabled(Loc.Text("Config.GBufferMaterialParameters"));
-
-        var parameters = plugin.GBufferProbe.MaterialParameters;
-        var g0 = parameters.G0;
-        var g1 = parameters.G1;
-        var g2 = parameters.G2;
-        var g3 = parameters.G3;
-        var g4 = parameters.G4;
-        var stencil = (int)parameters.Stencil;
-        var changed = false;
-
-        if (BeginBehaviorControlTable("##GBufferMaterialParameters"))
-        {
-            var normal = new Vector3(g0.X, g0.Y, g0.Z);
-            ImGui.BeginDisabled();
-            DrawBehaviorControlLabel(Loc.Text("Config.GBufferMaterial.G0Normal"));
-            ImGui.SetNextItemWidth(-1f);
-            ImGui.InputFloat3("##G0Normal", ref normal);
-            ImGui.EndDisabled();
-
-            DrawBehaviorControlLabel(Loc.Text("Config.GBufferMaterial.G0Alpha"));
-            ImGui.SetNextItemWidth(-1f);
-            changed |= ImGui.InputFloat("##G0Alpha", ref g0.W);
-
-            DrawBehaviorControlLabel(Loc.Text("Config.GBufferMaterial.G1SurfaceLighting"));
-            ImGui.SetNextItemWidth(-1f);
-            changed |= ImGui.InputFloat4("##G1", ref g1);
-
-            var albedo = new Vector3(g2.X, g2.Y, g2.Z);
-            ImGui.BeginDisabled();
-            DrawBehaviorControlLabel(Loc.Text("Config.GBufferMaterial.G2Albedo"));
-            ImGui.SetNextItemWidth(-1f);
-            ImGui.InputFloat3("##G2Albedo", ref albedo);
-            ImGui.EndDisabled();
-
-            DrawBehaviorControlLabel(Loc.Text("Config.GBufferMaterial.G2Alpha"));
-            ImGui.SetNextItemWidth(-1f);
-            changed |= ImGui.InputFloat("##G2Alpha", ref g2.W);
-
-            var g3Rg = new Vector2(g3.X, g3.Y);
-            DrawBehaviorControlLabel(Loc.Text("Config.GBufferMaterial.G3RgUnknown"));
-            ImGui.SetNextItemWidth(-1f);
-            if (ImGui.InputFloat2("##G3Rg", ref g3Rg))
-            {
-                g3.X = g3Rg.X;
-                g3.Y = g3Rg.Y;
-                changed = true;
-            }
-
-            DrawBehaviorControlLabel(Loc.Text("Config.GBufferMaterial.G3SpecularReflectance"));
-            ImGui.SetNextItemWidth(-1f);
-            changed |= ImGui.InputFloat("##G3B", ref g3.Z);
-
-            DrawBehaviorControlLabel(Loc.Text("Config.GBufferMaterial.G3Alpha"));
-            ImGui.SetNextItemWidth(-1f);
-            changed |= ImGui.InputFloat("##G3Alpha", ref g3.W);
-
-            var emissiveColor = new Vector3(g4.X, g4.Y, g4.Z);
-            DrawBehaviorControlLabel(Loc.Text("Config.GBufferMaterial.G4EmissiveColor"));
-            ImGui.SetNextItemWidth(-1f);
-            if (ImGui.InputFloat3("##G4EmissiveColor", ref emissiveColor))
-            {
-                g4.X = emissiveColor.X;
-                g4.Y = emissiveColor.Y;
-                g4.Z = emissiveColor.Z;
-                changed = true;
-            }
-
-            DrawBehaviorControlLabel(Loc.Text("Config.GBufferMaterial.G4EmissiveIntensity"));
-            ImGui.SetNextItemWidth(-1f);
-            changed |= ImGui.InputFloat("##G4EmissiveIntensity", ref g4.W);
-
-            DrawBehaviorControlLabel(Loc.Text("Config.GBufferMaterial.Stencil"));
-            ImGui.SetNextItemWidth(-1f);
-            if (ImGui.InputInt("##Stencil", ref stencil))
-            {
-                stencil = Math.Clamp(stencil, byte.MinValue, byte.MaxValue);
-                changed = true;
-            }
-
-            ImGui.EndTable();
-        }
-
-        if (changed)
-        {
-            plugin.GBufferProbe.MaterialParameters = new GBufferMaterial(g0, g1, g2, g3, g4, (byte)stencil);
-        }
-
-        if (ImGui.Button(Loc.Text("Config.GBufferMaterialParameters.Reset")))
-        {
-            plugin.GBufferProbe.ResetMaterialParameters();
-        }
-        ImGui.SameLine();
-        DrawHelpMarker(Loc.Text("Config.GBufferMaterialParameters.Help"));
     }
 
     private void DrawSceneVisibilityCheckbox(string id, string label, Func<bool> getValue, Action<bool> setValue)

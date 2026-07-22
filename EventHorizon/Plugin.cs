@@ -101,7 +101,7 @@ public sealed class Plugin : IDalamudPlugin
     private ConfigWindow ConfigWindow { get; init; }
     private PlayerPreviewWindow PlayerPreviewWindow { get; init; }
     private DemoWindow UnderpaintDemoWindow { get; init; }
-    private UnderpaintRenderer? UnderpaintRenderer { get; init; }
+    private Renderer? UnderpaintRenderer { get; init; }
     private CullingController Culling { get; init; }
     private PlayerPreviewHighlighter PlayerPreviewHighlighter { get; init; }
     private ActorVfxController ActorVfxController { get; init; }
@@ -109,7 +109,6 @@ public sealed class Plugin : IDalamudPlugin
     private StaticVfxController StaticVfxController { get; init; }
     private WorldDotOverlay WorldDotOverlay { get; init; }
     private SceneVisibilityController SceneVisibilityController { get; init; }
-    private GBufferProbeController GBufferProbeController { get; init; }
 #if DEBUG
     private NativeBgObjectPreviewController NativeBgObjectPreview { get; init; }
 #endif
@@ -120,7 +119,6 @@ public sealed class Plugin : IDalamudPlugin
 
     public int HiddenPlayerCount => Culling.HiddenPlayerCount;
     internal CullingStatus CullingStatus => Culling.GetStatus();
-    internal GBufferProbeController GBufferProbe => GBufferProbeController;
 
     #endregion
 
@@ -156,7 +154,6 @@ public sealed class Plugin : IDalamudPlugin
 #if DEBUG
             NativeBgObjectPreview = new NativeBgObjectPreviewController();
 #endif
-            GBufferProbeController = new GBufferProbeController(Configuration, UnderpaintRenderer);
             Culling = new CullingController(
                 GameInteropProvider,
                 SigScanner,
@@ -288,7 +285,6 @@ public sealed class Plugin : IDalamudPlugin
         NativeBgObjectPreview?.Dispose();
 #endif
         SceneVisibilityController?.Dispose();
-        GBufferProbeController?.Dispose();
         UnderpaintRenderer?.Dispose();
         TargetingMarkerController?.Dispose();
         DtrBackground?.Dispose();
@@ -382,26 +378,15 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
-    private void DrawGBufferProbeWorldArrow()
-    {
-        var localPlayer = ObjectTable.LocalPlayer;
-        if (localPlayer == null || !GBufferProbeController.TryGetWorldMarker(out var marker))
-        {
-            return;
-        }
-
-        PlayerPreviewWorldArrowRenderer.Draw(localPlayer.Position, marker.Center, GameGui, marker.Color, marker.Label);
-    }
-
-    private static UnderpaintRenderer? InitializeUnderpaint()
+    private static Renderer? InitializeUnderpaint()
     {
         try
         {
-            return new UnderpaintRenderer(GameInteropProvider, Log);
+            return new Renderer(GameInteropProvider, SigScanner, Log);
         }
         catch (Exception exception)
         {
-            Log.Error(exception, "Underpaint initialization failed; G-buffer drawing is unavailable.");
+            Log.Error(exception, "Underpaint initialization failed.");
             return null;
         }
     }
@@ -415,7 +400,6 @@ public sealed class Plugin : IDalamudPlugin
         Culling.TemporarilyShowAllPlayers = IsTemporaryShowAllPlayersShortcutHeld();
 
         SceneVisibilityController.Update();
-        GBufferProbeController.Update();
 #if DEBUG
         NativeBgObjectPreview.Update();
 #endif

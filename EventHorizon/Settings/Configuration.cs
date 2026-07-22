@@ -94,7 +94,6 @@ internal class Configuration : IPluginConfiguration
     public bool HideWater { get; set; } = false;
     public bool HideGrass { get; set; } = false;
     public bool HideAll3DScene { get; set; } = false;
-    public bool EnableGBufferProbe { get; set; } = false;
 
     [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
     public List<PlayerKeepRuleId> KeepRuleOrder { get; set; } = PlayerKeepRuleOrder.CreateDefaultOrder();
@@ -116,7 +115,6 @@ internal class Configuration : IPluginConfiguration
             HideWater = false,
             HideGrass = false,
             HideAll3DScene = false,
-            EnableGBufferProbe = false,
         };
 
     public bool Normalize(Func<int, bool> isValidVirtualKey)
