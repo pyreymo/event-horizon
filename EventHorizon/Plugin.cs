@@ -175,7 +175,7 @@ public sealed class Plugin : IDalamudPlugin
             );
             ConfigWindow = new ConfigWindow(this, DataManager, playerPreviewPanel, IsPlayerPreviewWindowOpen, TogglePlayerPreviewWindow);
             PlayerPreviewWindow = new PlayerPreviewWindow(playerPreviewPanel, OpenMainUi);
-            UnderpaintDemoWindow = new DemoWindow(UnderpaintRenderer);
+            UnderpaintDemoWindow = new DemoWindow();
             DtrStatusBar = new DtrBar(DtrBar, Configuration, Culling.GetStatus, SetPlayerHidingEnabled, ToggleConfigUi);
             DtrBackground = new DtrBackground(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
             TargetingMarkerController = new TargetingMarkerController(
@@ -397,7 +397,6 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnFrameworkUpdate(IFramework framework)
     {
-        UnderpaintDemoWindow.SubmitFrame();
         Culling.TemporarilyShowAllPlayers = IsTemporaryShowAllPlayersShortcutHeld();
 
         SceneVisibilityController.Update();
