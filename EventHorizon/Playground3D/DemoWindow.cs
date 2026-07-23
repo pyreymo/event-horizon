@@ -13,8 +13,10 @@ internal sealed unsafe class DemoWindow : Window
     private const int MainRenderCameraSubView = 12;
 
     private readonly Renderer? renderer;
+    private readonly Triangle[] frame = new Triangle[2];
     private Matrix4x4 anchorWorld;
     private Matrix4x4 currentWorld;
+    private Matrix4x4 secondCurrentWorld;
     private bool hasAnchorWorld;
     private Vector3 offset;
     private float rotationDegrees;
@@ -58,16 +60,22 @@ internal sealed unsafe class DemoWindow : Window
 
             anchorWorld = Matrix4x4.CreateTranslation(0, 0, -5) * inverseView;
             currentWorld = anchorWorld;
+            secondCurrentWorld = Matrix4x4.CreateTranslation(1.5f, 0, 0) * anchorWorld;
             hasAnchorWorld = true;
         }
 
         var previousWorld = currentWorld;
+        var secondPreviousWorld = secondCurrentWorld;
         currentWorld =
             Matrix4x4.CreateScale(scale)
             * Matrix4x4.CreateRotationY(rotationDegrees * MathF.PI / 180)
             * Matrix4x4.CreateTranslation(offset)
             * anchorWorld;
-        renderer.SubmitTriangle(TriangleId, currentWorld, previousWorld, color, alpha, ditherFade);
+        secondCurrentWorld = Matrix4x4.CreateScale(0.75f) * Matrix4x4.CreateTranslation(offset + new Vector3(1.5f, 0, 0)) * anchorWorld;
+
+        frame[0] = new Triangle(TriangleId, currentWorld, previousWorld, color, alpha, ditherFade);
+        frame[1] = new Triangle(2, secondCurrentWorld, secondPreviousWorld, new Vector3(0, 1, 0), 0.75f, 1);
+        renderer.SubmitFrame(frame);
     }
 
     public override void Draw()
@@ -78,6 +86,7 @@ internal sealed unsafe class DemoWindow : Window
         ImGui.ColorEdit3("Color", ref color);
         ImGui.SliderFloat("Alpha", ref alpha, 0, 1, "%.2f");
         ImGui.SliderFloat("Dither fade (unknown semantics)", ref ditherFade, 0, 1, "%.2f");
+        ImGui.TextUnformatted("Triangle 2: fixed green, alpha 0.75, shifted right.");
 
         if (ImGui.Button("Reset"))
         {
