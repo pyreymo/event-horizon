@@ -9,14 +9,16 @@ namespace EventHorizon.Playground3D;
 internal sealed unsafe class DemoWindow : Window
 {
     private const ulong TriangleId = 1;
+    private const ulong QuadId = 3;
     private const int MainView = 30;
     private const int MainRenderCameraSubView = 12;
 
     private readonly Renderer? renderer;
-    private readonly Triangle[] frame = new Triangle[2];
+    private readonly Primitive[] frame = new Primitive[3];
     private Matrix4x4 anchorWorld;
     private Matrix4x4 currentWorld;
     private Matrix4x4 secondCurrentWorld;
+    private Matrix4x4 quadCurrentWorld;
     private bool hasAnchorWorld;
     private Vector3 offset;
     private float rotationDegrees;
@@ -61,20 +63,24 @@ internal sealed unsafe class DemoWindow : Window
             anchorWorld = Matrix4x4.CreateTranslation(0, 0, -5) * inverseView;
             currentWorld = anchorWorld;
             secondCurrentWorld = Matrix4x4.CreateTranslation(1.5f, 0, 0) * anchorWorld;
+            quadCurrentWorld = Matrix4x4.CreateTranslation(-1.5f, 0, 0) * anchorWorld;
             hasAnchorWorld = true;
         }
 
         var previousWorld = currentWorld;
         var secondPreviousWorld = secondCurrentWorld;
+        var quadPreviousWorld = quadCurrentWorld;
         currentWorld =
             Matrix4x4.CreateScale(scale)
             * Matrix4x4.CreateRotationY(rotationDegrees * MathF.PI / 180)
             * Matrix4x4.CreateTranslation(offset)
             * anchorWorld;
         secondCurrentWorld = Matrix4x4.CreateScale(0.75f) * Matrix4x4.CreateTranslation(offset + new Vector3(1.5f, 0, 0)) * anchorWorld;
+        quadCurrentWorld = Matrix4x4.CreateScale(0.75f) * Matrix4x4.CreateTranslation(offset + new Vector3(-1.5f, 0, 0)) * anchorWorld;
 
-        frame[0] = new Triangle(TriangleId, currentWorld, previousWorld, color, alpha, ditherFade);
-        frame[1] = new Triangle(2, secondCurrentWorld, secondPreviousWorld, new Vector3(0, 1, 0), 0.75f, 1);
+        frame[0] = new Primitive(PrimitiveType.Triangle, TriangleId, currentWorld, previousWorld, color, alpha, ditherFade);
+        frame[1] = new Primitive(PrimitiveType.Triangle, 2, secondCurrentWorld, secondPreviousWorld, new Vector3(0, 1, 0), 0.75f, 1);
+        frame[2] = new Primitive(PrimitiveType.Quad, QuadId, quadCurrentWorld, quadPreviousWorld, new Vector3(0, 0.5f, 1), 0.65f, 1);
         renderer.SubmitFrame(frame);
     }
 
@@ -87,6 +93,7 @@ internal sealed unsafe class DemoWindow : Window
         ImGui.SliderFloat("Alpha", ref alpha, 0, 1, "%.2f");
         ImGui.SliderFloat("Dither fade (unknown semantics)", ref ditherFade, 0, 1, "%.2f");
         ImGui.TextUnformatted("Triangle 2: fixed green, alpha 0.75, shifted right.");
+        ImGui.TextUnformatted("Quad: fixed blue, alpha 0.65, shifted left.");
 
         if (ImGui.Button("Reset"))
         {
