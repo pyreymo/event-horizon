@@ -75,7 +75,7 @@ internal sealed unsafe class DemoWindow : Window
         ImGui.SliderFloat("Rotation", ref rotationDegrees, -180, 180, "%.0f deg");
         ImGui.SliderFloat("Scale", ref scale, 0.1f, 5, "%.2f");
         ImGui.ColorEdit3("Color", ref color);
-        ImGui.SliderFloat("Dither alpha", ref alpha, 0, 1, "%.2f");
+        ImGui.SliderFloat("Alpha", ref alpha, 0, 1, "%.2f");
 
         if (ImGui.Button("Reset"))
         {
