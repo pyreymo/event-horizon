@@ -21,6 +21,7 @@ internal sealed unsafe class DemoWindow : Window
     private float scale = 1;
     private Vector3 color = new(1, 0, 0);
     private float alpha = 0.5f;
+    private float ditherFade = 1;
 
     public DemoWindow(Renderer? renderer)
         : base("Rendering Research")
@@ -66,7 +67,7 @@ internal sealed unsafe class DemoWindow : Window
             * Matrix4x4.CreateRotationY(rotationDegrees * MathF.PI / 180)
             * Matrix4x4.CreateTranslation(offset)
             * anchorWorld;
-        renderer.SubmitTriangle(TriangleId, currentWorld, previousWorld, color, alpha);
+        renderer.SubmitTriangle(TriangleId, currentWorld, previousWorld, color, alpha, ditherFade);
     }
 
     public override void Draw()
@@ -76,6 +77,7 @@ internal sealed unsafe class DemoWindow : Window
         ImGui.SliderFloat("Scale", ref scale, 0.1f, 5, "%.2f");
         ImGui.ColorEdit3("Color", ref color);
         ImGui.SliderFloat("Alpha", ref alpha, 0, 1, "%.2f");
+        ImGui.SliderFloat("Dither fade (unknown semantics)", ref ditherFade, 0, 1, "%.2f");
 
         if (ImGui.Button("Reset"))
         {
@@ -84,6 +86,7 @@ internal sealed unsafe class DemoWindow : Window
             scale = 1;
             color = new Vector3(1, 0, 0);
             alpha = 0.5f;
+            ditherFade = 1;
         }
     }
 }
