@@ -23,7 +23,6 @@ internal sealed unsafe class DemoWindow : Window
     private Matrix4x4 icosahedronCurrentWorld;
     private bool hasAnchorWorld;
     private Vector3 offset;
-    private float groupHorizontalOffset;
     private float rotationDegrees;
     private float scale = 1;
     private Vector3 color = new(1, 0, 0);
@@ -75,19 +74,17 @@ internal sealed unsafe class DemoWindow : Window
         var secondPreviousWorld = secondCurrentWorld;
         var quadPreviousWorld = quadCurrentWorld;
         var icosahedronPreviousWorld = icosahedronCurrentWorld;
-        var groupOffset = offset + new Vector3(groupHorizontalOffset, 0, 0);
         currentWorld =
             Matrix4x4.CreateScale(scale)
             * Matrix4x4.CreateRotationY(rotationDegrees * MathF.PI / 180)
-            * Matrix4x4.CreateTranslation(groupOffset)
+            * Matrix4x4.CreateTranslation(offset)
             * anchorWorld;
-        secondCurrentWorld =
-            Matrix4x4.CreateScale(0.75f) * Matrix4x4.CreateTranslation(groupOffset + new Vector3(1.5f, 0, 0)) * anchorWorld;
-        quadCurrentWorld = Matrix4x4.CreateScale(0.75f) * Matrix4x4.CreateTranslation(groupOffset + new Vector3(-1.5f, 0, 0)) * anchorWorld;
+        secondCurrentWorld = Matrix4x4.CreateScale(0.75f) * Matrix4x4.CreateTranslation(offset + new Vector3(1.5f, 0, 0)) * anchorWorld;
+        quadCurrentWorld = Matrix4x4.CreateScale(0.75f) * Matrix4x4.CreateTranslation(offset + new Vector3(-1.5f, 0, 0)) * anchorWorld;
         icosahedronCurrentWorld =
             Matrix4x4.CreateScale(1.2f)
             * Matrix4x4.CreateFromYawPitchRoll(0.35f, 0.2f, 0)
-            * Matrix4x4.CreateTranslation(groupOffset + new Vector3(0, 1.4f, 0))
+            * Matrix4x4.CreateTranslation(offset + new Vector3(0, 1.4f, 0))
             * anchorWorld;
 
         frame[0] = new Primitive(PrimitiveType.Triangle, TriangleId, currentWorld, previousWorld, color, alpha, ditherFade);
@@ -108,7 +105,6 @@ internal sealed unsafe class DemoWindow : Window
     public override void Draw()
     {
         ImGui.DragFloat3("Offset", ref offset, 0.05f);
-        ImGui.SliderFloat("Group horizontal offset", ref groupHorizontalOffset, -10, 10, "%.2f");
         ImGui.SliderFloat("Rotation", ref rotationDegrees, -180, 180, "%.0f deg");
         ImGui.SliderFloat("Scale", ref scale, 0.1f, 5, "%.2f");
         ImGui.ColorEdit3("Color", ref color);
@@ -121,7 +117,6 @@ internal sealed unsafe class DemoWindow : Window
         if (ImGui.Button("Reset"))
         {
             offset = default;
-            groupHorizontalOffset = 0;
             rotationDegrees = 0;
             scale = 1;
             color = new Vector3(1, 0, 0);
