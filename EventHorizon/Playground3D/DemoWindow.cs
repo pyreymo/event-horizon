@@ -161,7 +161,7 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.TextUnformatted(primitive.Name);
         ImGui.Separator();
         ImGui.DragFloat3("Position", ref primitive.Position, 0.05f);
-        ImGui.ColorEdit4("Color", ref primitive.Color);
+        ImGui.ColorEdit4("Color", ref primitive.Color, ImGuiColorEditFlags.DisplayRgb | ImGuiColorEditFlags.InputRgb);
         ImGui.SliderFloat("Dither", ref primitive.Dither, 0f, 1f, "%.2f");
 
         if (primitive.Drawable is not RectangleDrawable rectangle)
