@@ -86,6 +86,19 @@ internal sealed class DemoWindow : Window, IDisposable
                 ClearAll();
         }
 
+#if DEBUG
+        if (primitives.Count > 0)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Capture SortKeys"))
+                renderer.ArmSortKeyCapture();
+        }
+
+        var sortKeyCaptureStatus = renderer.SortKeyCaptureStatus;
+        if (!string.IsNullOrEmpty(sortKeyCaptureStatus))
+            ImGui.TextWrapped(sortKeyCaptureStatus);
+#endif
+
         ImGui.Separator();
         if (!ImGui.BeginTable("Primitive editor", 2, ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.Resizable))
             return;
