@@ -1,127 +1,100 @@
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
-using FFXIVClientStructs.FFXIV.Client.Graphics.Render;
+using Dalamud.Plugin.Services;
 using Underpaint;
 
 namespace EventHorizon.Playground3D;
 
-internal sealed unsafe class DemoWindow : Window
+internal sealed class DemoWindow : Window, IDisposable
 {
-    private const ulong TriangleId = 1;
-    private const ulong QuadId = 3;
-    private const ulong IcosahedronId = 4;
-    private const int MainView = 30;
-    private const int MainRenderCameraSubView = 12;
+    private static readonly Matrix4x4 GroundRotation = Matrix4x4.CreateRotationX(-MathF.PI / 2f);
+    private static readonly Vector3 TriangleColor = new(1f, 0.15f, 0.1f);
+    private static readonly Vector3 RectangleColor = new(0.1f, 0.5f, 1f);
 
     private readonly Renderer? renderer;
-    private readonly Primitive[] frame = new Primitive[4];
-    private Matrix4x4 anchorWorld;
-    private Matrix4x4 currentWorld;
-    private Matrix4x4 secondCurrentWorld;
-    private Matrix4x4 quadCurrentWorld;
-    private Matrix4x4 icosahedronCurrentWorld;
-    private bool hasAnchorWorld;
-    private Vector3 offset;
-    private float rotationDegrees;
-    private float scale = 1;
-    private Vector3 color = new(1, 0, 0);
-    private float alpha = 0.5f;
-    private float ditherFade = 1;
+    private readonly IObjectTable objectTable;
+    private TriangleDrawable? triangle;
+    private RectangleDrawable? rectangle;
+    private Vector3 trianglePosition;
+    private Vector3 rectanglePosition;
+    private float rectangleWidth = 2f;
+    private float rectangleHeight = 1f;
 
-    public DemoWindow(Renderer? renderer)
+    public DemoWindow(Renderer? renderer, IObjectTable objectTable)
         : base("Rendering Research")
     {
         this.renderer = renderer;
+        this.objectTable = objectTable;
         IsOpen = false;
         SizeCondition = ImGuiCond.FirstUseEver;
-        Size = new Vector2(560, 480);
+        Size = new Vector2(420, 260);
         SizeConstraints = new WindowSizeConstraints
         {
-            MinimumSize = new Vector2(360, 240),
+            MinimumSize = new Vector2(320, 180),
             MaximumSize = new Vector2(float.MaxValue, float.MaxValue),
         };
     }
-
-    public void Dispose() { }
 
     public void SubmitFrame()
     {
         if (renderer == null)
             return;
 
-        if (!hasAnchorWorld)
-        {
-            var manager = Manager.Instance();
-            var camera = manager == null ? null : manager->Views[MainView].SubViews[MainRenderCameraSubView].Camera;
-            if (camera == null)
-                return;
-
-            var view = (Matrix4x4)camera->ViewMatrix;
-            view.M44 = 1;
-            if (!Matrix4x4.Invert(view, out var inverseView))
-                return;
-
-            anchorWorld = Matrix4x4.CreateTranslation(0, 0, -5) * inverseView;
-            currentWorld = anchorWorld;
-            secondCurrentWorld = Matrix4x4.CreateTranslation(1.5f, 0, 0) * anchorWorld;
-            quadCurrentWorld = Matrix4x4.CreateTranslation(-1.5f, 0, 0) * anchorWorld;
-            icosahedronCurrentWorld = Matrix4x4.CreateTranslation(0, 1.4f, 0) * anchorWorld;
-            hasAnchorWorld = true;
-        }
-
-        var previousWorld = currentWorld;
-        var secondPreviousWorld = secondCurrentWorld;
-        var quadPreviousWorld = quadCurrentWorld;
-        var icosahedronPreviousWorld = icosahedronCurrentWorld;
-        currentWorld =
-            Matrix4x4.CreateScale(scale)
-            * Matrix4x4.CreateRotationY(rotationDegrees * MathF.PI / 180)
-            * Matrix4x4.CreateTranslation(offset)
-            * anchorWorld;
-        secondCurrentWorld = Matrix4x4.CreateScale(0.75f) * Matrix4x4.CreateTranslation(offset + new Vector3(1.5f, 0, 0)) * anchorWorld;
-        quadCurrentWorld = Matrix4x4.CreateScale(0.75f) * Matrix4x4.CreateTranslation(offset + new Vector3(-1.5f, 0, 0)) * anchorWorld;
-        icosahedronCurrentWorld =
-            Matrix4x4.CreateScale(1.2f)
-            * Matrix4x4.CreateFromYawPitchRoll(0.35f, 0.2f, 0)
-            * Matrix4x4.CreateTranslation(offset + new Vector3(0, 1.4f, 0))
-            * anchorWorld;
-
-        frame[0] = new Primitive(PrimitiveType.Triangle, TriangleId, currentWorld, previousWorld, color, alpha, ditherFade);
-        frame[1] = new Primitive(PrimitiveType.Triangle, 2, secondCurrentWorld, secondPreviousWorld, new Vector3(0, 1, 0), 0.75f, 1);
-        frame[2] = new Primitive(PrimitiveType.Quad, QuadId, quadCurrentWorld, quadPreviousWorld, new Vector3(0, 0.5f, 1), 0.65f, 1);
-        frame[3] = new Primitive(
-            PrimitiveType.Icosahedron,
-            IcosahedronId,
-            icosahedronCurrentWorld,
-            icosahedronPreviousWorld,
-            new Vector3(1, 0.65f, 0.1f),
-            0.75f,
-            1
-        );
-        renderer.SubmitFrame(frame);
+        using var frame = renderer.BeginFrame();
+        if (triangle != null)
+            frame.DrawTriangle(triangle, GroundRotation * Matrix4x4.CreateTranslation(trianglePosition), TriangleColor, 0.75f);
+        if (rectangle != null)
+            frame.DrawRectangle(rectangle, GroundRotation * Matrix4x4.CreateTranslation(rectanglePosition), RectangleColor, 0.65f);
+        frame.Publish();
     }
 
     public override void Draw()
     {
-        ImGui.DragFloat3("Offset", ref offset, 0.05f);
-        ImGui.SliderFloat("Rotation", ref rotationDegrees, -180, 180, "%.0f deg");
-        ImGui.SliderFloat("Scale", ref scale, 0.1f, 5, "%.2f");
-        ImGui.ColorEdit3("Color", ref color);
-        ImGui.SliderFloat("Alpha", ref alpha, 0, 1, "%.2f");
-        ImGui.SliderFloat("Dither fade (unknown semantics)", ref ditherFade, 0, 1, "%.2f");
-        ImGui.TextUnformatted("Triangle 2: fixed green, alpha 0.75, shifted right.");
-        ImGui.TextUnformatted("Quad: fixed blue, alpha 0.65, shifted left.");
-        ImGui.TextUnformatted("Icosahedron: fixed orange, alpha 0.75, shifted up.");
-
-        if (ImGui.Button("Reset"))
+        if (renderer == null)
         {
-            offset = default;
-            rotationDegrees = 0;
-            scale = 1;
-            color = new Vector3(1, 0, 0);
-            alpha = 0.5f;
-            ditherFade = 1;
+            ImGui.TextUnformatted("Underpaint is unavailable.");
+            return;
         }
+
+        var localPlayer = objectTable.LocalPlayer;
+        if (triangle == null)
+        {
+            if (ImGui.Button("Generate triangle") && localPlayer != null)
+            {
+                triangle = renderer.CreateTriangle();
+                trianglePosition = localPlayer.Position;
+            }
+        }
+        else
+        {
+            ImGui.DragFloat3("Triangle position", ref trianglePosition, 0.05f);
+        }
+
+        if (rectangle == null)
+        {
+            if (ImGui.Button("Generate rectangle") && localPlayer != null)
+            {
+                rectangle = renderer.CreateRectangle(rectangleWidth, rectangleHeight);
+                rectanglePosition = localPlayer.Position;
+            }
+        }
+        else
+        {
+            ImGui.DragFloat3("Rectangle position", ref rectanglePosition, 0.05f);
+            var sizeChanged = ImGui.SliderFloat("Rectangle width", ref rectangleWidth, 0.1f, 10f, "%.2f");
+            sizeChanged |= ImGui.SliderFloat("Rectangle height", ref rectangleHeight, 0.1f, 10f, "%.2f");
+            if (sizeChanged)
+                rectangle.Resize(rectangleWidth, rectangleHeight);
+        }
+
+        if (localPlayer == null && (triangle == null || rectangle == null))
+            ImGui.TextUnformatted("Local player is unavailable.");
+    }
+
+    public void Dispose()
+    {
+        rectangle?.Dispose();
+        triangle?.Dispose();
     }
 }
