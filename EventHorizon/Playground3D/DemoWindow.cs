@@ -2,8 +2,6 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
-using EventHorizon.Integration.Debug;
-using EventHorizon.Interop.Vfx;
 using Underpaint;
 
 namespace EventHorizon.Playground3D;
@@ -18,11 +16,6 @@ internal sealed class DemoWindow : Window, IDisposable
     private readonly List<PrimitiveItem> primitives = [];
     private int selectedIndex = -1;
     private int nextPrimitiveNumber = 1;
-#if DEBUG
-    private int avfxProbeCount = 2;
-    private Vector3 avfxProbeOffset = new(0f, 0f, 2f);
-    private Vector3 avfxProbeStep = new(0f, 0f, 0.25f);
-#endif
 
     public DemoWindow(Renderer? renderer, IObjectTable objectTable, IClientState clientState)
         : base("Rendering Research")
@@ -45,13 +38,6 @@ internal sealed class DemoWindow : Window, IDisposable
     {
         if (renderer == null)
             return;
-
-#if DEBUG
-        renderer.UpdateAvfxSortProbe();
-        var avfxReport = renderer.TakeAvfxSortProbeReport();
-        if (!string.IsNullOrEmpty(avfxReport))
-            DebugFileLog.Information("Underpaint.AvfxSortProbe", "{Report}", avfxReport);
-#endif
 
         using var frame = renderer.BeginFrame();
         if (!IsInGame())
@@ -111,21 +97,6 @@ internal sealed class DemoWindow : Window, IDisposable
         var sortKeyCaptureStatus = renderer.SortKeyCaptureStatus;
         if (!string.IsNullOrEmpty(sortKeyCaptureStatus))
             ImGui.TextWrapped(sortKeyCaptureStatus);
-
-        ImGui.Separator();
-        ImGui.TextUnformatted("Native AVFX sorting probe");
-        ImGui.SliderInt("Instance count##AvfxProbe", ref avfxProbeCount, 2, 32);
-        ImGui.DragFloat3("First offset##AvfxProbe", ref avfxProbeOffset, 0.05f);
-        ImGui.DragFloat3("Per-instance step##AvfxProbe", ref avfxProbeStep, 0.05f);
-        if (ImGui.Button("Arm category 2##AvfxProbe"))
-            ArmAvfxProbe(StaticVfxResourceRedirector.AvfxSortDepthPath, 2);
-        ImGui.SameLine();
-        if (ImGui.Button("Arm category 12##AvfxProbe"))
-            ArmAvfxProbe(StaticVfxResourceRedirector.AvfxSortPriorityPath, 12);
-        ImGui.SameLine();
-        if (ImGui.Button("Stop##AvfxProbe"))
-            renderer.StopAvfxSortProbe();
-        ImGui.TextWrapped(renderer.AvfxSortProbeStatus);
 #endif
 
         ImGui.Separator();
@@ -155,9 +126,6 @@ internal sealed class DemoWindow : Window, IDisposable
     public void Dispose()
     {
         clientState.TerritoryChanged -= OnTerritoryChanged;
-#if DEBUG
-        renderer?.StopAvfxSortProbe();
-#endif
         ClearAll();
     }
 
@@ -235,27 +203,7 @@ internal sealed class DemoWindow : Window, IDisposable
         selectedIndex = -1;
     }
 
-    private void OnTerritoryChanged(uint _)
-    {
-#if DEBUG
-        renderer?.StopAvfxSortProbe();
-#endif
-        ClearAll();
-    }
-
-#if DEBUG
-    private void ArmAvfxProbe(string resourcePath, int expectedDrawLayerType)
-    {
-        var localPlayer = objectTable.LocalPlayer;
-        if (renderer == null || localPlayer == null)
-            return;
-
-        var positions = new Vector3[avfxProbeCount];
-        for (var index = 0; index < positions.Length; index++)
-            positions[index] = localPlayer.Position + avfxProbeOffset + avfxProbeStep * index;
-        renderer.ArmAvfxSortProbe(resourcePath, positions, expectedDrawLayerType);
-    }
-#endif
+    private void OnTerritoryChanged(uint _) => ClearAll();
 
     private sealed class PrimitiveItem(string name, IDisposable drawable, Vector3 position, Vector4 color) : IDisposable
     {

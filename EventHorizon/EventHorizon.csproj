@@ -18,10 +18,6 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>true</Visible>
     </Content>
-    <Content Include="Assets\no-binder-priority.avfx">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Visible>true</Visible>
-    </Content>
     <EmbeddedResource Include="Assets\gaze-marker.png" />
   </ItemGroup>
 
