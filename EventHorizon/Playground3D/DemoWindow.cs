@@ -25,7 +25,7 @@ internal sealed class DemoWindow : Window, IDisposable
     private bool createTwoAvfxInstances = true;
     private Vector3 avfxInstanceSpacing = new(1.5f, 0f, 0f);
     private bool testAvfxAlphaOrdering;
-    private float avfxPerformanceSpacing = 0.35f;
+    private float avfxPerformanceSpacing = 0.01f;
 #endif
 
     public DemoWindow(Renderer? renderer, IObjectTable objectTable, IClientState clientState)
@@ -142,16 +142,19 @@ internal sealed class DemoWindow : Window, IDisposable
         if (ImGui.Button("Baseline (0)##AvfxPerformance"))
             StartAvfxPerformanceProbe(0);
         ImGui.SameLine();
-        if (ImGui.Button("8 hosts##AvfxPerformance"))
-            StartAvfxPerformanceProbe(8);
+        if (ImGui.Button("1K hosts##AvfxPerformance"))
+            StartAvfxPerformanceProbe(1024);
         ImGui.SameLine();
-        if (ImGui.Button("32 hosts##AvfxPerformance"))
-            StartAvfxPerformanceProbe(32);
-        if (ImGui.Button("128 hosts##AvfxPerformance"))
-            StartAvfxPerformanceProbe(128);
+        if (ImGui.Button("4K hosts##AvfxPerformance"))
+            StartAvfxPerformanceProbe(4096);
+        if (ImGui.Button("16K hosts##AvfxPerformance"))
+            StartAvfxPerformanceProbe(16384);
         ImGui.SameLine();
-        if (ImGui.Button("512 hosts##AvfxPerformance"))
-            StartAvfxPerformanceProbe(512);
+        if (ImGui.Button("64K hosts##AvfxPerformance"))
+            StartAvfxPerformanceProbe(65536);
+        ImGui.SameLine();
+        if (ImGui.Button("256K hosts##AvfxPerformance"))
+            StartAvfxPerformanceProbe(262144);
         ImGui.SameLine();
         if (ImGui.Button("Stop##AvfxPerformance"))
             renderer.StopAvfxPerformanceProbe();
