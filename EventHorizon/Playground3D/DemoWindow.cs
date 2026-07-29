@@ -24,6 +24,7 @@ internal sealed class DemoWindow : Window, IDisposable
     private bool animateAvfxVertices;
     private bool createTwoAvfxInstances = true;
     private Vector3 avfxInstanceSpacing = new(1.5f, 0f, 0f);
+    private bool testAvfxAlphaOrdering;
 #endif
 
     public DemoWindow(Renderer? renderer, IObjectTable objectTable, IClientState clientState)
@@ -118,7 +119,8 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.Checkbox("Animate color and alpha##AvfxGeometry", ref animateAvfxColorAndAlpha);
         ImGui.Checkbox("Animate vertex positions##AvfxGeometry", ref animateAvfxVertices);
         ImGui.Checkbox("Create two instances##AvfxGeometry", ref createTwoAvfxInstances);
-        if (createTwoAvfxInstances)
+        ImGui.Checkbox("Test alpha ordering##AvfxGeometry", ref testAvfxAlphaOrdering);
+        if (createTwoAvfxInstances || testAvfxAlphaOrdering)
             ImGui.DragFloat3("Instance spacing##AvfxGeometry", ref avfxInstanceSpacing, 0.05f);
         ImGui.TextDisabled("Animation options are applied when the shell starts.");
         if (ImGui.Button("Start lifecycle shell##AvfxGeometry"))
@@ -126,6 +128,10 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.SameLine();
         if (ImGui.Button("Stop##AvfxGeometry"))
             renderer.StopAvfxGeometryProbe();
+        if (testAvfxAlphaOrdering && ImGui.Button("Swap red/blue positions##AvfxGeometry"))
+            renderer.SwapAvfxGeometryProbePositions();
+        if (testAvfxAlphaOrdering)
+            ImGui.TextWrapped("Align the two triangles in screen space with different camera depths, then swap positions.");
         ImGui.TextWrapped(renderer.AvfxGeometryProbeStatus);
 #endif
 
@@ -255,9 +261,10 @@ internal sealed class DemoWindow : Window, IDisposable
             StaticVfxResourceRedirector.UnderpaintShellPath,
             localPlayer.Position + avfxHostOffset,
             avfxTransformOffset,
-            animateAvfxColorAndAlpha,
-            animateAvfxVertices,
-            createTwoAvfxInstances ? 2 : 1,
+            animateAvfxColorAndAlpha && !testAvfxAlphaOrdering,
+            animateAvfxVertices && !testAvfxAlphaOrdering,
+            testAvfxAlphaOrdering,
+            testAvfxAlphaOrdering || createTwoAvfxInstances ? 2 : 1,
             avfxInstanceSpacing
         );
     }
