@@ -73,6 +73,9 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.SameLine();
         if (ImGui.Button("Add sphere"))
             AddSphere();
+        ImGui.SameLine();
+        if (ImGui.Button("Add animated decal ring"))
+            AddAnimatedDecalRing();
         if (selectedIndex >= 0)
         {
             ImGui.SameLine();
@@ -125,6 +128,9 @@ internal sealed class DemoWindow : Window, IDisposable
         Add("Rectangle", renderer!.CreateRectangle(2f, 1f), new Vector4(0.1f, 0.5f, 1f, 0.65f));
 
     private void AddSphere() => Add("Sphere", renderer!.CreateSphere(1f), new Vector4(0.5f, 0.2f, 1f, 0.65f));
+
+    private void AddAnimatedDecalRing() =>
+        Add("Animated decal ring", renderer!.CreateAnimatedDecalRing(), new Vector4(1f, 0.25f, 0.05f, 1f));
 
     private void Add(string kind, IDisposable drawable, Vector4 color)
     {
@@ -188,7 +194,12 @@ internal sealed class DemoWindow : Window, IDisposable
 
         internal void Draw(PrimitiveFrame frame)
         {
-            var transform = Drawable is SphereDrawable ? Matrix4x4.CreateTranslation(Position) : GroundRotation * Matrix4x4.CreateTranslation(Position);
+            var transform = Drawable switch
+            {
+                SphereDrawable => Matrix4x4.CreateTranslation(Position),
+                DecalRingDrawable => Matrix4x4.CreateScale(3f) * Matrix4x4.CreateTranslation(Position),
+                _ => GroundRotation * Matrix4x4.CreateTranslation(Position),
+            };
             var color = new Vector3(Color.X, Color.Y, Color.Z);
             switch (Drawable)
             {
@@ -200,6 +211,9 @@ internal sealed class DemoWindow : Window, IDisposable
                     break;
                 case SphereDrawable sphere:
                     frame.DrawSphere(sphere, transform, Position, color, Color.W);
+                    break;
+                case DecalRingDrawable ring:
+                    frame.DrawAnimatedDecalRing(ring, transform, color, Color.W);
                     break;
             }
         }
