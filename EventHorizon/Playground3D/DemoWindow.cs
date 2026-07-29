@@ -21,6 +21,7 @@ internal sealed class DemoWindow : Window, IDisposable
     private Vector3 avfxHostOffset = new(0f, 0f, 2f);
     private Vector3 avfxTransformOffset = new(0f, 0f, 1f);
     private bool avfxUseOwnedMesh;
+    private bool avfxUseControlledTransform;
 #endif
 
     public DemoWindow(Renderer? renderer, IObjectTable objectTable, IClientState clientState)
@@ -114,6 +115,8 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.DragFloat3("Transform offset##AvfxGeometry", ref avfxTransformOffset, 0.05f);
         if (ImGui.Checkbox("Use owned unit triangle##AvfxGeometry", ref avfxUseOwnedMesh))
             renderer.SetAvfxGeometryProbeOwnedMesh(avfxUseOwnedMesh);
+        if (ImGui.Checkbox("Use controlled world transform##AvfxGeometry", ref avfxUseControlledTransform))
+            renderer.SetAvfxGeometryProbeControlledTransform(avfxUseControlledTransform);
         if (ImGui.Button("Start descriptor substitution##AvfxGeometry"))
             StartAvfxGeometryProbe();
         ImGui.SameLine();
@@ -245,6 +248,7 @@ internal sealed class DemoWindow : Window, IDisposable
             return;
 
         renderer.SetAvfxGeometryProbeOwnedMesh(avfxUseOwnedMesh);
+        renderer.SetAvfxGeometryProbeControlledTransform(avfxUseControlledTransform);
         renderer.StartAvfxGeometryProbe(
             StaticVfxResourceRedirector.HiddenPlayerGroundMarkerPath,
             localPlayer.Position + avfxHostOffset,
