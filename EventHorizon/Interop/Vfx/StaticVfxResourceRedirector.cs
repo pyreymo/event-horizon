@@ -14,15 +14,19 @@ namespace EventHorizon.Interop.Vfx;
 internal sealed unsafe class StaticVfxResourceRedirector : IDisposable
 {
     public const string HiddenPlayerGroundMarkerPath = "vfx/common/eff/x6d8_stlp_01_c0x1.avfx";
+    public const string UnderpaintShellPath = "vfx/common/eff/underpaint_shell.avfx";
 
     private const string LocalHiddenPlayerGroundMarkerAssetPath = "Assets/no-binder.avfx";
+    private const string LocalUnderpaintShellAssetPath = "Assets/underpaint-shell.avfx";
     private const string ReadFileSig =
         "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 41 54 41 55 41 56 41 57 48 81 EC ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 ?? ?? ?? ?? 48 63 42";
     private const string ReadSqpackSig = "40 56 41 56 48 83 EC ?? 0F BE 02";
 
     private readonly IPluginLog log;
     private readonly string localHiddenPlayerGroundMarkerPath;
+    private readonly string localUnderpaintShellPath;
     private bool loggedMissingAsset;
+    private bool loggedMissingShellAsset;
     private bool disposed;
 
     [Signature(ReadSqpackSig, DetourName = nameof(ReadSqpackDetour))]
@@ -39,6 +43,7 @@ internal sealed unsafe class StaticVfxResourceRedirector : IDisposable
             ?? Path.GetDirectoryName(typeof(StaticVfxResourceRedirector).Assembly.Location)
             ?? AppContext.BaseDirectory;
         localHiddenPlayerGroundMarkerPath = Path.Combine(assemblyDirectory, LocalHiddenPlayerGroundMarkerAssetPath);
+        localUnderpaintShellPath = Path.Combine(assemblyDirectory, LocalUnderpaintShellAssetPath);
 
         try
         {
@@ -74,16 +79,33 @@ internal sealed unsafe class StaticVfxResourceRedirector : IDisposable
         }
 
         var actualPath = GetResourcePath(fileDesc->ResourceHandle);
-        if (!actualPath.Equals(HiddenPlayerGroundMarkerPath, StringComparison.OrdinalIgnoreCase))
+        string localPath;
+        if (actualPath.Equals(HiddenPlayerGroundMarkerPath, StringComparison.OrdinalIgnoreCase))
+        {
+            localPath = localHiddenPlayerGroundMarkerPath;
+        }
+        else if (actualPath.Equals(UnderpaintShellPath, StringComparison.OrdinalIgnoreCase))
+        {
+            localPath = localUnderpaintShellPath;
+        }
+        else
         {
             return readSqpackHook.Original(fileHandler, fileDesc, priority, isSync);
         }
 
-        if (!File.Exists(localHiddenPlayerGroundMarkerPath))
+        if (!File.Exists(localPath))
         {
-            if (!loggedMissingAsset)
+            if (actualPath.Equals(UnderpaintShellPath, StringComparison.OrdinalIgnoreCase))
             {
-                log.Warning("Static VFX asset missing. path={Path}", localHiddenPlayerGroundMarkerPath);
+                if (!loggedMissingShellAsset)
+                {
+                    log.Warning("Underpaint shell asset missing. path={Path}", localPath);
+                    loggedMissingShellAsset = true;
+                }
+            }
+            else if (!loggedMissingAsset)
+            {
+                log.Warning("Static VFX asset missing. path={Path}", localPath);
                 loggedMissingAsset = true;
             }
 
@@ -91,9 +113,9 @@ internal sealed unsafe class StaticVfxResourceRedirector : IDisposable
         }
 
         fileDesc->FileMode = GameFileMode.LoadUnpackedResource;
-        fileDesc->FilePathString = localHiddenPlayerGroundMarkerPath;
+        fileDesc->FilePathString = localPath;
 
-        var utfPath = Encoding.Unicode.GetBytes(localHiddenPlayerGroundMarkerPath);
+        var utfPath = Encoding.Unicode.GetBytes(localPath);
         var fileInterface = stackalloc byte[0x20 + utfPath.Length + 0x16];
         Marshal.Copy(utfPath, 0, (nint)fileInterface + 0x21, utfPath.Length);
         fileDesc->FileInterface = (FileInterface*)fileInterface;
