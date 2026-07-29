@@ -22,6 +22,8 @@ internal sealed class DemoWindow : Window, IDisposable
     private Vector3 avfxTransformOffset = new(0f, 0f, 1f);
     private bool animateAvfxColorAndAlpha = true;
     private bool animateAvfxVertices;
+    private bool createTwoAvfxInstances = true;
+    private Vector3 avfxInstanceSpacing = new(1.5f, 0f, 0f);
 #endif
 
     public DemoWindow(Renderer? renderer, IObjectTable objectTable, IClientState clientState)
@@ -115,6 +117,9 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.DragFloat3("Transform offset##AvfxGeometry", ref avfxTransformOffset, 0.05f);
         ImGui.Checkbox("Animate color and alpha##AvfxGeometry", ref animateAvfxColorAndAlpha);
         ImGui.Checkbox("Animate vertex positions##AvfxGeometry", ref animateAvfxVertices);
+        ImGui.Checkbox("Create two instances##AvfxGeometry", ref createTwoAvfxInstances);
+        if (createTwoAvfxInstances)
+            ImGui.DragFloat3("Instance spacing##AvfxGeometry", ref avfxInstanceSpacing, 0.05f);
         ImGui.TextDisabled("Animation options are applied when the shell starts.");
         if (ImGui.Button("Start lifecycle shell##AvfxGeometry"))
             StartAvfxGeometryProbe();
@@ -251,7 +256,9 @@ internal sealed class DemoWindow : Window, IDisposable
             localPlayer.Position + avfxHostOffset,
             avfxTransformOffset,
             animateAvfxColorAndAlpha,
-            animateAvfxVertices
+            animateAvfxVertices,
+            createTwoAvfxInstances ? 2 : 1,
+            avfxInstanceSpacing
         );
     }
 #endif
