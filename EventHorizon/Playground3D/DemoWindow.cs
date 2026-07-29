@@ -20,6 +20,8 @@ internal sealed class DemoWindow : Window, IDisposable
 #if DEBUG
     private Vector3 avfxHostOffset = new(0f, 0f, 2f);
     private Vector3 avfxTransformOffset = new(0f, 0f, 1f);
+    private bool animateAvfxColorAndAlpha = true;
+    private bool animateAvfxVertices;
 #endif
 
     public DemoWindow(Renderer? renderer, IObjectTable objectTable, IClientState clientState)
@@ -111,6 +113,9 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.TextUnformatted("AVFX lifecycle shell gate");
         ImGui.DragFloat3("Host offset##AvfxGeometry", ref avfxHostOffset, 0.05f);
         ImGui.DragFloat3("Transform offset##AvfxGeometry", ref avfxTransformOffset, 0.05f);
+        ImGui.Checkbox("Animate color and alpha##AvfxGeometry", ref animateAvfxColorAndAlpha);
+        ImGui.Checkbox("Animate vertex positions##AvfxGeometry", ref animateAvfxVertices);
+        ImGui.TextDisabled("Animation options are applied when the shell starts.");
         if (ImGui.Button("Start lifecycle shell##AvfxGeometry"))
             StartAvfxGeometryProbe();
         ImGui.SameLine();
@@ -244,7 +249,9 @@ internal sealed class DemoWindow : Window, IDisposable
         renderer.StartAvfxGeometryProbe(
             StaticVfxResourceRedirector.UnderpaintShellPath,
             localPlayer.Position + avfxHostOffset,
-            avfxTransformOffset
+            avfxTransformOffset,
+            animateAvfxColorAndAlpha,
+            animateAvfxVertices
         );
     }
 #endif
