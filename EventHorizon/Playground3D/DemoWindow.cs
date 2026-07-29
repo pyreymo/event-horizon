@@ -25,6 +25,7 @@ internal sealed class DemoWindow : Window, IDisposable
     private bool createTwoAvfxInstances = true;
     private Vector3 avfxInstanceSpacing = new(1.5f, 0f, 0f);
     private bool testAvfxAlphaOrdering;
+    private float avfxPerformanceSpacing = 0.35f;
 #endif
 
     public DemoWindow(Renderer? renderer, IObjectTable objectTable, IClientState clientState)
@@ -44,13 +45,14 @@ internal sealed class DemoWindow : Window, IDisposable
         };
     }
 
-    public void SubmitFrame()
+    public void SubmitFrame(TimeSpan frameDelta)
     {
         if (renderer == null)
             return;
 
 #if DEBUG
         renderer.UpdateAvfxGeometryProbe();
+        renderer.UpdateAvfxPerformanceProbe(frameDelta);
 #endif
 
         using var frame = renderer.BeginFrame();
@@ -133,6 +135,27 @@ internal sealed class DemoWindow : Window, IDisposable
         if (testAvfxAlphaOrdering)
             ImGui.TextWrapped("Align the two triangles in screen space with different camera depths, then swap positions.");
         ImGui.TextWrapped(renderer.AvfxGeometryProbeStatus);
+
+        ImGui.Separator();
+        ImGui.TextUnformatted("AVFX shell host scale");
+        ImGui.DragFloat("Grid spacing##AvfxPerformance", ref avfxPerformanceSpacing, 0.01f, 0f, 2f, "%.2f");
+        if (ImGui.Button("Baseline (0)##AvfxPerformance"))
+            StartAvfxPerformanceProbe(0);
+        ImGui.SameLine();
+        if (ImGui.Button("8 hosts##AvfxPerformance"))
+            StartAvfxPerformanceProbe(8);
+        ImGui.SameLine();
+        if (ImGui.Button("32 hosts##AvfxPerformance"))
+            StartAvfxPerformanceProbe(32);
+        if (ImGui.Button("128 hosts##AvfxPerformance"))
+            StartAvfxPerformanceProbe(128);
+        ImGui.SameLine();
+        if (ImGui.Button("512 hosts##AvfxPerformance"))
+            StartAvfxPerformanceProbe(512);
+        ImGui.SameLine();
+        if (ImGui.Button("Stop##AvfxPerformance"))
+            renderer.StopAvfxPerformanceProbe();
+        ImGui.TextWrapped(renderer.AvfxPerformanceProbeStatus);
 #endif
 
         ImGui.Separator();
@@ -164,6 +187,7 @@ internal sealed class DemoWindow : Window, IDisposable
         clientState.TerritoryChanged -= OnTerritoryChanged;
 #if DEBUG
         renderer?.StopAvfxGeometryProbe();
+        renderer?.StopAvfxPerformanceProbe();
 #endif
         ClearAll();
     }
@@ -246,6 +270,7 @@ internal sealed class DemoWindow : Window, IDisposable
     {
 #if DEBUG
         renderer?.StopAvfxGeometryProbe();
+        renderer?.StopAvfxPerformanceProbe();
 #endif
         ClearAll();
     }
@@ -268,6 +293,20 @@ internal sealed class DemoWindow : Window, IDisposable
             avfxInstanceSpacing
         );
     }
+
+    private void StartAvfxPerformanceProbe(int hostCount)
+    {
+        var localPlayer = objectTable.LocalPlayer;
+        if (renderer == null || localPlayer == null)
+            return;
+
+        renderer.StartAvfxPerformanceProbe(
+            StaticVfxResourceRedirector.UnderpaintShellPath,
+            localPlayer.Position + avfxHostOffset,
+            hostCount,
+            avfxPerformanceSpacing
+        );
+    }
 #endif
 
     private sealed class PrimitiveItem(string name, IDisposable drawable, Vector3 position, Vector4 color) : IDisposable
@@ -285,10 +324,10 @@ internal sealed class DemoWindow : Window, IDisposable
             switch (Drawable)
             {
                 case TriangleDrawable triangle:
-                    frame.DrawTriangle(triangle, transform, color, Color.W, Dither);
+                    frame.DrawTriangle(triangle, transform, Position, color, Color.W, Dither);
                     break;
                 case RectangleDrawable rectangle:
-                    frame.DrawRectangle(rectangle, transform, color, Color.W, Dither);
+                    frame.DrawRectangle(rectangle, transform, Position, color, Color.W, Dither);
                     break;
             }
         }

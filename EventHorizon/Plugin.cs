@@ -397,7 +397,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnFrameworkUpdate(IFramework framework)
     {
-        UnderpaintDemoWindow.SubmitFrame();
+        UnderpaintDemoWindow.SubmitFrame(framework.UpdateDelta);
         Culling.TemporarilyShowAllPlayers = IsTemporaryShowAllPlayersShortcutHeld();
 
         SceneVisibilityController.Update();
