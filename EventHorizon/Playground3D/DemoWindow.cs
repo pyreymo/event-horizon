@@ -2,7 +2,6 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
-using EventHorizon.Interop.Vfx;
 using Underpaint;
 
 namespace EventHorizon.Playground3D;
@@ -17,19 +16,9 @@ internal sealed class DemoWindow : Window, IDisposable
     private readonly List<PrimitiveItem> primitives = [];
     private int selectedIndex = -1;
     private int nextPrimitiveNumber = 1;
-#if DEBUG
-    private Vector3 avfxHostOffset = new(0f, 0f, 2f);
-    private Vector3 avfxTransformOffset = new(0f, 0f, 1f);
-    private bool animateAvfxColorAndAlpha = true;
-    private bool animateAvfxVertices;
-    private bool createTwoAvfxInstances = true;
-    private Vector3 avfxInstanceSpacing = new(1.5f, 0f, 0f);
-    private bool testAvfxAlphaOrdering;
-    private float avfxPerformanceSpacing = 0.01f;
-#endif
 
     public DemoWindow(Renderer? renderer, IObjectTable objectTable, IClientState clientState)
-        : base("Rendering Research")
+        : base("Underpaint Primitives")
     {
         this.renderer = renderer;
         this.objectTable = objectTable;
@@ -45,15 +34,10 @@ internal sealed class DemoWindow : Window, IDisposable
         };
     }
 
-    public void SubmitFrame(TimeSpan frameDelta)
+    public void SubmitFrame()
     {
         if (renderer == null)
             return;
-
-#if DEBUG
-        renderer.UpdateAvfxGeometryProbe();
-        renderer.UpdateAvfxPerformanceProbe(frameDelta);
-#endif
 
         using var frame = renderer.BeginFrame();
         if (!IsInGame())
@@ -75,7 +59,6 @@ internal sealed class DemoWindow : Window, IDisposable
             ImGui.TextUnformatted("Underpaint is unavailable.");
             return;
         }
-
         if (!IsInGame())
         {
             ImGui.TextUnformatted("Primitive drawing is only available in game.");
@@ -87,14 +70,15 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.SameLine();
         if (ImGui.Button("Add rectangle"))
             AddRectangle();
-
+        ImGui.SameLine();
+        if (ImGui.Button("Add sphere"))
+            AddSphere();
         if (selectedIndex >= 0)
         {
             ImGui.SameLine();
             if (ImGui.Button("Delete selected"))
                 DeleteSelected();
         }
-
         if (primitives.Count > 0)
         {
             ImGui.SameLine();
@@ -102,69 +86,9 @@ internal sealed class DemoWindow : Window, IDisposable
                 ClearAll();
         }
 
-#if DEBUG
-        if (primitives.Count > 0)
-        {
-            ImGui.SameLine();
-            if (ImGui.Button("Capture SortKeys"))
-                renderer.ArmSortKeyCapture();
-        }
-
-        var sortKeyCaptureStatus = renderer.SortKeyCaptureStatus;
-        if (!string.IsNullOrEmpty(sortKeyCaptureStatus))
-            ImGui.TextWrapped(sortKeyCaptureStatus);
-
-        ImGui.Separator();
-        ImGui.TextUnformatted("AVFX lifecycle shell gate");
-        ImGui.DragFloat3("Host offset##AvfxGeometry", ref avfxHostOffset, 0.05f);
-        ImGui.DragFloat3("Transform offset##AvfxGeometry", ref avfxTransformOffset, 0.05f);
-        ImGui.Checkbox("Animate color and alpha##AvfxGeometry", ref animateAvfxColorAndAlpha);
-        ImGui.Checkbox("Animate vertex positions##AvfxGeometry", ref animateAvfxVertices);
-        ImGui.Checkbox("Create two instances##AvfxGeometry", ref createTwoAvfxInstances);
-        ImGui.Checkbox("Test alpha ordering##AvfxGeometry", ref testAvfxAlphaOrdering);
-        if (createTwoAvfxInstances || testAvfxAlphaOrdering)
-            ImGui.DragFloat3("Instance spacing##AvfxGeometry", ref avfxInstanceSpacing, 0.05f);
-        ImGui.TextDisabled("Animation options are applied when the shell starts.");
-        if (ImGui.Button("Start lifecycle shell##AvfxGeometry"))
-            StartAvfxGeometryProbe();
-        ImGui.SameLine();
-        if (ImGui.Button("Stop##AvfxGeometry"))
-            renderer.StopAvfxGeometryProbe();
-        if (testAvfxAlphaOrdering && ImGui.Button("Swap red/blue positions##AvfxGeometry"))
-            renderer.SwapAvfxGeometryProbePositions();
-        if (testAvfxAlphaOrdering)
-            ImGui.TextWrapped("Align the two triangles in screen space with different camera depths, then swap positions.");
-        ImGui.TextWrapped(renderer.AvfxGeometryProbeStatus);
-
-        ImGui.Separator();
-        ImGui.TextUnformatted("AVFX runtime faceted sphere: 1,024 faces per instance");
-        ImGui.DragFloat("Grid spacing##AvfxPerformance", ref avfxPerformanceSpacing, 0.01f, 0f, 2f, "%.2f");
-        if (ImGui.Button("Baseline (0)##AvfxPerformance"))
-            StartAvfxPerformanceProbe(0);
-        ImGui.SameLine();
-        if (ImGui.Button("256 instances##AvfxPerformance"))
-            StartAvfxPerformanceProbe(256);
-        ImGui.SameLine();
-        if (ImGui.Button("512 instances##AvfxPerformance"))
-            StartAvfxPerformanceProbe(512);
-        if (ImGui.Button("1K instances##AvfxPerformance"))
-            StartAvfxPerformanceProbe(1024);
-        ImGui.SameLine();
-        if (ImGui.Button("2K instances##AvfxPerformance"))
-            StartAvfxPerformanceProbe(2048);
-        ImGui.SameLine();
-        if (ImGui.Button("4K instances##AvfxPerformance"))
-            StartAvfxPerformanceProbe(4096);
-        ImGui.SameLine();
-        if (ImGui.Button("Stop##AvfxPerformance"))
-            renderer.StopAvfxPerformanceProbe();
-        ImGui.TextWrapped(renderer.AvfxPerformanceProbeStatus);
-#endif
-
         ImGui.Separator();
         if (!ImGui.BeginTable("Primitive editor", 2, ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.Resizable))
             return;
-
         ImGui.TableSetupColumn("Primitives", ImGuiTableColumnFlags.WidthFixed, 180f);
         ImGui.TableSetupColumn("Properties", ImGuiTableColumnFlags.WidthStretch);
         ImGui.TableHeadersRow();
@@ -175,23 +99,17 @@ internal sealed class DemoWindow : Window, IDisposable
             if (ImGui.Selectable(primitives[index].Name, selectedIndex == index))
                 selectedIndex = index;
         }
-
         ImGui.TableNextColumn();
         if (selectedIndex >= 0 && selectedIndex < primitives.Count)
             DrawEditor(primitives[selectedIndex]);
         else
             ImGui.TextUnformatted("Select a primitive to edit it.");
-
         ImGui.EndTable();
     }
 
     public void Dispose()
     {
         clientState.TerritoryChanged -= OnTerritoryChanged;
-#if DEBUG
-        renderer?.StopAvfxGeometryProbe();
-        renderer?.StopAvfxPerformanceProbe();
-#endif
         ClearAll();
     }
 
@@ -201,37 +119,22 @@ internal sealed class DemoWindow : Window, IDisposable
         return clientState.IsLoggedIn && localPlayer != null && !localPlayer.IsDead;
     }
 
-    private void AddTriangle()
+    private void AddTriangle() => Add("Triangle", renderer!.CreateTriangle(), new Vector4(1f, 0.15f, 0.1f, 0.75f));
+
+    private void AddRectangle() =>
+        Add("Rectangle", renderer!.CreateRectangle(2f, 1f), new Vector4(0.1f, 0.5f, 1f, 0.65f));
+
+    private void AddSphere() => Add("Sphere", renderer!.CreateSphere(1f), new Vector4(0.5f, 0.2f, 1f, 0.65f));
+
+    private void Add(string kind, IDisposable drawable, Vector4 color)
     {
         var localPlayer = objectTable.LocalPlayer;
-        if (renderer == null || localPlayer == null)
+        if (localPlayer == null)
+        {
+            drawable.Dispose();
             return;
-
-        primitives.Add(
-            new PrimitiveItem(
-                $"Triangle {nextPrimitiveNumber++}",
-                renderer.CreateTriangle(),
-                localPlayer.Position,
-                new Vector4(1f, 0.15f, 0.1f, 0.75f)
-            )
-        );
-        selectedIndex = primitives.Count - 1;
-    }
-
-    private void AddRectangle()
-    {
-        var localPlayer = objectTable.LocalPlayer;
-        if (renderer == null || localPlayer == null)
-            return;
-
-        primitives.Add(
-            new PrimitiveItem(
-                $"Rectangle {nextPrimitiveNumber++}",
-                renderer.CreateRectangle(2f, 1f),
-                localPlayer.Position,
-                new Vector4(0.1f, 0.5f, 1f, 0.65f)
-            )
-        );
+        }
+        primitives.Add(new PrimitiveItem($"{kind} {nextPrimitiveNumber++}", drawable, localPlayer.Position, color));
         selectedIndex = primitives.Count - 1;
     }
 
@@ -241,17 +144,22 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.Separator();
         ImGui.DragFloat3("Position", ref primitive.Position, 0.05f);
         ImGui.ColorEdit4("Color", ref primitive.Color, ImGuiColorEditFlags.DisplayRgb | ImGuiColorEditFlags.InputRgb);
-        ImGui.SliderFloat("Dither", ref primitive.Dither, 0f, 1f, "%.2f");
 
-        if (primitive.Drawable is not RectangleDrawable rectangle)
-            return;
-
-        var width = rectangle.Width;
-        var height = rectangle.Height;
-        var sizeChanged = ImGui.SliderFloat("Width", ref width, 0.1f, 10f, "%.2f");
-        sizeChanged |= ImGui.SliderFloat("Height", ref height, 0.1f, 10f, "%.2f");
-        if (sizeChanged)
-            rectangle.Resize(width, height);
+        if (primitive.Drawable is RectangleDrawable rectangle)
+        {
+            var width = rectangle.Width;
+            var height = rectangle.Height;
+            var changed = ImGui.SliderFloat("Width", ref width, 0.1f, 10f, "%.2f");
+            changed |= ImGui.SliderFloat("Height", ref height, 0.1f, 10f, "%.2f");
+            if (changed)
+                rectangle.Resize(width, height);
+        }
+        else if (primitive.Drawable is SphereDrawable sphere)
+        {
+            var radius = sphere.Radius;
+            if (ImGui.SliderFloat("Radius", ref radius, 0.1f, 10f, "%.2f"))
+                sphere.Resize(radius);
+        }
     }
 
     private void DeleteSelected()
@@ -269,48 +177,7 @@ internal sealed class DemoWindow : Window, IDisposable
         selectedIndex = -1;
     }
 
-    private void OnTerritoryChanged(uint _)
-    {
-#if DEBUG
-        renderer?.StopAvfxGeometryProbe();
-        renderer?.StopAvfxPerformanceProbe();
-#endif
-        ClearAll();
-    }
-
-#if DEBUG
-    private void StartAvfxGeometryProbe()
-    {
-        var localPlayer = objectTable.LocalPlayer;
-        if (renderer == null || localPlayer == null)
-            return;
-
-        renderer.StartAvfxGeometryProbe(
-            StaticVfxResourceRedirector.UnderpaintShellPath,
-            localPlayer.Position + avfxHostOffset,
-            avfxTransformOffset,
-            animateAvfxColorAndAlpha && !testAvfxAlphaOrdering,
-            animateAvfxVertices && !testAvfxAlphaOrdering,
-            testAvfxAlphaOrdering,
-            testAvfxAlphaOrdering || createTwoAvfxInstances ? 2 : 1,
-            avfxInstanceSpacing
-        );
-    }
-
-    private void StartAvfxPerformanceProbe(int hostCount)
-    {
-        var localPlayer = objectTable.LocalPlayer;
-        if (renderer == null || localPlayer == null)
-            return;
-
-        renderer.StartAvfxPerformanceProbe(
-            StaticVfxResourceRedirector.UnderpaintShellPath,
-            localPlayer.Position + avfxHostOffset,
-            hostCount,
-            avfxPerformanceSpacing
-        );
-    }
-#endif
+    private void OnTerritoryChanged(uint _) => ClearAll();
 
     private sealed class PrimitiveItem(string name, IDisposable drawable, Vector3 position, Vector4 color) : IDisposable
     {
@@ -318,19 +185,21 @@ internal sealed class DemoWindow : Window, IDisposable
         internal IDisposable Drawable { get; } = drawable;
         internal Vector3 Position = position;
         internal Vector4 Color = color;
-        internal float Dither = 1f;
 
         internal void Draw(PrimitiveFrame frame)
         {
-            var transform = GroundRotation * Matrix4x4.CreateTranslation(Position);
+            var transform = Drawable is SphereDrawable ? Matrix4x4.CreateTranslation(Position) : GroundRotation * Matrix4x4.CreateTranslation(Position);
             var color = new Vector3(Color.X, Color.Y, Color.Z);
             switch (Drawable)
             {
                 case TriangleDrawable triangle:
-                    frame.DrawTriangle(triangle, transform, Position, color, Color.W, Dither);
+                    frame.DrawTriangle(triangle, transform, Position, color, Color.W);
                     break;
                 case RectangleDrawable rectangle:
-                    frame.DrawRectangle(rectangle, transform, Position, color, Color.W, Dither);
+                    frame.DrawRectangle(rectangle, transform, Position, color, Color.W);
+                    break;
+                case SphereDrawable sphere:
+                    frame.DrawSphere(sphere, transform, Position, color, Color.W);
                     break;
             }
         }
