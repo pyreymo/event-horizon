@@ -2,6 +2,7 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
+using EventHorizon.Interop.Vfx;
 using Underpaint;
 
 namespace EventHorizon.Playground3D;
@@ -16,6 +17,10 @@ internal sealed class DemoWindow : Window, IDisposable
     private readonly List<PrimitiveItem> primitives = [];
     private int selectedIndex = -1;
     private int nextPrimitiveNumber = 1;
+#if DEBUG
+    private Vector3 avfxHostOffset = new(0f, 0f, 2f);
+    private Vector3 avfxTransformOffset = new(0f, 0f, 1f);
+#endif
 
     public DemoWindow(Renderer? renderer, IObjectTable objectTable, IClientState clientState)
         : base("Rendering Research")
@@ -38,6 +43,10 @@ internal sealed class DemoWindow : Window, IDisposable
     {
         if (renderer == null)
             return;
+
+#if DEBUG
+        renderer.UpdateAvfxGeometryProbe();
+#endif
 
         using var frame = renderer.BeginFrame();
         if (!IsInGame())
@@ -97,6 +106,17 @@ internal sealed class DemoWindow : Window, IDisposable
         var sortKeyCaptureStatus = renderer.SortKeyCaptureStatus;
         if (!string.IsNullOrEmpty(sortKeyCaptureStatus))
             ImGui.TextWrapped(sortKeyCaptureStatus);
+
+        ImGui.Separator();
+        ImGui.TextUnformatted("AVFX model descriptor transform A/B");
+        ImGui.DragFloat3("Host offset##AvfxGeometry", ref avfxHostOffset, 0.05f);
+        ImGui.DragFloat3("Transform offset##AvfxGeometry", ref avfxTransformOffset, 0.05f);
+        if (ImGui.Button("Start transform substitution##AvfxGeometry"))
+            StartAvfxGeometryProbe();
+        ImGui.SameLine();
+        if (ImGui.Button("Stop##AvfxGeometry"))
+            renderer.StopAvfxGeometryProbe();
+        ImGui.TextWrapped(renderer.AvfxGeometryProbeStatus);
 #endif
 
         ImGui.Separator();
@@ -126,6 +146,9 @@ internal sealed class DemoWindow : Window, IDisposable
     public void Dispose()
     {
         clientState.TerritoryChanged -= OnTerritoryChanged;
+#if DEBUG
+        renderer?.StopAvfxGeometryProbe();
+#endif
         ClearAll();
     }
 
@@ -203,7 +226,28 @@ internal sealed class DemoWindow : Window, IDisposable
         selectedIndex = -1;
     }
 
-    private void OnTerritoryChanged(uint _) => ClearAll();
+    private void OnTerritoryChanged(uint _)
+    {
+#if DEBUG
+        renderer?.StopAvfxGeometryProbe();
+#endif
+        ClearAll();
+    }
+
+#if DEBUG
+    private void StartAvfxGeometryProbe()
+    {
+        var localPlayer = objectTable.LocalPlayer;
+        if (renderer == null || localPlayer == null)
+            return;
+
+        renderer.StartAvfxGeometryProbe(
+            StaticVfxResourceRedirector.HiddenPlayerGroundMarkerPath,
+            localPlayer.Position + avfxHostOffset,
+            avfxTransformOffset
+        );
+    }
+#endif
 
     private sealed class PrimitiveItem(string name, IDisposable drawable, Vector3 position, Vector4 color) : IDisposable
     {
