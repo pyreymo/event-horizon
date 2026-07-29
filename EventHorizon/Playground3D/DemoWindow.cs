@@ -20,6 +20,7 @@ internal sealed class DemoWindow : Window, IDisposable
 #if DEBUG
     private Vector3 avfxHostOffset = new(0f, 0f, 2f);
     private Vector3 avfxTransformOffset = new(0f, 0f, 1f);
+    private bool avfxUseOwnedMesh;
 #endif
 
     public DemoWindow(Renderer? renderer, IObjectTable objectTable, IClientState clientState)
@@ -108,10 +109,12 @@ internal sealed class DemoWindow : Window, IDisposable
             ImGui.TextWrapped(sortKeyCaptureStatus);
 
         ImGui.Separator();
-        ImGui.TextUnformatted("AVFX model descriptor transform A/B");
+        ImGui.TextUnformatted("AVFX model descriptor A/B");
         ImGui.DragFloat3("Host offset##AvfxGeometry", ref avfxHostOffset, 0.05f);
         ImGui.DragFloat3("Transform offset##AvfxGeometry", ref avfxTransformOffset, 0.05f);
-        if (ImGui.Button("Start transform substitution##AvfxGeometry"))
+        if (ImGui.Checkbox("Use owned unit triangle##AvfxGeometry", ref avfxUseOwnedMesh))
+            renderer.SetAvfxGeometryProbeOwnedMesh(avfxUseOwnedMesh);
+        if (ImGui.Button("Start descriptor substitution##AvfxGeometry"))
             StartAvfxGeometryProbe();
         ImGui.SameLine();
         if (ImGui.Button("Stop##AvfxGeometry"))
@@ -241,6 +244,7 @@ internal sealed class DemoWindow : Window, IDisposable
         if (renderer == null || localPlayer == null)
             return;
 
+        renderer.SetAvfxGeometryProbeOwnedMesh(avfxUseOwnedMesh);
         renderer.StartAvfxGeometryProbe(
             StaticVfxResourceRedirector.HiddenPlayerGroundMarkerPath,
             localPlayer.Position + avfxHostOffset,
