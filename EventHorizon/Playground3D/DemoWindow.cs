@@ -137,24 +137,24 @@ internal sealed class DemoWindow : Window, IDisposable
         ImGui.TextWrapped(renderer.AvfxGeometryProbeStatus);
 
         ImGui.Separator();
-        ImGui.TextUnformatted("AVFX runtime mesh: 1K faces per instance");
+        ImGui.TextUnformatted("AVFX runtime faceted sphere: 1,024 faces per instance");
         ImGui.DragFloat("Grid spacing##AvfxPerformance", ref avfxPerformanceSpacing, 0.01f, 0f, 2f, "%.2f");
         if (ImGui.Button("Baseline (0)##AvfxPerformance"))
             StartAvfxPerformanceProbe(0);
         ImGui.SameLine();
-        if (ImGui.Button("1 instance##AvfxPerformance"))
-            StartAvfxPerformanceProbe(1);
-        ImGui.SameLine();
-        if (ImGui.Button("4 instances##AvfxPerformance"))
-            StartAvfxPerformanceProbe(4);
-        if (ImGui.Button("16 instances##AvfxPerformance"))
-            StartAvfxPerformanceProbe(16);
-        ImGui.SameLine();
-        if (ImGui.Button("64 instances##AvfxPerformance"))
-            StartAvfxPerformanceProbe(64);
-        ImGui.SameLine();
         if (ImGui.Button("256 instances##AvfxPerformance"))
             StartAvfxPerformanceProbe(256);
+        ImGui.SameLine();
+        if (ImGui.Button("512 instances##AvfxPerformance"))
+            StartAvfxPerformanceProbe(512);
+        if (ImGui.Button("1K instances##AvfxPerformance"))
+            StartAvfxPerformanceProbe(1024);
+        ImGui.SameLine();
+        if (ImGui.Button("2K instances##AvfxPerformance"))
+            StartAvfxPerformanceProbe(2048);
+        ImGui.SameLine();
+        if (ImGui.Button("4K instances##AvfxPerformance"))
+            StartAvfxPerformanceProbe(4096);
         ImGui.SameLine();
         if (ImGui.Button("Stop##AvfxPerformance"))
             renderer.StopAvfxPerformanceProbe();
