@@ -43,7 +43,7 @@
     "Config.StatusSummary.Fps": "FPS",
     "Config.StatusSummary.Fps.Value": "{0:F0}",
     "Config.StatusSummary.VisibleHidden": "Players",
-    "Config.StatusSummary.VisibleHidden.Value": "Visible {0} / Hidden {1}",
+    "Config.StatusSummary.VisibleHidden.Value": "Not excluded {0} / Excluded {1}",
 
     "Config.Preview.Title": "Preview",
     "Config.Preview.FloatingTitle": "Player preview",
@@ -52,18 +52,17 @@
 
     "Config.Preview.Status": "Status: {0}",
     "Config.Preview.Status.PlayerUnavailable": "waiting to enter the game",
+    "Config.Preview.Status.NativeHookFailed": "admission unavailable; using game settings",
+    "Config.Preview.Admitted": "allowed by rules (subject to game limits)",
+    "Config.Preview.Rejected": "excluded by rules",
     "Config.Preview.Status.NoOtherPlayers": "no other players to preview",
 
     "Config.Preview.Tooltip.Distance": "Distance: {0:F1} yalms",
-    "Config.Preview.Tooltip.SoftScore": "Soft score: {0:F3} ({1} points)",
-    "Config.Preview.Tooltip.PredictedDistances": "Predicted distance: {0:F1} -> {1:F1} -> {2:F1} -> {3:F1} yalms",
-    "Config.Preview.Tooltip.ScoreBreakdown": "Total score: {0} rank + {1} soft + {2} retention = {3}",
-    "Config.Preview.Tooltip.SoftScoreUnavailable": "Soft score: unavailable",
     "Config.Preview.Tooltip.Rule": "Rule: {0}",
     "Config.Preview.Tooltip.NoRule": "Rule: no keep rule matched",
     "Config.Preview.Tooltip.Budget.Counted": "Budget: counted",
     "Config.Preview.Tooltip.Budget.Exempt": "Budget: exempt",
-    "Config.Preview.Tooltip.CutByBudget": "Hidden by budget limit",
+    "Config.Preview.Tooltip.CutByBudget": "Excluded by player budget",
 
     "Config.Section.HideTriggers": "Hide triggers",
     "Config.DisableInDuty": "Disable in duties",
@@ -72,7 +71,7 @@
 
     "Config.Section.VisiblePlayerBudget": "Visible player budget",
     "Config.LimitVisiblePlayerCount": "Max",
-    "Config.LimitVisiblePlayerCount.Help": "Limits the number of kept players that use the budget. Rules that do not use the budget may exceed this limit.",
+    "Config.LimitVisiblePlayerCount.Help": "Limits the number of kept players that use the budget. Rules that do not use the budget may exceed this limit. All players remain subject to the game's overall draw limit.",
     "Config.VisiblePlayerCountLimitSuffix": "budgeted players",
     "Config.PerRuleBudget": "Set budget use per rule",
 

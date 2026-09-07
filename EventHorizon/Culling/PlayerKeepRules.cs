@@ -24,7 +24,6 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
     private readonly Configuration configuration = configuration;
     private readonly IObjectTable objectTable = objectTable;
     private readonly ITargetManager targetManager = targetManager;
-    private readonly HashSet<ulong> nearbyKeptPlayers = [];
     private readonly Dictionary<ulong, long> recentTargetPlayers = [];
     private readonly Dictionary<ulong, long> targetingMePlayers = [];
     private readonly Dictionary<string, long> recentChatPlayers = new(StringComparer.OrdinalIgnoreCase);
@@ -54,7 +53,6 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
 
     public void Clear()
     {
-        nearbyKeptPlayers.Clear();
         recentTargetPlayers.Clear();
         targetingMePlayers.Clear();
         ClearRecentChatPlayers();
@@ -249,24 +247,7 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
 
         distanceSq = Vector3.DistanceSquared(localPlayerPosition, player->Position);
 
-        if (nearbyKeptPlayers.Contains(playerId))
-        {
-            if (distanceSq <= nearbyRangeSq)
-            {
-                return true;
-            }
-
-            nearbyKeptPlayers.Remove(playerId);
-            return false;
-        }
-
-        if (distanceSq > nearbyRangeSq)
-        {
-            return false;
-        }
-
-        nearbyKeptPlayers.Add(playerId);
-        return true;
+        return distanceSq <= nearbyRangeSq;
     }
 
     private bool ShouldKeepTargetOrFocusPlayer(GameObject* gameObject)

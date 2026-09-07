@@ -25,7 +25,7 @@ internal sealed unsafe class HiddenPlayerMarker(
     private readonly List<WorldDot> dots = [];
     private bool vfxStyleActive;
 
-    public void Update(GameObjectManager* manager, HiddenObjectTracker hiddenObjects)
+    public void Update(GameObjectManager* manager, PlayerAdmissionDecision[] targets)
     {
         if (!configuration.EnableHiddenPlayerGroundMarker || manager == null)
         {
@@ -36,7 +36,15 @@ internal sealed unsafe class HiddenPlayerMarker(
         hiddenPlayerAddresses.Clear();
         candidates.Clear();
         liveIds.Clear();
-        hiddenObjects.CollectHiddenPlayerAddresses(manager, hiddenPlayerAddresses);
+        foreach (var target in targets)
+        {
+            if (!target.Allowed && target.ObjectIndex >= 0 && target.ObjectIndex < manager->Objects.IndexSorted.Length)
+            {
+                var obj = manager->Objects.IndexSorted[target.ObjectIndex].Value;
+                if (target.Identity.Matches(obj))
+                    hiddenPlayerAddresses.Add((nint)obj);
+            }
+        }
 
         if (configuration.UseHiddenPlayerMarkerDot)
         {

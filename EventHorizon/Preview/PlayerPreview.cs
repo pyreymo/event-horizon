@@ -56,7 +56,7 @@ internal sealed unsafe class PlayerPreview(Configuration configuration)
         return previousEntityId != ActiveSelectedPlayerEntityId;
     }
 
-    public void Refresh(GameObjectManager* manager, PlayerVisibilityTarget[] targets)
+    public void Refresh(GameObjectManager* manager, PlayerAdmissionDecision[] targets)
     {
         var builder = PlayerPreviewBuilder.Begin(manager, configuration);
         foreach (var target in targets)
@@ -69,15 +69,7 @@ internal sealed unsafe class PlayerPreview(Configuration configuration)
             var gameObject = FindPlayerObject(manager, target.Identity, target.ObjectIndex);
             if (gameObject != null)
             {
-                builder.Add(
-                    gameObject,
-                    target.ObjectIndex,
-                    GetName(gameObject),
-                    target.Decision,
-                    !target.DesiredVisible,
-                    target.CutByBudget,
-                    target.SelectionScore
-                );
+                builder.Add(gameObject, target.ObjectIndex, GetName(gameObject), target.Decision, !target.Allowed, target.CutByBudget);
             }
         }
 
@@ -159,6 +151,7 @@ internal enum PlayerPreviewEmptyReason
     PlayerUnavailable,
     SuspendedInDuty,
     SuspendedByLowPlayerCount,
+    NativeHookFailed,
     NoOtherPlayers,
 }
 
@@ -174,8 +167,7 @@ internal readonly record struct PlayerPreviewEntry(
     PlayerKeepBudgetPolicy BudgetPolicy,
     int? BudgetRank,
     bool CutByBudget,
-    PlayerKeepRuleMask MatchedRules,
-    PlayerVisibilitySelectionScore? SelectionScore
+    PlayerKeepRuleMask MatchedRules
 );
 
 internal readonly record struct PlayerPreviewStats(int TotalPlayers, int VisiblePlayers, int HiddenPlayers, int BudgetLimit)
@@ -226,8 +218,7 @@ internal sealed unsafe class PlayerPreviewBuilder
         string name,
         PlayerKeepDecision keepDecision,
         bool shouldHide,
-        bool cutByBudget,
-        PlayerVisibilitySelectionScore? selectionScore
+        bool cutByBudget
     )
     {
         if (gameObject == null)
@@ -259,8 +250,7 @@ internal sealed unsafe class PlayerPreviewBuilder
                 keepDecision.BudgetPolicy,
                 keepDecision.Kind == PlayerKeepDecisionKind.Keep ? keepDecision.Rank : null,
                 cutByBudget,
-                keepDecision.MatchedRules,
-                selectionScore
+                keepDecision.MatchedRules
             )
         );
     }

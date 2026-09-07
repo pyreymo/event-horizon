@@ -104,6 +104,7 @@ internal sealed class PlayerPreviewRenderer
                 PlayerPreviewEmptyReason.PlayerUnavailable => Loc.Text("Config.Preview.Status.PlayerUnavailable"),
                 PlayerPreviewEmptyReason.SuspendedInDuty => string.Format(pausedFormat, Loc.Text("PauseReason.InDuty")),
                 PlayerPreviewEmptyReason.SuspendedByLowPlayerCount => string.Format(pausedFormat, Loc.Text("PauseReason.LowPlayerCount")),
+                PlayerPreviewEmptyReason.NativeHookFailed => Loc.Text("Config.Preview.Status.NativeHookFailed"),
                 _ => Loc.Text("Config.Preview.Status.NoOtherPlayers"),
             };
             var text = string.Format(Loc.Text("Config.Preview.Status"), status);
@@ -296,35 +297,11 @@ internal sealed class PlayerPreviewRenderer
         ImGui.Separator();
         ImGui.TextUnformatted(string.Format(Loc.Text("Config.Preview.Tooltip.Distance"), player.Distance));
         ImGui.TextUnformatted(
-            string.Format(Loc.Text("Config.Preview.Status"), Loc.Text(player.IsVisible ? "Status.Visible" : "Status.Hidden"))
+            string.Format(
+                Loc.Text("Config.Preview.Status"),
+                Loc.Text(player.IsVisible ? "Config.Preview.Admitted" : "Config.Preview.Rejected")
+            )
         );
-
-        if (player.SelectionScore is { } score)
-        {
-            ImGui.TextUnformatted(string.Format(Loc.Text("Config.Preview.Tooltip.SoftScore"), score.SoftScore, score.SoftPoints));
-            ImGui.TextUnformatted(
-                string.Format(
-                    Loc.Text("Config.Preview.Tooltip.PredictedDistances"),
-                    score.PredictedDistances.X,
-                    score.PredictedDistances.Y,
-                    score.PredictedDistances.Z,
-                    score.PredictedDistances.W
-                )
-            );
-            ImGui.TextUnformatted(
-                string.Format(
-                    Loc.Text("Config.Preview.Tooltip.ScoreBreakdown"),
-                    score.RankPoints,
-                    score.SoftPoints,
-                    score.RetentionPoints,
-                    score.TotalPoints
-                )
-            );
-        }
-        else
-        {
-            ImGui.TextUnformatted(Loc.Text("Config.Preview.Tooltip.SoftScoreUnavailable"));
-        }
 
         if (player.BestRule.HasValue)
         {

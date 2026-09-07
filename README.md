@@ -59,13 +59,13 @@ Set a maximum number of visible players and choose who should be kept:
 
 Rules can be reordered, enabled individually, and made exempt from the visible-player limit.
 
-Event Horizon uses a stable selection system to avoid constantly swapping visible models as you move through a crowd.
+Event Horizon applies rule priority to the game's freshly collected draw candidates. The game owns model hiding, restoration, and its overall draw limit. Exempt rules bypass only the plugin's player budget. Nearby-range and recent-target/chat rules remain; predictive selection and model-transition queues have been removed.
 
 ### Live player preview
 
 See nearby players and inspect:
 
-- Whether they are visible or hidden
+- Whether the rules admit or exclude them (actual drawing remains subject to game limits)
 - Which rule matched them
 - Whether they count toward the player limit
 - Where they are relative to your character
@@ -138,3 +138,7 @@ dotnet build .\EventHorizon\EventHorizon.csproj --configuration Release -p:Platf
 ```
 
 Tagged releases are built by GitHub Actions and published as `EventHorizon.zip`.
+
+## Experimental native admission
+
+Implementation contract and binary verification: [native admission](docs/native-admission.md).
