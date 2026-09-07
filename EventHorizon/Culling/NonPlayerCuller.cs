@@ -59,6 +59,7 @@ internal sealed unsafe class NonPlayerCuller(Configuration configuration)
             return configuration.HideOtherPlayerBattlePets
                 && localPlayerEntityId != 0
                 && gameObject->ObjectKind == ObjectKind.BattleNpc
+                && gameObject->BattleNpcSubKind == BattleNpcSubKind.Pet
                 && gameObject->OwnerId != localPlayerEntityId;
         }
 
