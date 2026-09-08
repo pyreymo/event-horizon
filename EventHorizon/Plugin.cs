@@ -151,14 +151,7 @@ public sealed class Plugin : IDalamudPlugin
             var featureStore = new FeatureConfigStore(PluginInterface, Log);
             var api = new CullingApi(Culling, Configuration, SetPlayerHidingEnabled);
             Features = new FeatureHost(
-                FeatureCatalog.Create(
-                    featureStore,
-                    api,
-                    api,
-                    OpenUi,
-                    (scope, command, action) => Features.RegisterCommand(scope, command, action),
-                    configurationLoadFailed
-                ),
+                FeatureCatalog.Create(api, api, OpenUi, (scope, command, action) => Features.RegisterCommand(scope, command, action)),
                 featureStore,
                 Framework,
                 PluginInterface,

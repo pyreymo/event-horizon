@@ -1,5 +1,11 @@
 using System;
+using Dalamud.Game.Addon.Lifecycle;
+using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Plugin.Services;
+using EventHorizon.Interop.Atk;
+using EventHorizon.Settings;
+using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Component.GUI;
 
 namespace EventHorizon.Features.Dtr;
 
@@ -12,6 +18,19 @@ internal sealed class DtrBackgroundFeature(
     IClientState clientState
 ) : Feature<DtrBackgroundSettings>(settings, save)
 {
+    internal static IFeatureDefinition CreateDefinition(
+        IAddonLifecycle addons,
+        IGameGui gameGui,
+        IFramework framework,
+        IClientState clientState
+    ) =>
+        new FeatureDefinition<DtrBackgroundSettings>(
+            "dtr-background",
+            "Feature.Name.DtrBackground",
+            store => store.LegacyEnabled("EnableDtrBackground", false),
+            (settings, save) => new DtrBackgroundFeature(settings, save, addons, gameGui, framework, clientState)
+        );
+
     public override void Enable(FeatureScope scope) => _ = new DtrBackground(addons, gameGui, framework, clientState, Settings, scope);
 
     public override void DrawSettings()
@@ -41,4 +60,223 @@ internal sealed class DtrBackgroundFeature(
         if (changed)
             Save();
     }
+
+    private sealed class DtrBackground : IDisposable
+    {
+        private const string DtrAddonName = "_DTR";
+        private const uint BackgroundNodeId = 900003;
+
+        private readonly IGameGui gameGui;
+        private readonly IClientState clientState;
+        private readonly DtrBackgroundSettings configuration;
+        private readonly ChatLogBackgroundSkinProvider skinProvider;
+        private bool disposed;
+        private readonly DtrBackgroundNode backgroundNode = new(BackgroundNodeId);
+
+        public DtrBackground(
+            IAddonLifecycle addonLifecycle,
+            IGameGui gameGui,
+            IFramework framework,
+            IClientState clientState,
+            DtrBackgroundSettings configuration,
+            FeatureScope scope
+        )
+        {
+            this.gameGui = gameGui;
+            this.clientState = clientState;
+            this.configuration = configuration;
+            skinProvider = new ChatLogBackgroundSkinProvider(gameGui);
+
+            scope.Own(this);
+            void Setup(AddonEvent e, AddonArgs args) => scope.Run(() => OnDtrPostSetup(e, args));
+            void Draw(AddonEvent e, AddonArgs args) => scope.Run(() => OnDtrPreDraw(e, args));
+            void Finalize(AddonEvent e, AddonArgs args) => scope.Run(() => OnDtrPreFinalize(e, args));
+            scope.Defer(() => addonLifecycle.UnregisterListener(AddonEvent.PostSetup, DtrAddonName, Setup));
+            addonLifecycle.RegisterListener(AddonEvent.PostSetup, DtrAddonName, Setup);
+            scope.Defer(() => addonLifecycle.UnregisterListener(AddonEvent.PreDraw, DtrAddonName, Draw));
+            addonLifecycle.RegisterListener(AddonEvent.PreDraw, DtrAddonName, Draw);
+            scope.Defer(() => addonLifecycle.UnregisterListener(AddonEvent.PreFinalize, DtrAddonName, Finalize));
+            addonLifecycle.RegisterListener(AddonEvent.PreFinalize, DtrAddonName, Finalize);
+            scope.OnUpdate(() => OnFrameworkUpdate(framework));
+
+            Refresh();
+        }
+
+        public void Refresh()
+        {
+            if (!ShouldShowBackground())
+            {
+                RemoveBackground();
+                return;
+            }
+
+            var addonPointer = gameGui.GetAddonByName(DtrAddonName);
+            if (addonPointer != nint.Zero)
+            {
+                Apply(addonPointer);
+            }
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+                return;
+            disposed = true;
+
+            RemoveBackground();
+        }
+
+        private void OnDtrPostSetup(AddonEvent type, AddonArgs args) => Apply(args.Addon);
+
+        private void OnDtrPreDraw(AddonEvent type, AddonArgs args) => Apply(args.Addon);
+
+        private void OnDtrPreFinalize(AddonEvent type, AddonArgs args) => RemoveBackground(args.Addon);
+
+        private void OnFrameworkUpdate(IFramework _)
+        {
+            if (!clientState.IsLoggedIn && backgroundNode.IsCreated)
+            {
+                RemoveBackground();
+            }
+        }
+
+        private unsafe void Apply(nint dtrPointer)
+        {
+            if (!ShouldShowBackground())
+            {
+                RemoveBackground(dtrPointer);
+                return;
+            }
+
+            if (dtrPointer == nint.Zero)
+            {
+                RemoveBackground();
+                return;
+            }
+
+            if (!skinProvider.TryGetChatLogBackgroundSkin(out var skin))
+            {
+                RemoveBackground(dtrPointer);
+                return;
+            }
+
+            var unit = (AtkUnitBase*)dtrPointer;
+            var root = unit->RootNode;
+            if (root == null || !DtrBoundsProvider.TryGetBounds(unit, backgroundNode.ResourceNode, out var bounds))
+            {
+                RemoveBackground(dtrPointer);
+                return;
+            }
+
+            if (!backgroundNode.EnsureAttached(unit, root))
+            {
+                return;
+            }
+
+            if (backgroundNode.Update(bounds, CreateStyle(), skin))
+            {
+                root->IsDirty = true;
+            }
+        }
+
+        private void RemoveBackground()
+        {
+            var addonPointer = gameGui.GetAddonByName(DtrAddonName);
+            RemoveBackground(addonPointer != nint.Zero ? addonPointer.Address : nint.Zero);
+        }
+
+        private unsafe void RemoveBackground(nint dtrPointer)
+        {
+            backgroundNode.Destroy(dtrPointer != nint.Zero ? (AtkUnitBase*)dtrPointer : null);
+        }
+
+        private DtrBackgroundStyle CreateStyle()
+        {
+            return new DtrBackgroundStyle(
+                configuration.DtrBackgroundHorizontalPadding,
+                configuration.DtrBackgroundHorizontalPadding,
+                configuration.DtrBackgroundPaddingTop,
+                configuration.DtrBackgroundPaddingBottom,
+                configuration.DtrBackgroundAlpha
+            );
+        }
+
+        private bool ShouldShowBackground() => clientState.IsLoggedIn;
+    }
+
+    private static unsafe class DtrBoundsProvider
+    {
+        public static bool TryGetBounds(AtkUnitBase* unit, AtkResNode* background, out NativeNodeBounds bounds)
+        {
+            if (unit == null || unit->RootNode == null)
+            {
+                bounds = default;
+                return false;
+            }
+
+            var collector = new NativeNodeBoundsCollector();
+            NativeNodeBoundsScanner.AddChildTreeBounds(unit->RootNode, background, ShouldUseDtrContentNode, ref collector);
+            NativeNodeBoundsScanner.AddNodeListBounds(unit, background, ShouldUseDtrContentNode, ref collector);
+            return collector.TryBuild(out bounds);
+        }
+
+        private static bool ShouldUseDtrContentNode(AtkResNode* node, AtkResNode* background)
+        {
+            return node != null
+                && node != background
+                && node->NodeFlags.HasFlag(NodeFlags.Visible)
+                && node->Type != NodeType.Collision
+                && node->Width > 0
+                && node->Height > 0;
+        }
+    }
+
+    private sealed class ChatLogBackgroundSkinProvider(IGameGui gameGui)
+    {
+        private const string ChatLogAddonName = "ChatLog";
+
+        public unsafe bool TryGetChatLogBackgroundSkin(out DtrBackgroundSkin skin)
+        {
+            var chatLogPointer = gameGui.GetAddonByName(ChatLogAddonName);
+            if (chatLogPointer == nint.Zero)
+            {
+                skin = default;
+                return false;
+            }
+
+            var source = ((AddonChatLog*)chatLogPointer.Address)->BackgroundNode;
+            if (source == null || source->PartsList == null)
+            {
+                skin = default;
+                return false;
+            }
+
+            skin = new DtrBackgroundSkin(
+                source->PartsList,
+                source->PartId,
+                source->TopOffset,
+                source->RightOffset,
+                source->BottomOffset,
+                source->LeftOffset,
+                source->BlendMode,
+                source->PartsTypeRenderType
+            );
+            return true;
+        }
+    }
+}
+
+internal sealed class DtrBackgroundSettings : IFeatureSettings
+{
+    public int Version { get; set; } = 1;
+
+    [ConfigRange(0, 80)]
+    public float DtrBackgroundHorizontalPadding { get; set; } = 24f;
+
+    [ConfigRange(0, 80)]
+    public float DtrBackgroundPaddingTop { get; set; } = 10f;
+
+    [ConfigRange(0, 80)]
+    public float DtrBackgroundPaddingBottom { get; set; } = 4f;
+    public byte DtrBackgroundAlpha { get; set; } = 128;
 }

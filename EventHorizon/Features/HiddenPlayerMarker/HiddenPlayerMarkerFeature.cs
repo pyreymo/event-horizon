@@ -6,6 +6,7 @@ using Dalamud.Plugin.Services;
 using EventHorizon.Application;
 using EventHorizon.Culling;
 using EventHorizon.Interop.Vfx;
+using EventHorizon.Settings;
 using EventHorizon.WorldGraphics;
 
 namespace EventHorizon.Features.HiddenPlayerMarker;
@@ -21,6 +22,21 @@ internal sealed class HiddenPlayerMarkerFeature(
     IPluginLog log
 ) : Feature<HiddenPlayerMarkerSettings>(settings, save)
 {
+    internal static IFeatureDefinition CreateDefinition(
+        ICullingReader reader,
+        IGameGui gameGui,
+        IDalamudPluginInterface pluginInterface,
+        IGameInteropProvider interop,
+        ISigScanner scanner,
+        IPluginLog log
+    ) =>
+        new FeatureDefinition<HiddenPlayerMarkerSettings>(
+            "hidden-player-markers",
+            "Feature.Name.HiddenPlayerMarker",
+            store => store.LegacyEnabled("EnableHiddenPlayerGroundMarker", true),
+            (settings, save) => new HiddenPlayerMarkerFeature(settings, save, reader, gameGui, pluginInterface, interop, scanner, log)
+        );
+
     public override void Enable(FeatureScope scope)
     {
         var overlay = scope.Own(new WorldDotOverlay(gameGui));
@@ -113,4 +129,17 @@ internal sealed class HiddenPlayerMarkerFeature(
         if (changed)
             Save();
     }
+}
+
+internal sealed class HiddenPlayerMarkerSettings : IFeatureSettings
+{
+    public int Version { get; set; } = 1;
+    public bool UseHiddenPlayerMarkerDot { get; set; } = false;
+    public byte HiddenPlayerMarkerDotColorRed { get; set; } = 124;
+    public byte HiddenPlayerMarkerDotColorGreen { get; set; } = 89;
+    public byte HiddenPlayerMarkerDotColorBlue { get; set; } = 158;
+    public byte HiddenPlayerMarkerDotColorAlpha { get; set; } = 180;
+
+    [ConfigRange(1, 20)]
+    public float HiddenPlayerMarkerDotRadius { get; set; } = 5f;
 }

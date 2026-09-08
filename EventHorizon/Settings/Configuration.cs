@@ -29,19 +29,19 @@ internal class Configuration : IPluginConfiguration
     public bool LimitVisiblePlayerCount { get; set; } = true;
 
     [ConfigRange(0, 100)]
-    public int VisiblePlayerCountLimit { get; set; } = 30;
+    public int VisiblePlayerCountLimit { get; set; } = 25;
     public bool HideOtherPlayerCompanions { get; set; } = true;
     public bool HideOtherPlayerOrnaments { get; set; } = false;
     public bool HideOtherPlayerBattlePets { get; set; } = false;
     public bool HideUnattachedEventNpcs { get; set; } = false;
     public bool KeepFriends { get; set; } = true;
     public bool KeepPartyAndAllianceMembers { get; set; } = true;
-    public bool KeepRecruitingPlayers { get; set; } = true;
+    public bool KeepRecruitingPlayers { get; set; } = false;
     public bool KeepRecentChatPlayers { get; set; } = true;
     public bool KeepNearbyPlayers { get; set; } = true;
 
     [ConfigRange(PlayerKeepRuleSettings.NearbyRangeMin, PlayerKeepRuleSettings.NearbyRangeMax)]
-    public float KeepNearbyPlayersRange { get; set; } = 5f;
+    public float KeepNearbyPlayersRange { get; set; } = 10f;
     public bool KeepTargetAndFocusPlayers { get; set; } = true;
     public bool KeepPlayersTargetingMe { get; set; } = true;
     public bool KeepSelectedRaces { get; set; }

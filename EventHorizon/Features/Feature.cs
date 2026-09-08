@@ -1,5 +1,4 @@
 using System;
-using EventHorizon.Localization;
 
 namespace EventHorizon.Features;
 
@@ -10,8 +9,21 @@ internal interface IFeature : IDisposable
     void DrawSettings();
 }
 
+internal interface IFeatureSettings
+{
+    int Version { get; set; }
+}
+
+internal interface IFeatureDefinition
+{
+    string Id { get; }
+    string TitleKey { get; }
+    bool GetDefaultEnabled(FeatureConfigStore store);
+    IFeature Create(FeatureConfigStore store);
+}
+
 internal abstract class Feature<TSettings>(TSettings settings, Action save) : IFeature
-    where TSettings : class
+    where TSettings : class, IFeatureSettings
 {
     protected TSettings Settings { get; } = settings;
 
@@ -26,26 +38,23 @@ internal abstract class Feature<TSettings>(TSettings settings, Action save) : IF
     public virtual void Dispose() { }
 }
 
-internal enum FeatureState
-{
-    Disabled,
-    Enabling,
-    Enabled,
-    Disabling,
-    Faulted,
-    Disposed,
-}
-
-internal sealed class FeatureRegistration(string id, string titleKey, bool defaultEnabled, Func<IFeature> create)
+internal sealed class FeatureDefinition<TSettings>(
+    string id,
+    string titleKey,
+    Func<FeatureConfigStore, bool> getDefaultEnabled,
+    Func<TSettings, Action, IFeature> create
+) : IFeatureDefinition
+    where TSettings : class, IFeatureSettings, new()
 {
     public string Id { get; } = id;
-    public string Title => Loc.Text(titleKey);
-    public string Description => Loc.Text(titleKey + ".Description");
-    public bool DefaultEnabled { get; } = defaultEnabled;
-    public Func<IFeature> Create { get; } = create;
-    public IFeature? Instance { get; set; }
-    public FeatureScope? Scope { get; set; }
-    public FeatureState State { get; set; }
-    public Exception? Error { get; set; }
-    public bool? PendingEnabled { get; set; }
+    public string TitleKey { get; } = titleKey;
+
+    public bool GetDefaultEnabled(FeatureConfigStore store) => getDefaultEnabled(store);
+
+    public IFeature Create(FeatureConfigStore store)
+    {
+        var settings = store.Load<TSettings>(Id);
+        store.Save(Id, settings);
+        return create(settings, () => store.Save(Id, settings));
+    }
 }

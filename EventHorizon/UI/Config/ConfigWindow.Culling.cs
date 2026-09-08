@@ -29,7 +29,6 @@ internal partial class ConfigWindow
                 ImGui.Spacing();
                 DrawCardSeparator();
                 ImGui.Spacing();
-                ImGui.TextDisabled(Loc.Text("Config.Section.VisiblePlayerBudget"));
                 DrawVisiblePlayerLimitRule();
             }
         );

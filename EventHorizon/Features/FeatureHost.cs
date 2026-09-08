@@ -10,7 +10,7 @@ namespace EventHorizon.Features;
 
 internal sealed class FeatureHost : IDisposable
 {
-    private readonly List<FeatureRegistration> features;
+    private readonly List<FeatureRuntime> features;
     private readonly FeaturePreferences preferences;
     private readonly FeatureConfigStore store;
     private readonly IFramework framework;
@@ -21,7 +21,7 @@ internal sealed class FeatureHost : IDisposable
     private string? selectedFeatureId;
 
     public FeatureHost(
-        IEnumerable<FeatureRegistration> registrations,
+        IEnumerable<IFeatureDefinition> definitions,
         FeatureConfigStore store,
         IFramework framework,
         IDalamudPluginInterface pluginInterface,
@@ -33,11 +33,15 @@ internal sealed class FeatureHost : IDisposable
         this.framework = framework;
         this.pluginInterface = pluginInterface;
         this.log = log;
-        features = [.. registrations];
+        features = [];
         var ids = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var feature in features)
+        foreach (var definition in definitions)
+        {
+            var feature = new FeatureRuntime(definition, definition.GetDefaultEnabled(store));
             if (!ids.Add(feature.Id))
                 throw new InvalidOperationException($"Duplicate feature id: {feature.Id}");
+            features.Add(feature);
+        }
         try
         {
             preferences = store.Load<FeaturePreferences>("runtime");
@@ -102,14 +106,14 @@ internal sealed class FeatureHost : IDisposable
         }
     }
 
-    private void Start(FeatureRegistration feature)
+    private void Start(FeatureRuntime feature)
     {
         if (feature.State is FeatureState.Enabled or FeatureState.Faulted or FeatureState.Disposed)
             return;
         feature.State = FeatureState.Enabling;
         try
         {
-            feature.Instance ??= feature.Create();
+            feature.Instance ??= feature.Definition.Create(store);
             feature.Scope = new FeatureScope(framework, pluginInterface, exception => Fail(feature, exception));
             feature.Instance.Enable(feature.Scope);
             if (feature.State == FeatureState.Faulted)
@@ -124,7 +128,7 @@ internal sealed class FeatureHost : IDisposable
         }
     }
 
-    private void Fail(FeatureRegistration feature, Exception exception)
+    private void Fail(FeatureRuntime feature, Exception exception)
     {
         feature.Scope?.Deactivate();
         feature.Error = exception;
@@ -132,7 +136,7 @@ internal sealed class FeatureHost : IDisposable
         log.Error(exception, "Feature {Feature} failed.", feature.Id);
     }
 
-    private void Stop(FeatureRegistration feature, bool faulted)
+    private void Stop(FeatureRuntime feature, bool faulted)
     {
         if (feature.State == FeatureState.Disposed)
             return;
@@ -247,7 +251,7 @@ internal sealed class FeatureHost : IDisposable
                 ImGui.PushItemWidth(Math.Min(fontSize * 12f, ImGui.GetContentRegionAvail().X * 0.5f));
                 try
                 {
-                    selected.Instance ??= selected.Create();
+                    selected.Instance ??= selected.Definition.Create(store);
                     selected.Instance.DrawSettings();
                 }
                 catch (Exception exception)
@@ -270,7 +274,7 @@ internal sealed class FeatureHost : IDisposable
         }
     }
 
-    private void SetEnabled(FeatureRegistration feature, bool enabled)
+    private void SetEnabled(FeatureRuntime feature, bool enabled)
     {
         preferences.Enabled[feature.Id] = enabled;
         feature.PendingEnabled = enabled;
@@ -307,5 +311,29 @@ internal sealed class FeatureHost : IDisposable
             feature.State = FeatureState.Disposed;
         }
         commands.Clear();
+    }
+
+    private enum FeatureState
+    {
+        Disabled,
+        Enabling,
+        Enabled,
+        Disabling,
+        Faulted,
+        Disposed,
+    }
+
+    private sealed class FeatureRuntime(IFeatureDefinition definition, bool defaultEnabled)
+    {
+        public IFeatureDefinition Definition { get; } = definition;
+        public string Id => Definition.Id;
+        public string Title => Loc.Text(Definition.TitleKey);
+        public string Description => Loc.Text(Definition.TitleKey + ".Description");
+        public bool DefaultEnabled { get; } = defaultEnabled;
+        public IFeature? Instance { get; set; }
+        public FeatureScope? Scope { get; set; }
+        public FeatureState State { get; set; }
+        public Exception? Error { get; set; }
+        public bool? PendingEnabled { get; set; }
     }
 }

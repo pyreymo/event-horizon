@@ -1,6 +1,7 @@
 using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
 using EventHorizon.Application;
@@ -9,11 +10,6 @@ using EventHorizon.Localization;
 using EventHorizon.UI;
 
 namespace EventHorizon.Features.Preview;
-
-internal sealed class PreviewSettings
-{
-    public int Version { get; set; } = 1;
-}
 
 internal sealed class PreviewFeature(
     PreviewSettings settings,
@@ -25,6 +21,20 @@ internal sealed class PreviewFeature(
     Action<FeatureScope, string, Action> registerCommand
 ) : Feature<PreviewSettings>(settings, save)
 {
+    internal static IFeatureDefinition CreateDefinition(
+        ICullingReader reader,
+        ICullingCommands commands,
+        IGameGui gameGui,
+        Action openSettings,
+        Action<FeatureScope, string, Action> registerCommand
+    ) =>
+        new FeatureDefinition<PreviewSettings>(
+            "preview",
+            "Feature.Name.Preview",
+            _ => false,
+            (settings, save) => new PreviewFeature(settings, save, reader, commands, gameGui, openSettings, registerCommand)
+        );
+
     private PlayerPreviewPanel? panel;
     private PlayerPreviewWindow? window;
     private PlayerPreviewHighlighter? highlighter;
@@ -97,7 +107,7 @@ internal sealed class PreviewFeature(
         }
         if (ImGui.Button(Loc.Text("Feature.Preview.Open")))
             window.Toggle();
-        var visible = ImGui.BeginChild("Preview", new Vector2(0, 400));
+        var visible = ImGui.BeginChild("Preview", new Vector2(0, 800));
         try
         {
             if (visible)
@@ -108,4 +118,57 @@ internal sealed class PreviewFeature(
             ImGui.EndChild();
         }
     }
+
+    private sealed class PlayerPreviewWindow : Window
+    {
+        private const float MinimumPreviewSide = 180f;
+        private const float FloatingWindowDefaultSide = 300f;
+        private const float GearIconOffsetX = 1.5f;
+
+        private readonly PlayerPreviewPanel previewPanel;
+        private readonly Action openMainWindow;
+        private readonly Action close;
+
+        public PlayerPreviewWindow(PlayerPreviewPanel previewPanel, Action openMainWindow, Action close)
+            : base($"{Loc.Text("Config.Preview.FloatingTitle")}###EventHorizonPlayerPreview")
+        {
+            Size = new Vector2(FloatingWindowDefaultSide);
+            SizeCondition = ImGuiCond.FirstUseEver;
+            SizeConstraints = new WindowSizeConstraints
+            {
+                MinimumSize = new Vector2(MinimumPreviewSide),
+                MaximumSize = new Vector2(float.MaxValue),
+            };
+
+            this.previewPanel = previewPanel;
+            this.openMainWindow = openMainWindow;
+            this.close = close;
+
+            TitleBarButtons.Add(
+                new TitleBarButton
+                {
+                    Icon = FontAwesomeIcon.Cog,
+                    IconOffset = new Vector2(GearIconOffsetX, 0f),
+                    Click = _ => this.openMainWindow(),
+                }
+            );
+        }
+
+        public override void PreDraw()
+        {
+            WindowName = $"{Loc.Text("Config.Preview.FloatingTitle")}###EventHorizonPlayerPreview";
+        }
+
+        public override void OnClose() => close();
+
+        public override void Draw()
+        {
+            previewPanel.DrawFloatingContent(PlayerKeepRuleLabels.GetLabel);
+        }
+    }
+}
+
+internal sealed class PreviewSettings : IFeatureSettings
+{
+    public int Version { get; set; } = 1;
 }
