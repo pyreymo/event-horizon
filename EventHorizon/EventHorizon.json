@@ -1,7 +1,7 @@
 {
   "Author": "pyreymo",
   "Name": "Event Horizon",
-  "Changelog": "A focused crowd control console with relationship preferences and a nearby-player inspector.",
+  "Changelog": "- Rebuilt crowd management around the game's native draw-candidate admission path for cleaner, more reliable player culling.\n- Redesigned settings around a focused crowd-control workflow with explicit player limits, relationship-based keep rules, pause conditions, and reveal controls.\n- Added a modular Features layer for Server Info Bar controls, targeting markers, hidden-player markers, player preview, and scene visibility options.\n- Reworked player preview into an inline or floating nearby-player inspector with admission state, selection, temporary budget exemption, highlighting, and a world direction arrow.\n- Improved configuration migration and failure handling, including safer fallback behavior when older settings cannot be loaded.\n- Fixed battle-pet classification and improved compatibility with Penumbra-driven character changes.",
   "Punchline": "Keep the people who matter in view.",
   "Description": "Control crowd density, keep important players, and inspect why someone is excluded. Use /eventhorizon or /eh.",
   "RepoUrl": "https://github.com/pyreymo/event-horizon",
