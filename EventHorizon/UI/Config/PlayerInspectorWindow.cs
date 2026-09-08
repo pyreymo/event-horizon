@@ -21,9 +21,13 @@ internal sealed class PlayerInspectorWindow : Window
         : base("Players###EventHorizonInspector")
     {
         this.culling = culling;
-        Size = new Vector2(780, 530);
+        Size = new Vector2(CrowdUi.S(780), CrowdUi.S(530));
         SizeCondition = ImGuiCond.FirstUseEver;
-        SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(650, 340), MaximumSize = new Vector2(1400, 1200) };
+        SizeConstraints = new WindowSizeConstraints
+        {
+            MinimumSize = new Vector2(CrowdUi.S(650), CrowdUi.S(340)),
+            MaximumSize = new Vector2(CrowdUi.S(1400), CrowdUi.S(1200)),
+        };
     }
 
     public override void PreDraw()
@@ -39,14 +43,29 @@ internal sealed class PlayerInspectorWindow : Window
     public override void Draw()
     {
         var status = culling.GetStatus();
-        ImGui.TextColored(CrowdUi.Accent, CrowdUi.State(status));
-        CrowdUi.Hint(Loc.Text("Inspector.Help"));
-        ImGui.SetNextItemWidth(260);
-        ImGui.InputTextWithHint("###Search", Loc.Text("Inspector.Search"), ref search, 128);
+        CrowdUi.StateIndicator(status);
         ImGui.SameLine();
-        ImGui.Checkbox(Loc.Text("Inspector.RejectedOnly"), ref rejectedOnly);
-        if (ImGui.SmallButton(Loc.Text("Inspector.StopReveal")))
-            culling.StopReveal();
+        ImGui.TextDisabled("(?)");
+        CrowdUi.Tooltip(Loc.Text("Inspector.Help"));
+        if (ImGui.BeginTable("##SearchBar", 3, ImGuiTableFlags.SizingStretchProp))
+        {
+            ImGui.TableSetupColumn("Search", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("Filter", ImGuiTableColumnFlags.WidthFixed, CrowdUi.S(116));
+            ImGui.TableSetupColumn("Stop", ImGuiTableColumnFlags.WidthFixed, CrowdUi.S(114));
+            ImGui.TableNextColumn();
+            ImGui.SetNextItemWidth(-1);
+            ImGui.InputTextWithHint("###Search", Loc.Text("Inspector.Search"), ref search, 128);
+            ImGui.TableNextColumn();
+            ImGui.Checkbox(Loc.Text("Inspector.RejectedOnly"), ref rejectedOnly);
+            ImGui.TableNextColumn();
+            if (ImGui.Button(Loc.Text("Inspector.StopReveal"), new Vector2(-1, 0)))
+            {
+                culling.StopReveal();
+                nextRefresh = 0;
+            }
+            ImGui.EndTable();
+        }
+        ImGui.Spacing();
 
         var now = Environment.TickCount64;
         if (now >= nextRefresh)
@@ -56,7 +75,7 @@ internal sealed class PlayerInspectorWindow : Window
         }
         if (players.Count == 0)
         {
-            CrowdUi.Hint(Loc.Text("Inspector.Empty"));
+            CrowdUi.Caption(Loc.Text("Inspector.Empty"));
             return;
         }
         if (
@@ -64,15 +83,15 @@ internal sealed class PlayerInspectorWindow : Window
                 "###Players",
                 5,
                 ImGuiTableFlags.ScrollY | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp,
-                new Vector2(0, Math.Max(100, ImGui.GetContentRegionAvail().Y))
+                new Vector2(0, Math.Max(CrowdUi.S(100), ImGui.GetContentRegionAvail().Y))
             )
         )
             return;
         ImGui.TableSetupColumn(Loc.Text("Inspector.Player"), ImGuiTableColumnFlags.WidthStretch);
-        ImGui.TableSetupColumn(Loc.Text("Inspector.Decision"), ImGuiTableColumnFlags.WidthFixed, 108);
+        ImGui.TableSetupColumn(Loc.Text("Inspector.Decision"), ImGuiTableColumnFlags.WidthFixed, CrowdUi.S(100));
         ImGui.TableSetupColumn(Loc.Text("Inspector.Reason"), ImGuiTableColumnFlags.WidthStretch);
-        ImGui.TableSetupColumn(Loc.Text("Inspector.Distance"), ImGuiTableColumnFlags.WidthFixed, 60);
-        ImGui.TableSetupColumn("###Action", ImGuiTableColumnFlags.WidthFixed, 110);
+        ImGui.TableSetupColumn(Loc.Text("Inspector.Distance"), ImGuiTableColumnFlags.WidthFixed, CrowdUi.S(60));
+        ImGui.TableSetupColumn("###Action", ImGuiTableColumnFlags.WidthFixed, CrowdUi.S(110));
         ImGui.TableSetupScrollFreeze(0, 1);
         ImGui.TableHeadersRow();
         var shown = 0;
@@ -80,15 +99,21 @@ internal sealed class PlayerInspectorWindow : Window
         {
             // A paused controller has no current plugin decision, even if the cached row had one.
             var admission = status.Mode == CullingRuntimeMode.Active ? player.Admission : null;
-            if (!player.Name.Contains(search, StringComparison.OrdinalIgnoreCase) || (rejectedOnly && admission?.Allowed != false))
+            if (
+                !player.Name.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || (rejectedOnly && admission?.Allowed != false && admission?.TemporaryReveal != true)
+            )
                 continue;
             shown++;
             ImGui.PushID(player.Identity.GameObjectId.ToString("X"));
-            ImGui.TableNextRow();
+            ImGui.TableNextRow(ImGuiTableRowFlags.None, CrowdUi.S(34));
             ImGui.TableNextColumn();
             ImGui.TextUnformatted(string.IsNullOrWhiteSpace(player.Name) ? $"#{player.Identity.EntityId:X8}" : player.Name);
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(
+            ImGui.TextColored(
+                admission is { TemporaryReveal: true } ? CrowdUi.Gold
+                    : admission is { Allowed: true } ? CrowdUi.Accent
+                    : CrowdUi.Muted,
                 Loc.Text(
                     admission is { Allowed: false } ? "Inspector.Rejected"
                     : admission is { TemporaryReveal: true } ? "Inspector.Revealing"
