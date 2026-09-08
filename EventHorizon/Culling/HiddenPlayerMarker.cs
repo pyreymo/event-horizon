@@ -14,7 +14,7 @@ internal sealed unsafe class HiddenPlayerMarker(
     Configuration configuration,
     IGameGui gameGui,
     StaticVfxController staticVfxController,
-    IWorldDotOverlay worldDotOverlay
+    WorldDotOverlay worldDotOverlay
 )
 {
     private const int MaxCreatesPerFrame = 8;
@@ -38,12 +38,9 @@ internal sealed unsafe class HiddenPlayerMarker(
         liveIds.Clear();
         foreach (var target in targets)
         {
-            if (!target.Allowed && target.ObjectIndex >= 0 && target.ObjectIndex < manager->Objects.IndexSorted.Length)
-            {
-                var obj = manager->Objects.IndexSorted[target.ObjectIndex].Value;
-                if (target.Identity.Matches(obj))
-                    hiddenPlayerAddresses.Add((nint)obj);
-            }
+            var obj = target.Resolve(manager);
+            if (!target.Allowed && obj != null)
+                hiddenPlayerAddresses.Add((nint)obj);
         }
 
         if (configuration.UseHiddenPlayerMarkerDot)

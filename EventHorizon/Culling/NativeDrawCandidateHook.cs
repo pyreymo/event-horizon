@@ -6,10 +6,17 @@ using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.Culling;
 
-// This is the Update stack record, NOT a field on GameObject. See docs/native-admission.md.
+// GameObjectManager.Update rebuilds these stack records each pass. Rejecting a record
+// leaves the object untouched; the game handles EnableDraw/DisableDraw and its own budget.
 [StructLayout(LayoutKind.Explicit, Size = 16)]
 internal unsafe struct NativeDrawCandidate
 {
+    public const int MaxDrawPriority = 15;
+
+    public readonly bool IsInDrawRange => Priority <= MaxDrawPriority;
+
+    public void Reject() => Priority = Math.Max(MaxDrawPriority + 1, Priority);
+
     [FieldOffset(0)]
     public GameObject* Object;
 
@@ -60,10 +67,10 @@ internal sealed unsafe class NativeDrawCandidateHook : IDisposable
             try
             {
                 var bytes = (nint)last - (nint)first;
-                if (first == null || bytes < 0 || bytes > 819 * 16 || bytes % 16 != 0)
+                if (first == null || bytes < 0 || bytes > 819 * sizeof(NativeDrawCandidate) || bytes % sizeof(NativeDrawCandidate) != 0)
                     throw new InvalidOperationException("Unexpected native draw candidate range.");
 
-                var source = new Span<NativeDrawCandidate>(first, (int)(bytes / 16));
+                var source = new Span<NativeDrawCandidate>(first, (int)(bytes / sizeof(NativeDrawCandidate)));
                 Span<NativeDrawCandidate> working = stackalloc NativeDrawCandidate[source.Length];
                 source.CopyTo(working);
                 apply(working);

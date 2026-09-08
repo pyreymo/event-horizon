@@ -51,7 +51,7 @@ internal sealed unsafe class TargetingMarkerController : IDisposable
     private readonly EmbeddedMarkerTextureResources markerResources;
     private readonly ActorVfxController actorVfxController;
     private readonly IPluginLog log;
-    private readonly IWorldDotOverlay worldDotOverlay;
+    private readonly WorldDotOverlay worldDotOverlay;
     private readonly List<WorldDot> dots = [];
 
     private TargetingMeMarkerStyle appliedStyle;
@@ -71,7 +71,7 @@ internal sealed unsafe class TargetingMarkerController : IDisposable
         IFramework framework,
         ITextureProvider textureProvider,
         ActorVfxController actorVfxController,
-        IWorldDotOverlay worldDotOverlay,
+        WorldDotOverlay worldDotOverlay,
         IPluginLog log
     )
     {

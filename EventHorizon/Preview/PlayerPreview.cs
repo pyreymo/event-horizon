@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using System.Text;
 using EventHorizon.Culling;
 using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
@@ -12,7 +11,6 @@ internal sealed unsafe class PlayerPreview(Configuration configuration)
 {
     private const int SelectionVisibilityLeaseMs = 500;
 
-    private readonly Dictionary<ulong, string> names = [];
     private PlayerPreviewSnapshot snapshot = PlayerPreviewSnapshot.Empty(PlayerPreviewEmptyReason.PlayerUnavailable);
     private uint? selectedPlayerEntityId;
     private long selectionExpiresAt;
@@ -66,7 +64,7 @@ internal sealed unsafe class PlayerPreview(Configuration configuration)
                 continue;
             }
 
-            var gameObject = FindPlayerObject(manager, target.Identity, target.ObjectIndex);
+            var gameObject = target.Resolve(manager);
             if (gameObject != null)
             {
                 builder.Add(gameObject, target.ObjectIndex, GetName(gameObject), target.Decision, !target.Allowed, target.CutByBudget);
@@ -78,61 +76,20 @@ internal sealed unsafe class PlayerPreview(Configuration configuration)
 
     public void Clear(PlayerPreviewEmptyReason reason)
     {
-        names.Clear();
         snapshot = PlayerPreviewSnapshot.Empty(reason);
         selectedPlayerEntityId = null;
         selectionExpiresAt = 0;
     }
 
-    private string GetName(GameObject* gameObject)
+    private static string GetName(GameObject* gameObject)
     {
-        var gameObjectId = (ulong)gameObject->GetGameObjectId();
-        if (gameObjectId != 0 && names.TryGetValue(gameObjectId, out var name))
-        {
-            return name;
-        }
-
-        name = PlayerPreviewBuilder.GetObjectName(gameObject);
-        if (gameObjectId != 0 && !(name.Length == 9 && name[0] == '#'))
-        {
-            names[gameObjectId] = name;
-        }
-
-        return name;
+        var name = gameObject->NameString;
+        return string.IsNullOrWhiteSpace(name) ? $"#{gameObject->EntityId:X8}" : name;
     }
 
-    private static GameObject* FindPlayerObject(GameObjectManager* manager, PlayerObjectIdentity identity, int expectedIndex)
-    {
-        if (manager == null || identity.Address == nint.Zero)
-        {
-            return null;
-        }
-
-        if (expectedIndex >= 0 && expectedIndex < manager->Objects.IndexSorted.Length)
-        {
-            var expectedObject = manager->Objects.IndexSorted[expectedIndex].Value;
-            if (expectedObject != null && expectedObject->ObjectKind == ObjectKind.Pc && identity.Matches(expectedObject))
-            {
-                return expectedObject;
-            }
-        }
-
-        for (var index = 0; index < manager->Objects.IndexSorted.Length; index++)
-        {
-            var gameObject = manager->Objects.IndexSorted[index].Value;
-            if (gameObject != null && gameObject->ObjectKind == ObjectKind.Pc && identity.Matches(gameObject))
-            {
-                return gameObject;
-            }
-        }
-
-        return null;
-    }
 }
 
 internal sealed record PlayerPreviewSnapshot(
-    int Version,
-    long UpdatedAtTicks,
     float ViewRange,
     float NearbyRange,
     IReadOnlyList<PlayerPreviewEntry> Players,
@@ -140,7 +97,7 @@ internal sealed record PlayerPreviewSnapshot(
     PlayerPreviewEmptyReason EmptyReason
 )
 {
-    public static PlayerPreviewSnapshot Empty(PlayerPreviewEmptyReason reason) => new(0, 0, 50f, 0f, [], PlayerPreviewStats.Empty, reason);
+    public static PlayerPreviewSnapshot Empty(PlayerPreviewEmptyReason reason) => new(50f, 0f, [], PlayerPreviewStats.Empty, reason);
 }
 
 internal enum PlayerPreviewEmptyReason
@@ -162,7 +119,6 @@ internal readonly record struct PlayerPreviewEntry(
     Vector2 RelativeXZ,
     float Distance,
     bool IsVisible,
-    bool IsHiddenByPlugin,
     PlayerKeepRuleId? BestRule,
     PlayerKeepBudgetPolicy BudgetPolicy,
     int? BudgetRank,
@@ -245,50 +201,18 @@ internal sealed unsafe class PlayerPreviewBuilder
                 relativeXz,
                 distance,
                 !shouldHide,
-                shouldHide,
                 keepDecision.RuleId,
                 keepDecision.BudgetPolicy,
-                keepDecision.Kind == PlayerKeepDecisionKind.Keep ? keepDecision.Rank : null,
+                keepDecision.HasMatchingRule ? keepDecision.Rank : null,
                 cutByBudget,
                 keepDecision.MatchedRules
             )
         );
     }
 
-    public void Add(GameObject* gameObject, int objectIndex, PlayerPreviewEntry previousEntry)
-    {
-        if (gameObject == null)
-        {
-            return;
-        }
-
-        var (relativeXz, distance) = GetRelativePosition(gameObject);
-
-        if (previousEntry.IsVisible)
-        {
-            visiblePlayers++;
-        }
-        else
-        {
-            hiddenPlayers++;
-        }
-
-        players.Add(
-            previousEntry with
-            {
-                EntityId = gameObject->EntityId,
-                ObjectIndex = objectIndex,
-                RelativeXZ = relativeXz,
-                Distance = distance,
-            }
-        );
-    }
-
     public PlayerPreviewSnapshot Build()
     {
         return new PlayerPreviewSnapshot(
-            Environment.TickCount,
-            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             viewRange,
             nearbyRange,
             [.. players],
@@ -314,25 +238,4 @@ internal sealed unsafe class PlayerPreviewBuilder
         return (relativeXz, relativeXz.Length());
     }
 
-    // FFXIVClientStructs GameObject._name: FieldOffset(0x30), FixedSizeArray64<byte>.
-    private const int GameObjectNameOffset = 0x30;
-    private const int GameObjectNameLength = 64;
-
-    public static string GetObjectName(GameObject* gameObject)
-    {
-        var bytes = new ReadOnlySpan<byte>((byte*)gameObject + GameObjectNameOffset, GameObjectNameLength);
-        var length = bytes.IndexOf((byte)0);
-        if (length < 0)
-        {
-            length = bytes.Length;
-        }
-
-        if (length == 0)
-        {
-            return $"#{gameObject->EntityId:X8}";
-        }
-
-        var name = Encoding.UTF8.GetString(bytes[..length]);
-        return string.IsNullOrWhiteSpace(name) ? $"#{gameObject->EntityId:X8}" : name;
-    }
 }

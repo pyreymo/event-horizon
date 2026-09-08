@@ -32,7 +32,7 @@ internal sealed unsafe class DrawAdmissionPolicy(
     {
         rules.BeforeUpdate();
         players.Clear();
-        Span<int> slots = stackalloc int[candidates.Length];
+        Span<int> playerSlots = stackalloc int[candidates.Length];
         var slotCount = 0;
         for (var index = 0; index < candidates.Length; index++)
         {
@@ -48,7 +48,7 @@ internal sealed unsafe class DrawAdmissionPolicy(
             if (obj->ObjectKind != ObjectKind.Pc)
             {
                 if (nonPlayers.ShouldHide(obj, manager))
-                    candidates[index].Priority = Math.Max(16, candidate.Priority);
+                    candidates[index].Reject();
                 continue;
             }
             if (!CharacterObjectSlots.IsEvenSlot(obj->ObjectIndex))
@@ -58,47 +58,41 @@ internal sealed unsafe class DrawAdmissionPolicy(
             var position = (System.Numerics.Vector3)obj->Position;
             decision = decision.WithViewport(gameGui.WorldToScreen(position, out _, out var inView) && inView);
             var preview = previewEntityId == obj->EntityId;
-            var keep = preview || decision.Kind == PlayerKeepDecisionKind.Keep;
             // Preserve native range rejection. Leave render flags (including the game's
             // special exception) to Update; the plugin budget caps candidates, not draw calls.
-            var eligible = candidate.Priority <= 15;
-            players.Add(new(candidate, decision, PlayerObjectIdentity.From(obj), index, keep, preview, eligible));
-            slots[slotCount++] = index;
+            players.Add(new(candidate, decision, PlayerObjectIdentity.From(obj), index, preview));
+            playerSlots[slotCount++] = index;
         }
 
         players.Sort(Compare);
         var nextTargets = new PlayerAdmissionDecision[players.Count];
         var counted = 0;
+        var playerLimit = configuration.LimitVisiblePlayerCount ? Math.Clamp(configuration.VisiblePlayerCountLimit, 1, 100) : int.MaxValue;
         for (var index = 0; index < players.Count; index++)
         {
             var player = players[index];
             var candidate = player.Candidate;
-            var exempt = player.Preview || player.Decision.BudgetPolicy == PlayerKeepBudgetPolicy.Exempt;
-            var cut =
-                player.Keep
-                && player.Eligible
-                && !exempt
-                && configuration.LimitVisiblePlayerCount
-                && counted >= Math.Clamp(configuration.VisiblePlayerCountLimit, 1, 100);
-            var rejected = !player.Keep || cut;
-            if (!rejected && player.Eligible && !exempt)
+            var consumesBudget = player.Keep && candidate.IsInDrawRange && !player.Exempt;
+            var cutByBudget = consumesBudget && counted >= playerLimit;
+            var allowed = player.Keep && !cutByBudget;
+            if (allowed && consumesBudget)
                 counted++;
-            if (rejected)
-                candidate.Priority = Math.Max(16, candidate.Priority);
+            if (!allowed)
+                candidate.Reject();
 
-            // Non-player/local-player slots and relative native order remain untouched.
-            candidates[slots[index]] = candidate;
-            nextTargets[index] = new(player.Identity, candidate.Object->ObjectIndex, !rejected, player.Decision, cut);
+            // Sort only within the original remote-player slots; other objects keep their native positions.
+            candidates[playerSlots[index]] = candidate;
+            nextTargets[index] = new(player.Identity, candidate.Object->ObjectIndex, allowed, player.Decision, cutByBudget);
         }
         targets = nextTargets;
     }
 
     private static int Compare(RankedPlayer left, RankedPlayer right)
     {
-        var group = Group(left).CompareTo(Group(right));
+        var group = left.PriorityGroup.CompareTo(right.PriorityGroup);
         if (group != 0)
             return group;
-        if (!left.Keep || !left.Eligible)
+        if (!left.Keep || !left.Candidate.IsInDrawRange)
             return left.NativeIndex.CompareTo(right.NativeIndex);
         var rank = left.Decision.Rank.CompareTo(right.Decision.Rank);
         if (rank != 0)
@@ -107,19 +101,29 @@ internal sealed unsafe class DrawAdmissionPolicy(
         return tie != 0 ? tie : left.NativeIndex.CompareTo(right.NativeIndex);
     }
 
-    private static int Group(RankedPlayer player) =>
-        !player.Keep || !player.Eligible ? 3
-        : player.Preview ? 0
-        : player.Decision.BudgetPolicy == PlayerKeepBudgetPolicy.Exempt ? 1
-        : 2;
+    private enum PlayerPriorityGroup
+    {
+        Preview,
+        Exempt,
+        Counted,
+        RejectedOrOutOfRange,
+    }
 
     private readonly record struct RankedPlayer(
         NativeDrawCandidate Candidate,
         PlayerKeepDecision Decision,
         PlayerObjectIdentity Identity,
         int NativeIndex,
-        bool Keep,
-        bool Preview,
-        bool Eligible
-    );
+        bool Preview
+    )
+    {
+        public bool Keep => Preview || Decision.HasMatchingRule;
+        public bool Exempt => Preview || Decision.BudgetPolicy == PlayerKeepBudgetPolicy.Exempt;
+
+        public PlayerPriorityGroup PriorityGroup =>
+            !Keep || !Candidate.IsInDrawRange ? PlayerPriorityGroup.RejectedOrOutOfRange
+            : Preview ? PlayerPriorityGroup.Preview
+            : Exempt ? PlayerPriorityGroup.Exempt
+            : PlayerPriorityGroup.Counted;
+    }
 }

@@ -7,14 +7,14 @@ namespace EventHorizon.Culling;
 internal enum PlayerKeepRuleMask
 {
     None = 0,
-    TargetFocus = 1 << 0,
-    PartyAlliance = 1 << 1,
-    Friends = 1 << 2,
-    TargetingMe = 1 << 3,
-    RecentChat = 1 << 4,
-    Recruiting = 1 << 5,
-    Nearby = 1 << 6,
-    Race = 1 << 7,
+    TargetFocus = 1 << (int)PlayerKeepRuleId.TargetFocus,
+    PartyAlliance = 1 << (int)PlayerKeepRuleId.PartyAlliance,
+    Friends = 1 << (int)PlayerKeepRuleId.Friends,
+    TargetingMe = 1 << (int)PlayerKeepRuleId.TargetingMe,
+    RecentChat = 1 << (int)PlayerKeepRuleId.RecentChat,
+    Recruiting = 1 << (int)PlayerKeepRuleId.Recruiting,
+    Nearby = 1 << (int)PlayerKeepRuleId.Nearby,
+    Race = 1 << (int)PlayerKeepRuleId.Race,
 }
 
 internal static class RaceSexFilter
@@ -30,17 +30,9 @@ internal static class RaceSexFilter
     }
 }
 
-internal enum PlayerKeepDecisionKind
-{
-    None,
-    Keep,
-}
-
 internal readonly record struct PlayerKeepTieBreaker(bool InViewport, float DistanceSq)
 {
     public static readonly PlayerKeepTieBreaker None = new(false, float.MaxValue);
-
-    public static PlayerKeepTieBreaker Nearby(float distanceSq) => new(false, distanceSq);
 
     public PlayerKeepTieBreaker WithViewport(bool inViewport) => this with { InViewport = inViewport };
 
@@ -56,7 +48,6 @@ internal readonly record struct PlayerKeepTieBreaker(bool InViewport, float Dist
 }
 
 internal readonly record struct PlayerKeepDecision(
-    PlayerKeepDecisionKind Kind,
     PlayerKeepRuleId? RuleId,
     int Rank,
     PlayerKeepBudgetPolicy BudgetPolicy,
@@ -64,8 +55,9 @@ internal readonly record struct PlayerKeepDecision(
     PlayerKeepRuleMask MatchedRules
 )
 {
+    public bool HasMatchingRule => RuleId.HasValue;
+
     public static readonly PlayerKeepDecision None = new(
-        PlayerKeepDecisionKind.None,
         null,
         int.MaxValue,
         PlayerKeepBudgetPolicy.Exempt,
@@ -79,7 +71,7 @@ internal readonly record struct PlayerKeepDecision(
         PlayerKeepBudgetPolicy budgetPolicy,
         PlayerKeepTieBreaker tieBreaker,
         PlayerKeepRuleMask matchedRules
-    ) => new(PlayerKeepDecisionKind.Keep, ruleId, rank, budgetPolicy, tieBreaker, matchedRules);
+    ) => new(ruleId, rank, budgetPolicy, tieBreaker, matchedRules);
 
     public PlayerKeepDecision WithViewport(bool inViewport) => this with { TieBreaker = TieBreaker.WithViewport(inViewport) };
 }

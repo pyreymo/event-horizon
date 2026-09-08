@@ -20,13 +20,7 @@ internal readonly record struct WorldDot(Vector3 Position, uint Color, float Rad
     }
 }
 
-internal interface IWorldDotOverlay
-{
-    void Replace(WorldDotScope scope, ReadOnlySpan<WorldDot> dots);
-    void Clear(WorldDotScope scope);
-}
-
-internal sealed class WorldDotOverlay : IWorldDotOverlay, IDisposable
+internal sealed class WorldDotOverlay : IDisposable
 {
     private readonly IGameGui gameGui;
     private readonly IDalamudPluginInterface pluginInterface;

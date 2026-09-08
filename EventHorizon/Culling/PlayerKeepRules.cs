@@ -92,70 +92,30 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
             return PlayerKeepDecision.None;
         }
 
-        PlayerKeepRuleId? winningRule = null;
-        int? rank = null;
-        var tieBreaker = PlayerKeepTieBreaker.None;
-        var matchedRules = PlayerKeepRuleMask.None;
-        if (ShouldKeepTargetOrFocusPlayer(gameObject))
-        {
-            matchedRules |= PlayerKeepRuleMask.TargetFocus;
-            KeepBetterRule(ref winningRule, ref rank, ref tieBreaker, PlayerKeepRuleId.TargetFocus);
-        }
+        var decision = PlayerKeepDecision.None;
+        Match(PlayerKeepRuleId.TargetFocus, ShouldKeepTargetOrFocusPlayer(gameObject));
+        Match(PlayerKeepRuleId.PartyAlliance, ShouldKeepPartyOrAllianceMember(gameObject));
+        Match(PlayerKeepRuleId.Friends, ShouldKeepFriend(gameObject));
+        Match(PlayerKeepRuleId.TargetingMe, ShouldKeepPlayerTargetingLocalPlayer(gameObject));
+        Match(PlayerKeepRuleId.RecentChat, ShouldKeepRecentChatPlayer(gameObject));
+        Match(PlayerKeepRuleId.Recruiting, ShouldKeepRecruitingPlayer(gameObject));
+        Match(PlayerKeepRuleId.Nearby, ShouldKeepNearbyPlayer(gameObject, out var distanceSq), distanceSq);
+        Match(PlayerKeepRuleId.Race, ShouldKeepByRace(gameObject));
+        return decision;
 
-        if (ShouldKeepPartyOrAllianceMember(gameObject))
+        // Evaluate every rule: the preview needs all matches, and timed rules update their history.
+        void Match(PlayerKeepRuleId rule, bool matches, float distance = float.MaxValue)
         {
-            matchedRules |= PlayerKeepRuleMask.PartyAlliance;
-            KeepBetterRule(ref winningRule, ref rank, ref tieBreaker, PlayerKeepRuleId.PartyAlliance);
-        }
+            if (!matches)
+                return;
 
-        if (ShouldKeepFriend(gameObject))
-        {
-            matchedRules |= PlayerKeepRuleMask.Friends;
-            KeepBetterRule(ref winningRule, ref rank, ref tieBreaker, PlayerKeepRuleId.Friends);
+            var matchedRules = decision.MatchedRules | (PlayerKeepRuleMask)(1 << (int)rule);
+            var rank = ruleRanks[(int)rule];
+            if (rank < decision.Rank)
+                decision = PlayerKeepDecision.Keep(rule, rank, ruleBudgetPolicies[(int)rule], new(false, distance), matchedRules);
+            else
+                decision = decision with { MatchedRules = matchedRules };
         }
-
-        if (ShouldKeepPlayerTargetingLocalPlayer(gameObject))
-        {
-            matchedRules |= PlayerKeepRuleMask.TargetingMe;
-            KeepBetterRule(ref winningRule, ref rank, ref tieBreaker, PlayerKeepRuleId.TargetingMe);
-        }
-
-        if (ShouldKeepRecentChatPlayer(gameObject))
-        {
-            matchedRules |= PlayerKeepRuleMask.RecentChat;
-            KeepBetterRule(ref winningRule, ref rank, ref tieBreaker, PlayerKeepRuleId.RecentChat);
-        }
-
-        if (ShouldKeepRecruitingPlayer(gameObject))
-        {
-            matchedRules |= PlayerKeepRuleMask.Recruiting;
-            KeepBetterRule(ref winningRule, ref rank, ref tieBreaker, PlayerKeepRuleId.Recruiting);
-        }
-
-        if (ShouldKeepNearbyPlayer(gameObject, out var nearbyDistanceSq))
-        {
-            matchedRules |= PlayerKeepRuleMask.Nearby;
-            KeepBetterRule(
-                ref winningRule,
-                ref rank,
-                ref tieBreaker,
-                PlayerKeepRuleId.Nearby,
-                PlayerKeepTieBreaker.Nearby(nearbyDistanceSq)
-            );
-        }
-
-        if (ShouldKeepByRace(gameObject))
-        {
-            matchedRules |= PlayerKeepRuleMask.Race;
-            KeepBetterRule(ref winningRule, ref rank, ref tieBreaker, PlayerKeepRuleId.Race);
-        }
-
-        if (!winningRule.HasValue || !rank.HasValue)
-        {
-            return PlayerKeepDecision.None;
-        }
-
-        return CreateKeepDecision(winningRule.Value, rank.Value, tieBreaker, matchedRules);
     }
 
     private bool ShouldKeepFriend(GameObject* gameObject)
@@ -494,37 +454,6 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
     }
 
     private static bool IsPlayerObject(GameObject* gameObject) => gameObject->ObjectKind == ObjectKind.Pc;
-
-    private PlayerKeepDecision CreateKeepDecision(
-        PlayerKeepRuleId ruleId,
-        int rank,
-        PlayerKeepTieBreaker tieBreaker,
-        PlayerKeepRuleMask matchedRules
-    ) => PlayerKeepDecision.Keep(ruleId, rank, ruleBudgetPolicies[(int)ruleId], tieBreaker, matchedRules);
-
-    private void KeepBetterRule(
-        ref PlayerKeepRuleId? winningRule,
-        ref int? currentRank,
-        ref PlayerKeepTieBreaker currentTieBreaker,
-        PlayerKeepRuleId rule,
-        PlayerKeepTieBreaker tieBreaker
-    )
-    {
-        var rank = ruleRanks[(int)rule];
-        if (!currentRank.HasValue || rank < currentRank.Value)
-        {
-            winningRule = rule;
-            currentRank = rank;
-            currentTieBreaker = tieBreaker;
-        }
-    }
-
-    private void KeepBetterRule(
-        ref PlayerKeepRuleId? winningRule,
-        ref int? currentRank,
-        ref PlayerKeepTieBreaker currentTieBreaker,
-        PlayerKeepRuleId rule
-    ) => KeepBetterRule(ref winningRule, ref currentRank, ref currentTieBreaker, rule, PlayerKeepTieBreaker.None);
 
     #endregion
 

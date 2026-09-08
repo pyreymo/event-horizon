@@ -20,7 +20,6 @@ internal sealed unsafe class CullingController : IDisposable
     private readonly HiddenPlayerMarker hiddenPlayerMarker;
     private readonly PlayerPreview playerPreview;
     private CullingRuntimeMode? currentMode;
-    private int otherPlayerCount;
 
     public CullingController(
         IGameInteropProvider gameInteropProvider,
@@ -32,7 +31,7 @@ internal sealed unsafe class CullingController : IDisposable
         ITargetManager targetManager,
         IGameGui gameGui,
         StaticVfxController staticVfxController,
-        IWorldDotOverlay worldDotOverlay,
+        WorldDotOverlay worldDotOverlay,
         IPluginLog log
     )
     {
@@ -54,7 +53,7 @@ internal sealed unsafe class CullingController : IDisposable
                 return 0;
             var count = 0;
             foreach (var target in policy.Decisions)
-                if (!target.Allowed && target.Identity.Matches(manager->Objects.IndexSorted[target.ObjectIndex].Value))
+                if (!target.Allowed && target.Resolve(manager) != null)
                     count++;
             return count;
         }
@@ -116,7 +115,6 @@ internal sealed unsafe class CullingController : IDisposable
 
     private CullingRuntimeMode UpdateMode(GameObjectManager* manager)
     {
-        otherPlayerCount = CountOtherPlayers(manager);
         var mode = DetermineRuntimeMode(manager);
         if (currentMode != mode)
         {
@@ -140,7 +138,7 @@ internal sealed unsafe class CullingController : IDisposable
             return CullingRuntimeMode.PlayerUnavailable;
         if (configuration.DisableInDuty && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]))
             return CullingRuntimeMode.SuspendedDuty;
-        if (configuration.DisableCullingBelowPlayerCount && otherPlayerCount < configuration.DisableCullingPlayerCountThreshold)
+        if (configuration.DisableCullingBelowPlayerCount && CountOtherPlayers(manager) < configuration.DisableCullingPlayerCountThreshold)
             return CullingRuntimeMode.SuspendedLowPlayerCount;
         return CullingRuntimeMode.Active;
     }
