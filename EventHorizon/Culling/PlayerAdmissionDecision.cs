@@ -17,7 +17,7 @@ internal readonly record struct PlayerAdmissionDecision(
         if (manager == null || (uint)ObjectIndex >= manager->Objects.IndexSorted.Length)
             return null;
 
-        // Manager slots can be reused between admission and UI/marker updates.
+        // Manager slots can be reused after an admission decision was recorded.
         var obj = manager->Objects.IndexSorted[ObjectIndex].Value;
         return Identity.Matches(obj) ? obj : null;
     }

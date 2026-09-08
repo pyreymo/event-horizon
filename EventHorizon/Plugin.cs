@@ -3,15 +3,12 @@ using System.IO;
 using Dalamud.Game.Chat;
 using Dalamud.Game.Command;
 using Dalamud.Interface.ImGuiNotification;
-using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using EventHorizon.Culling;
-using EventHorizon.Dtr;
 using EventHorizon.Localization;
 using EventHorizon.Settings;
-using EventHorizon.UI.Config;
 
 namespace EventHorizon;
 
@@ -56,9 +53,6 @@ public sealed class Plugin : IDalamudPlugin
     internal static ICondition Condition { get; private set; } = null!;
 
     [PluginService]
-    internal static IDtrBar DtrBar { get; private set; } = null!;
-
-    [PluginService]
     internal static IPluginLog Log { get; private set; } = null!;
 
     [PluginService]
@@ -73,15 +67,10 @@ public sealed class Plugin : IDalamudPlugin
 
     internal Configuration Configuration { get; init; }
 
-    private readonly WindowSystem windowSystem = new("EventHorizon");
-    private ConfigWindow ConfigWindow { get; init; }
     internal CullingController Culling { get; private set; } = null!;
-    private PlayerInspectorWindow Inspector { get; set; } = null!;
-    private DtrBar DtrStatusBar { get; set; } = null!;
     private bool disposed;
 
     public int HiddenPlayerCount => Culling.HiddenPlayerCount;
-    internal CullingStatus CullingStatus => Culling.GetStatus();
 
     #endregion
 
@@ -117,21 +106,13 @@ public sealed class Plugin : IDalamudPlugin
                 GameGui,
                 Log
             );
-            ConfigWindow = new ConfigWindow(this);
-            Inspector = new PlayerInspectorWindow(Culling);
-            DtrStatusBar = new DtrBar(DtrBar, Configuration, Culling.GetStatus, SetPlayerHidingEnabled, ToggleConfigUi);
-            windowSystem.AddWindow(ConfigWindow);
-            windowSystem.AddWindow(Inspector);
 
             CommandManager.AddHandler(
                 PrimaryCommandName,
-                new CommandInfo(OnCommand) { HelpMessage = Loc.Text("Command.Help.OpenSettings") }
+                new CommandInfo(OnCommand) { HelpMessage = BuildCommandHelp(PrimaryCommandName) }
             );
             CommandManager.AddHandler(ShortCommandName, new CommandInfo(OnCommand) { HelpMessage = BuildCommandHelp(ShortCommandName) });
 
-            PluginInterface.UiBuilder.Draw += OnDraw;
-            PluginInterface.UiBuilder.OpenConfigUi += OpenConfigUi;
-            PluginInterface.UiBuilder.OpenMainUi += OpenMainUi;
             PluginInterface.LanguageChanged += OnLanguageChanged;
             ChatGui.ChatMessage += OnChatMessage;
             Framework.Update += OnFrameworkUpdate;
@@ -195,23 +176,18 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         disposed = true;
-        PluginInterface.UiBuilder.Draw -= OnDraw;
-        PluginInterface.UiBuilder.OpenConfigUi -= OpenConfigUi;
-        PluginInterface.UiBuilder.OpenMainUi -= OpenMainUi;
         PluginInterface.LanguageChanged -= OnLanguageChanged;
         ChatGui.ChatMessage -= OnChatMessage;
         Framework.Update -= OnFrameworkUpdate;
         CommandManager.RemoveHandler(PrimaryCommandName);
         CommandManager.RemoveHandler(ShortCommandName);
 
-        windowSystem.RemoveAllWindows();
-        DtrStatusBar?.Dispose();
         Culling?.Dispose();
     }
 
     #endregion
 
-    #region UI
+    #region Commands
 
     private void OnCommand(string command, string args)
     {
@@ -226,11 +202,8 @@ public sealed class Plugin : IDalamudPlugin
             case "toggle":
                 SetPlayerHidingEnabled(!Configuration.HideAllOtherPlayers);
                 break;
-            case "preview":
-                OpenPlayerInspector();
-                break;
             default:
-                ToggleConfigUi();
+                ChatGui.Print(BuildCommandHelp(ShortCommandName));
                 break;
         }
     }
@@ -239,35 +212,11 @@ public sealed class Plugin : IDalamudPlugin
     {
         return string.Format(
             Loc.Text("Command.Help"),
-            Loc.Text("Command.Help.OpenSettings"),
             commandName,
             Loc.Text("Command.Help.Enable"),
             Loc.Text("Command.Help.Disable"),
-            Loc.Text("Command.Help.Toggle"),
-            Loc.Text("Command.Help.Preview")
+            Loc.Text("Command.Help.Toggle")
         );
-    }
-
-    public void ToggleConfigUi() => ConfigWindow.Toggle();
-
-    internal void OpenPlayerInspector() => Inspector.IsOpen = true;
-
-    private void OpenMainUi() => ConfigWindow.IsOpen = true;
-
-    private void OpenConfigUi() => ConfigWindow.IsOpen = true;
-
-    public void RefreshDtrBar() => DtrStatusBar.RefreshNow();
-
-    private void OnDraw()
-    {
-        try
-        {
-            windowSystem.Draw();
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "WindowSystem.Draw threw.");
-        }
     }
 
     #endregion
@@ -277,9 +226,6 @@ public sealed class Plugin : IDalamudPlugin
     private void OnFrameworkUpdate(IFramework framework)
     {
         Culling.TemporarilyShowAllPlayers = IsTemporaryShowAllPlayersShortcutHeld();
-
-        DtrStatusBar.Update();
-
         Culling.Update();
     }
 
@@ -315,14 +261,10 @@ public sealed class Plugin : IDalamudPlugin
     private void SetPlayerHidingEnabled(bool enabled)
     {
         if (Configuration.HideAllOtherPlayers == enabled)
-        {
-            RefreshDtrBar();
             return;
-        }
 
         Configuration.HideAllOtherPlayers = enabled;
         Configuration.Save();
-        RefreshDtrBar();
         RefreshObjectCulling(resetRuleState: true);
     }
 
@@ -338,7 +280,6 @@ public sealed class Plugin : IDalamudPlugin
     private void OnLanguageChanged(string langCode)
     {
         Loc.Load(PluginInterface);
-        RefreshDtrBar();
     }
 
     #endregion

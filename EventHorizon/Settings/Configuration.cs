@@ -30,7 +30,6 @@ internal class Configuration : IPluginConfiguration
     public bool HideOtherPlayerOrnaments { get; set; } = false;
     public bool HideOtherPlayerBattlePets { get; set; } = false;
     public bool HideUnattachedEventNpcs { get; set; } = false;
-    public bool ShowDtrBar { get; set; } = true;
     public bool KeepFriends { get; set; } = true;
     public bool KeepPartyAndAllianceMembers { get; set; } = true;
     public bool KeepRecruitingPlayers { get; set; } = true;
