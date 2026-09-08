@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using Dalamud.Game.Chat;
 using Dalamud.Plugin.Services;
-using EventHorizon.Preview;
 using EventHorizon.Settings;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
@@ -28,7 +27,7 @@ internal sealed unsafe class DrawAdmissionPolicy(
 
     public void Clear() => targets = [];
 
-    public void Apply(Span<NativeDrawCandidate> candidates, GameObjectManager* manager, uint? previewEntityId)
+    public void Apply(Span<NativeDrawCandidate> candidates, GameObjectManager* manager, uint? revealedEntityId)
     {
         rules.BeforeUpdate();
         players.Clear();
@@ -56,25 +55,31 @@ internal sealed unsafe class DrawAdmissionPolicy(
 
             var decision = rules.GetKeepDecision(obj);
             var position = (System.Numerics.Vector3)obj->Position;
+            if (!decision.HasMatchingRule)
+            {
+                var local = manager->Objects.IndexSorted[0].Value;
+                var distance = local == null ? float.MaxValue : System.Numerics.Vector3.DistanceSquared(local->Position, position);
+                decision = decision with { TieBreaker = new(false, distance) };
+            }
             decision = decision.WithViewport(gameGui.WorldToScreen(position, out _, out var inView) && inView);
-            var preview = previewEntityId == obj->EntityId;
+            var reveal = revealedEntityId == obj->EntityId;
             // Preserve native range rejection. Leave render flags (including the game's
             // special exception) to Update; the plugin budget caps candidates, not draw calls.
-            players.Add(new(candidate, decision, PlayerObjectIdentity.From(obj), index, preview));
+            players.Add(new(candidate, decision, PlayerObjectIdentity.From(obj), index, reveal));
             playerSlots[slotCount++] = index;
         }
 
         players.Sort(Compare);
         var nextTargets = new PlayerAdmissionDecision[players.Count];
         var counted = 0;
-        var playerLimit = configuration.LimitVisiblePlayerCount ? Math.Clamp(configuration.VisiblePlayerCountLimit, 1, 100) : int.MaxValue;
+        var playerLimit = configuration.LimitVisiblePlayerCount ? Math.Clamp(configuration.VisiblePlayerCountLimit, 0, 100) : int.MaxValue;
         for (var index = 0; index < players.Count; index++)
         {
             var player = players[index];
             var candidate = player.Candidate;
-            var consumesBudget = player.Keep && candidate.IsInDrawRange && !player.Exempt;
+            var consumesBudget = candidate.IsInDrawRange && !player.Exempt;
             var cutByBudget = consumesBudget && counted >= playerLimit;
-            var allowed = player.Keep && !cutByBudget;
+            var allowed = !cutByBudget;
             if (allowed && consumesBudget)
                 counted++;
             if (!allowed)
@@ -82,7 +87,15 @@ internal sealed unsafe class DrawAdmissionPolicy(
 
             // Sort only within the original remote-player slots; other objects keep their native positions.
             candidates[playerSlots[index]] = candidate;
-            nextTargets[index] = new(player.Identity, candidate.Object->ObjectIndex, allowed, player.Decision, cutByBudget);
+            nextTargets[index] = new(
+                player.Identity,
+                candidate.Object->ObjectIndex,
+                allowed,
+                player.Decision,
+                cutByBudget,
+                player.Candidate.IsInDrawRange,
+                player.Reveal
+            );
         }
         targets = nextTargets;
     }
@@ -92,7 +105,7 @@ internal sealed unsafe class DrawAdmissionPolicy(
         var group = left.PriorityGroup.CompareTo(right.PriorityGroup);
         if (group != 0)
             return group;
-        if (!left.Keep || !left.Candidate.IsInDrawRange)
+        if (!left.Candidate.IsInDrawRange)
             return left.NativeIndex.CompareTo(right.NativeIndex);
         var rank = left.Decision.Rank.CompareTo(right.Decision.Rank);
         if (rank != 0)
@@ -103,10 +116,10 @@ internal sealed unsafe class DrawAdmissionPolicy(
 
     private enum PlayerPriorityGroup
     {
-        Preview,
+        Reveal,
         Exempt,
         Counted,
-        RejectedOrOutOfRange,
+        OutOfRange,
     }
 
     private readonly record struct RankedPlayer(
@@ -114,15 +127,14 @@ internal sealed unsafe class DrawAdmissionPolicy(
         PlayerKeepDecision Decision,
         PlayerObjectIdentity Identity,
         int NativeIndex,
-        bool Preview
+        bool Reveal
     )
     {
-        public bool Keep => Preview || Decision.HasMatchingRule;
-        public bool Exempt => Preview || Decision.BudgetPolicy == PlayerKeepBudgetPolicy.Exempt;
+        public bool Exempt => Reveal || Decision.BudgetPolicy == PlayerKeepBudgetPolicy.Exempt;
 
         public PlayerPriorityGroup PriorityGroup =>
-            !Keep || !Candidate.IsInDrawRange ? PlayerPriorityGroup.RejectedOrOutOfRange
-            : Preview ? PlayerPriorityGroup.Preview
+            !Candidate.IsInDrawRange ? PlayerPriorityGroup.OutOfRange
+            : Reveal ? PlayerPriorityGroup.Reveal
             : Exempt ? PlayerPriorityGroup.Exempt
             : PlayerPriorityGroup.Counted;
     }

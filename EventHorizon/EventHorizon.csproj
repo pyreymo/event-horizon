@@ -14,20 +14,5 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>true</Visible>
     </Content>
-    <Content Include="Assets\no-binder.avfx">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Visible>true</Visible>
-    </Content>
-    <EmbeddedResource Include="Assets\gaze-marker.png" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Serilog" Version="4.3.0">
-      <ExcludeAssets Condition="'$(Configuration)' == 'Debug'">runtime</ExcludeAssets>
-      <ExcludeAssets Condition="'$(Configuration)' != 'Debug'">all</ExcludeAssets>
-    </PackageReference>
-    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0">
-      <ExcludeAssets Condition="'$(Configuration)' != 'Debug'">all</ExcludeAssets>
-    </PackageReference>
   </ItemGroup>
 </Project>

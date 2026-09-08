@@ -7,7 +7,9 @@ internal readonly record struct PlayerAdmissionDecision(
     int ObjectIndex,
     bool Allowed,
     PlayerKeepDecision Decision,
-    bool CutByBudget
+    bool CutByBudget,
+    bool InDrawRange,
+    bool TemporaryReveal
 )
 {
     public unsafe GameObject* Resolve(GameObjectManager* manager)

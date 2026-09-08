@@ -1,11 +1,10 @@
 using System;
+using System.Collections.Generic;
+using System.Numerics;
 using Dalamud.Game.Chat;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin.Services;
-using EventHorizon.Interop.Vfx;
-using EventHorizon.Preview;
 using EventHorizon.Settings;
-using EventHorizon.WorldGraphics;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace EventHorizon.Culling;
@@ -17,90 +16,67 @@ internal sealed unsafe class CullingController : IDisposable
     private readonly ICondition condition;
     private readonly DrawAdmissionPolicy policy;
     private readonly NativeDrawCandidateHook candidatesHook;
-    private readonly HiddenPlayerMarker hiddenPlayerMarker;
-    private readonly PlayerPreview playerPreview;
     private CullingRuntimeMode? currentMode;
+    private PlayerObjectIdentity? revealedPlayer;
+    private long revealExpiresAt;
 
     public CullingController(
-        IGameInteropProvider gameInteropProvider,
-        ISigScanner sigScanner,
+        IGameInteropProvider interop,
+        ISigScanner scanner,
         Configuration configuration,
         IPlayerState playerState,
         ICondition condition,
-        IObjectTable objectTable,
-        ITargetManager targetManager,
+        IObjectTable objects,
+        ITargetManager targets,
         IGameGui gameGui,
-        StaticVfxController staticVfxController,
-        WorldDotOverlay worldDotOverlay,
         IPluginLog log
     )
     {
         this.configuration = configuration;
         this.playerState = playerState;
         this.condition = condition;
-        policy = new(configuration, objectTable, targetManager, gameGui);
-        hiddenPlayerMarker = new(configuration, gameGui, staticVfxController, worldDotOverlay);
-        playerPreview = new(configuration);
-        candidatesHook = new(gameInteropProvider, sigScanner, ApplyPolicy, log);
+        policy = new(configuration, objects, targets, gameGui);
+        candidatesHook = new(interop, scanner, ApplyPolicy, log);
     }
 
-    public int HiddenPlayerCount
-    {
-        get
-        {
-            var manager = GameObjectManager.Instance();
-            if (manager == null || currentMode != CullingRuntimeMode.Active || candidatesHook.Failed)
-                return 0;
-            var count = 0;
-            foreach (var target in policy.Decisions)
-                if (!target.Allowed && target.Resolve(manager) != null)
-                    count++;
-            return count;
-        }
-    }
-
-    public PlayerPreviewSnapshot PlayerPreviewSnapshot => playerPreview.Snapshot;
     public bool TemporarilyShowAllPlayers { private get; set; }
+    public int HiddenPlayerCount => GetStatus().Rejected;
 
     public void Enable() => candidatesHook.Enable();
 
-    public bool SetPreviewSelectedPlayer(uint? entityId) => playerPreview.SetSelectedPlayer(entityId);
-
     public void RecordChatMessage(IChatMessage message) => policy.RecordChatMessage(message);
+
+    public void StopReveal() => revealedPlayer = null;
+
+    public void Reveal(PlayerObjectIdentity identity)
+    {
+        revealedPlayer = identity;
+        revealExpiresAt = Environment.TickCount64 + 5_000;
+    }
+
+    private uint? GetRevealedEntityId(GameObjectManager* manager)
+    {
+        if (revealedPlayer is not { } identity || Environment.TickCount64 >= revealExpiresAt || manager == null)
+            return null;
+        var obj = manager->Objects.GetObjectByEntityId(identity.EntityId);
+        return identity.Matches(obj) ? identity.EntityId : null;
+    }
 
     private void ApplyPolicy(Span<NativeDrawCandidate> candidates)
     {
         var manager = GameObjectManager.Instance();
         if (UpdateMode(manager) == CullingRuntimeMode.Active)
-            policy.Apply(candidates, manager, playerPreview.ActiveSelectedPlayerEntityId);
+            policy.Apply(candidates, manager, GetRevealedEntityId(manager));
     }
 
-    public void Update()
-    {
-        var manager = GameObjectManager.Instance();
-        var mode = UpdateMode(manager);
-        if (mode == CullingRuntimeMode.Active)
-            hiddenPlayerMarker.Update(manager, policy.Decisions);
-        else
-        {
-            hiddenPlayerMarker.Clear();
-            playerPreview.Clear(GetPreviewEmptyReason(mode));
-        }
-    }
+    public void Update() => UpdateMode(GameObjectManager.Instance());
 
     public void Refresh(bool resetRuleState = false)
     {
         if (resetRuleState)
             policy.ClearRules();
+        policy.Clear();
         Update();
-        // The next native pass evaluates configuration changes and new arrivals.
-    }
-
-    public void RefreshPlayerPreview()
-    {
-        var manager = GameObjectManager.Instance();
-        if (UpdateMode(manager) == CullingRuntimeMode.Active)
-            playerPreview.Refresh(manager, policy.Decisions);
     }
 
     public void Dispose()
@@ -108,17 +84,17 @@ internal sealed unsafe class CullingController : IDisposable
         candidatesHook.Dispose();
         policy.Clear();
         policy.ClearRules();
-        hiddenPlayerMarker.Clear();
-        playerPreview.Clear(PlayerPreviewEmptyReason.PlayerUnavailable);
-        // No restoration pass: the game rebuilds candidates on its next Update.
+        StopReveal();
+        // The game rebuilds candidates on its next update; no model restoration is needed.
     }
 
     private CullingRuntimeMode UpdateMode(GameObjectManager* manager)
     {
-        var mode = DetermineRuntimeMode(manager);
+        var mode = DetermineMode(manager, CountOtherPlayers(manager));
         if (currentMode != mode)
         {
             policy.Clear();
+            StopReveal();
             if (mode is CullingRuntimeMode.Disabled or CullingRuntimeMode.PlayerUnavailable)
                 policy.ClearRules();
             currentMode = mode;
@@ -126,19 +102,19 @@ internal sealed unsafe class CullingController : IDisposable
         return mode;
     }
 
-    private CullingRuntimeMode DetermineRuntimeMode(GameObjectManager* manager)
+    private CullingRuntimeMode DetermineMode(GameObjectManager* manager, int count)
     {
         if (!configuration.HideAllOtherPlayers)
             return CullingRuntimeMode.Disabled;
         if (candidatesHook.Failed)
             return CullingRuntimeMode.NativeHookFailed;
-        if (TemporarilyShowAllPlayers)
-            return CullingRuntimeMode.SuspendedTemporaryReveal;
         if (!playerState.IsLoaded || manager == null)
             return CullingRuntimeMode.PlayerUnavailable;
+        if (TemporarilyShowAllPlayers)
+            return CullingRuntimeMode.SuspendedTemporaryReveal;
         if (configuration.DisableInDuty && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]))
             return CullingRuntimeMode.SuspendedDuty;
-        if (configuration.DisableCullingBelowPlayerCount && CountOtherPlayers(manager) < configuration.DisableCullingPlayerCountThreshold)
+        if (configuration.DisableCullingBelowPlayerCount && count < configuration.DisableCullingPlayerCountThreshold)
             return CullingRuntimeMode.SuspendedLowPlayerCount;
         return CullingRuntimeMode.Active;
     }
@@ -146,22 +122,63 @@ internal sealed unsafe class CullingController : IDisposable
     public CullingStatus GetStatus()
     {
         var manager = GameObjectManager.Instance();
-        var count = CountOtherPlayers(manager);
-        var enabled = configuration.HideAllOtherPlayers && !candidatesHook.Failed;
-        var available = playerState.IsLoaded && manager != null;
-        return new(
-            enabled,
-            enabled && TemporarilyShowAllPlayers,
-            enabled
-                && available
-                && configuration.DisableInDuty
-                && (condition[ConditionFlag.BoundByDuty] || condition[ConditionFlag.BoundByDuty56]),
-            enabled
-                && available
-                && configuration.DisableCullingBelowPlayerCount
-                && count < configuration.DisableCullingPlayerCountThreshold,
-            count
+        var count = playerState.IsLoaded ? CountOtherPlayers(manager) : 0;
+        var mode = DetermineMode(manager, count);
+        var admitted = 0;
+        var rejected = 0;
+        if (mode == CullingRuntimeMode.Active && currentMode == mode)
+        {
+            foreach (var decision in policy.Decisions)
+            {
+                if (decision.Resolve(manager) == null)
+                    continue;
+                if (decision.Allowed)
+                    admitted++;
+                else
+                    rejected++;
+            }
+        }
+        return new(mode, count, admitted, rejected);
+    }
+
+    public List<InspectedPlayer> InspectPlayers()
+    {
+        var players = new List<InspectedPlayer>();
+        var manager = GameObjectManager.Instance();
+        if (!playerState.IsLoaded || manager == null)
+            return players;
+        var local = manager->Objects.IndexSorted[0].Value;
+        var position = local == null ? Vector3.Zero : (Vector3)local->Position;
+        var status = GetStatus();
+        var decisions = new Dictionary<int, PlayerAdmissionDecision>();
+        if (status.Mode == CullingRuntimeMode.Active && currentMode == status.Mode)
+            foreach (var decision in policy.Decisions)
+                if (decision.Resolve(manager) != null)
+                    decisions[decision.ObjectIndex] = decision;
+
+        for (var index = CharacterObjectSlots.FirstRemoteSlot; index <= CharacterObjectSlots.LastEvenSlot; index += 2)
+        {
+            var obj = manager->Objects.IndexSorted[index].Value;
+            if (obj == null || obj->ObjectKind != ObjectKind.Pc)
+                continue;
+            var hasDecision = decisions.TryGetValue(index, out var decision);
+            players.Add(
+                new(
+                    PlayerObjectIdentity.From(obj),
+                    obj->NameString,
+                    Vector3.Distance(position, obj->Position),
+                    hasDecision ? decision : null
+                )
+            );
+        }
+        players.Sort(
+            (a, b) =>
+            {
+                var name = StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name);
+                return name != 0 ? name : a.Identity.GameObjectId.CompareTo(b.Identity.GameObjectId);
+            }
         );
+        return players;
     }
 
     private static int CountOtherPlayers(GameObjectManager* manager)
@@ -177,17 +194,6 @@ internal sealed unsafe class CullingController : IDisposable
         }
         return count;
     }
-
-    private static PlayerPreviewEmptyReason GetPreviewEmptyReason(CullingRuntimeMode mode) =>
-        mode switch
-        {
-            CullingRuntimeMode.Disabled => PlayerPreviewEmptyReason.PlayerHidingDisabled,
-            CullingRuntimeMode.SuspendedTemporaryReveal => PlayerPreviewEmptyReason.TemporaryReveal,
-            CullingRuntimeMode.SuspendedDuty => PlayerPreviewEmptyReason.SuspendedInDuty,
-            CullingRuntimeMode.SuspendedLowPlayerCount => PlayerPreviewEmptyReason.SuspendedByLowPlayerCount,
-            CullingRuntimeMode.NativeHookFailed => PlayerPreviewEmptyReason.NativeHookFailed,
-            _ => PlayerPreviewEmptyReason.PlayerUnavailable,
-        };
 }
 
 internal enum CullingRuntimeMode
@@ -201,10 +207,11 @@ internal enum CullingRuntimeMode
     Active,
 }
 
-internal readonly record struct CullingStatus(
-    bool Enabled,
-    bool SuspendedByTemporaryReveal,
-    bool SuspendedInDuty,
-    bool SuspendedByLowPlayerCount,
-    int OtherPlayerCount
+internal readonly record struct CullingStatus(CullingRuntimeMode Mode, int OtherPlayerCount, int Admitted, int Rejected);
+
+internal readonly record struct InspectedPlayer(
+    PlayerObjectIdentity Identity,
+    string Name,
+    float Distance,
+    PlayerAdmissionDecision? Admission
 );

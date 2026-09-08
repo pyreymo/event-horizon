@@ -3,131 +3,39 @@
 </p>
 
 <h1 align="center">Event Horizon</h1>
+<p align="center">Keep the people who matter in view.</p>
 
-<p align="center">
-  Cull what doesn't orbit you.
-</p>
+Event Horizon is a Dalamud plugin for controlling crowd density in FFXIV.
 
-<p align="center">
-  <a href="https://github.com/pyreymo/event-horizon/releases/latest"><img src="https://img.shields.io/github/v/release/pyreymo/event-horizon?label=release" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/Dalamud%20API-15-blue" alt="Dalamud API 15">
-</p>
+## Crowd controls
 
-## Why Event Horizon?
+Set how many ordinary players to admit, then choose which relationships to always keep or prefer. Always-kept players are additional to this limit. Preferences include party and alliance members, friends, targets, nearby players, recent conversations, recruiting players, and selected races and sexes. Other players fill remaining places.
 
-**Event Horizon** is a Dalamud plugin that reduces crowd clutter and improves performance by hiding less relevant players.
+The nearby-player inspector shows each player's decision, reason, and distance. An explicit action temporarily admits a player for five seconds for identification; closing the inspector ends that reveal. The game still controls actual model drawing, including its distance and overall character limits.
 
-Unlike FFXIV's built-in character limit, which broadly reduces the number of displayed characters, Event Horizon decides visibility per player. Party members, friends, targets, nearby players, and other configured priorities can remain visible even in the busiest areas.
+Culling can pause in duties, in small crowds, or while holding a reveal shortcut (Ctrl + Alt by default). Other players' minions, fashion accessories, battle pets, and certain nonessential event NPCs can also be hidden. These options follow the same pause conditions. Your own character is excluded from culling.
 
-**Native settings:** fewer characters, little control.  
-**Event Horizon:** fewer characters, the right ones stay.
-
-<p>
-  <strong>Vanilla (~50 FPS)</strong><br>
-  <img src="./images/gameplay-vanilla.png" alt="Gameplay preview - vanilla">
-</p>
-
-<p>
-  <strong>Event Horizon (110 FPS+)</strong><br>
-  <img src="./images/gameplay-event-horizon.png" alt="Gameplay preview - Event Horizon">
-</p>
+An optional server-bar entry shows status. Left-click toggles culling; right-click opens the console.
 
 ## Install
 
-Add the following custom plugin repository in Dalamud:
+Add this custom plugin repository in Dalamud, then install **Event Horizon**:
 
 ```text
 https://raw.githubusercontent.com/pyreymo/event-horizon/master/repo.json
 ```
 
-Then install **Event Horizon** from the plugin installer.
-
-## Features
-
-<img src="./images/settings.png" alt="Event Horizon settings">
-
-### Smart crowd culling
-
-Set a maximum number of visible players and choose who should be kept:
-
-- Friends, party and alliance members
-- Current target and focus target
-- Players targeting you
-- Recent chat participants
-- Nearby or recruiting players
-- Selected race and sex combinations
-
-Rules can be reordered, enabled individually, and made exempt from the visible-player limit.
-
-Event Horizon uses a stable selection system to avoid constantly swapping visible models as you move through a crowd.
-
-### Live player preview
-
-See nearby players and inspect:
-
-- Whether they are visible or hidden
-- Which rule matched them
-- Whether they count toward the player limit
-- Where they are relative to your character
-
-Open the floating preview with:
-
-```text
-/eh preview
-```
-
-### Player and NPC cleanup
-
-Event Horizon can also hide other players’:
-
-- Minions
-- Fashion accessories
-- Battle pets
-
-Optional experimental rules can remove certain non-targetable or dialogue-only Event NPCs.
-
-### Markers
-
-Players targeting you can be marked using a nameplate icon, screen-space dot, or world VFX.
-
-Hidden players can also receive optional world-position markers, allowing you to track nearby activity without rendering every character model.
-
-### World graphics controls
-
-For additional performance or visual cleanup, Event Horizon can independently hide:
-
-- Background objects
-- Terrain
-- Water
-- Grass
-- All 3D rendering
-
-These controls are disabled by default.
-
-### Safety and quick controls
-
-Event Horizon can automatically suspend player hiding:
-
-- In duties
-- When the nearby player count is low
-- While holding a configurable shortcut
-
-A Server Info Bar entry can display the current state, show FPS, and quickly toggle the plugin.
-
-Your own character is never hidden.
-
 ## Commands
 
-```text
-/eventhorizon
-/eh
-/eh on
-/eh off
-/eh toggle
-/eh preview
-```
+| Command | Action |
+| --- | --- |
+| `/eh` | Open or close the crowd console |
+| `/eh on` | Enable crowd management |
+| `/eh off` | Disable crowd management |
+| `/eh toggle` | Toggle crowd management |
+| `/eh preview` | Open the nearby-player inspector |
 
-`/eventhorizon` and `/eh` are interchangeable.
+`/eventhorizon` is an alias for `/eh`.
 
 ## Building from source
 

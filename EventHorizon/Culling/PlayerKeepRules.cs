@@ -103,18 +103,21 @@ internal sealed unsafe class PlayerKeepRules(Configuration configuration, IObjec
         Match(PlayerKeepRuleId.Race, ShouldKeepByRace(gameObject));
         return decision;
 
-        // Evaluate every rule: the preview needs all matches, and timed rules update their history.
+        // Evaluate every rule so timed relationships refresh even when a stronger rule wins.
         void Match(PlayerKeepRuleId rule, bool matches, float distance = float.MaxValue)
         {
             if (!matches)
                 return;
 
-            var matchedRules = decision.MatchedRules | (PlayerKeepRuleMask)(1 << (int)rule);
             var rank = ruleRanks[(int)rule];
-            if (rank < decision.Rank)
-                decision = PlayerKeepDecision.Keep(rule, rank, ruleBudgetPolicies[(int)rule], new(false, distance), matchedRules);
-            else
-                decision = decision with { MatchedRules = matchedRules };
+            var budget = ruleBudgetPolicies[(int)rule];
+            // Always-keep relationships win even when another preference has an earlier rank.
+            if (
+                (!decision.HasMatchingRule)
+                || (budget == PlayerKeepBudgetPolicy.Exempt && decision.BudgetPolicy != PlayerKeepBudgetPolicy.Exempt)
+                || (budget == decision.BudgetPolicy && rank < decision.Rank)
+            )
+                decision = PlayerKeepDecision.Keep(rule, rank, ruleBudgetPolicies[(int)rule], new(false, distance));
         }
     }
 

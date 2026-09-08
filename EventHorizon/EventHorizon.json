@@ -1,12 +1,16 @@
 {
   "Author": "pyreymo",
   "Name": "Event Horizon",
-  "Changelog": "- Added a configurable hold shortcut (Ctrl + Alt by default) to temporarily show all players without changing your culling settings.\n- Added scene-rendering controls for background objects, terrain, water, grass, and all 3D rendering.\n- Reworked player admission around the game's draw-enabling path to suppress spawn flashes and keep hidden state reliable as player slots change or are reused.\n- Improved culling responsiveness and performance with faster topology-aware refreshes, lower selection stickiness, and reliable deferred player reveals.\n- Expanded the player preview with clearer paused/empty states and detailed motion-aware selection scores, predicted distances, and score breakdowns.\n- Fixed companion, battle-pet, ornament, and Event NPC culling rules; NPCs with nameplate icons are now preserved. Experimental battle-pet and Event NPC hiding are disabled by default for new configurations.\n- Refined settings layouts, status text, localization, marker defaults, and targeting-me marker placement.",
-  "Punchline": "Cull what doesn't orbit you.",
-  "Description": "Cull distant or irrelevant world objects around your character. Use /eventhorizon or /eh to open settings.",
+  "Changelog": "A focused crowd control console with relationship preferences and a nearby-player inspector.",
+  "Punchline": "Keep the people who matter in view.",
+  "Description": "Control crowd density, keep important players, and inspect why someone is excluded. Use /eventhorizon or /eh.",
   "RepoUrl": "https://github.com/pyreymo/event-horizon",
   "ApplicableVersion": "any",
-  "Tags": ["utility", "performance", "visibility"],
+  "Tags": [
+    "utility",
+    "performance",
+    "visibility"
+  ],
   "IconUrl": "https://raw.githubusercontent.com/pyreymo/event-horizon/master/images/icon.png",
   "AcceptsFeedback": true
 }

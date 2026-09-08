@@ -9,14 +9,9 @@ using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using EventHorizon.Culling;
 using EventHorizon.Dtr;
-using EventHorizon.Integration.Debug;
-using EventHorizon.Interop.Vfx;
 using EventHorizon.Localization;
-using EventHorizon.Preview;
 using EventHorizon.Settings;
-using EventHorizon.TargetingMarker;
 using EventHorizon.UI.Config;
-using EventHorizon.WorldGraphics;
 
 namespace EventHorizon;
 
@@ -43,9 +38,6 @@ public sealed class Plugin : IDalamudPlugin
     internal static IPlayerState PlayerState { get; private set; } = null!;
 
     [PluginService]
-    internal static IClientState ClientState { get; private set; } = null!;
-
-    [PluginService]
     internal static IObjectTable ObjectTable { get; private set; } = null!;
 
     [PluginService]
@@ -62,18 +54,6 @@ public sealed class Plugin : IDalamudPlugin
 
     [PluginService]
     internal static ICondition Condition { get; private set; } = null!;
-
-    [PluginService]
-    internal static IDataManager DataManager { get; private set; } = null!;
-
-    [PluginService]
-    internal static IAddonLifecycle AddonLifecycle { get; private set; } = null!;
-
-    [PluginService]
-    internal static INamePlateGui NamePlateGui { get; private set; } = null!;
-
-    [PluginService]
-    internal static ITextureProvider TextureProvider { get; private set; } = null!;
 
     [PluginService]
     internal static IDtrBar DtrBar { get; private set; } = null!;
@@ -95,17 +75,9 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly WindowSystem windowSystem = new("EventHorizon");
     private ConfigWindow ConfigWindow { get; init; }
-    private PlayerPreviewWindow PlayerPreviewWindow { get; init; }
-    private CullingController Culling { get; init; }
-    private PlayerPreviewHighlighter PlayerPreviewHighlighter { get; init; }
-    private ActorVfxController ActorVfxController { get; init; }
-    private StaticVfxResourceRedirector StaticVfxResourceRedirector { get; init; }
-    private StaticVfxController StaticVfxController { get; init; }
-    private WorldDotOverlay WorldDotOverlay { get; init; }
-    private SceneVisibilityController SceneVisibilityController { get; init; }
-    private DtrBar DtrStatusBar { get; init; }
-    private DtrBackground DtrBackground { get; init; }
-    private TargetingMarkerController TargetingMarkerController { get; init; }
+    internal CullingController Culling { get; private set; } = null!;
+    private PlayerInspectorWindow Inspector { get; set; } = null!;
+    private DtrBar DtrStatusBar { get; set; } = null!;
     private bool disposed;
 
     public int HiddenPlayerCount => Culling.HiddenPlayerCount;
@@ -132,15 +104,8 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         var configurationNormalized = Configuration.Normalize(KeyState.IsVirtualKeyValid);
-        DebugFileLog.Initialize(PluginInterface, Log);
         try
         {
-            PlayerPreviewHighlighter = new PlayerPreviewHighlighter();
-            ActorVfxController = new ActorVfxController(GameInteropProvider, SigScanner, Log);
-            StaticVfxResourceRedirector = new StaticVfxResourceRedirector(PluginInterface, GameInteropProvider, Log);
-            StaticVfxController = new StaticVfxController(GameInteropProvider, SigScanner, Log);
-            WorldDotOverlay = new WorldDotOverlay(GameGui, PluginInterface);
-            SceneVisibilityController = new SceneVisibilityController(GameInteropProvider, Configuration);
             Culling = new CullingController(
                 GameInteropProvider,
                 SigScanner,
@@ -150,37 +115,13 @@ public sealed class Plugin : IDalamudPlugin
                 ObjectTable,
                 TargetManager,
                 GameGui,
-                StaticVfxController,
-                WorldDotOverlay,
                 Log
             );
-            var playerPreviewPanel = new PlayerPreviewPanel(
-                () => Culling.PlayerPreviewSnapshot,
-                CullingRefreshPlayerPreview,
-                SetPreviewSelectedPlayer,
-                GameGui
-            );
-            ConfigWindow = new ConfigWindow(this, DataManager, playerPreviewPanel, IsPlayerPreviewWindowOpen, TogglePlayerPreviewWindow);
-            PlayerPreviewWindow = new PlayerPreviewWindow(playerPreviewPanel, OpenMainUi);
+            ConfigWindow = new ConfigWindow(this);
+            Inspector = new PlayerInspectorWindow(Culling);
             DtrStatusBar = new DtrBar(DtrBar, Configuration, Culling.GetStatus, SetPlayerHidingEnabled, ToggleConfigUi);
-            DtrBackground = new DtrBackground(AddonLifecycle, GameGui, Framework, ClientState, Configuration);
-            TargetingMarkerController = new TargetingMarkerController(
-                AddonLifecycle,
-                GameGui,
-                NamePlateGui,
-                ObjectTable,
-                TargetManager,
-                Condition,
-                Configuration,
-                Framework,
-                TextureProvider,
-                ActorVfxController,
-                WorldDotOverlay,
-                Log
-            );
-
             windowSystem.AddWindow(ConfigWindow);
-            windowSystem.AddWindow(PlayerPreviewWindow);
+            windowSystem.AddWindow(Inspector);
 
             CommandManager.AddHandler(
                 PrimaryCommandName,
@@ -194,7 +135,6 @@ public sealed class Plugin : IDalamudPlugin
             PluginInterface.LanguageChanged += OnLanguageChanged;
             ChatGui.ChatMessage += OnChatMessage;
             Framework.Update += OnFrameworkUpdate;
-            SceneVisibilityController.Enable();
             Culling.Enable();
 
             PersistLoadedConfiguration(configurationLoadFailed || configurationNormalized);
@@ -265,17 +205,8 @@ public sealed class Plugin : IDalamudPlugin
         CommandManager.RemoveHandler(ShortCommandName);
 
         windowSystem.RemoveAllWindows();
-        SceneVisibilityController?.Dispose();
-        TargetingMarkerController?.Dispose();
-        DtrBackground?.Dispose();
         DtrStatusBar?.Dispose();
         Culling?.Dispose();
-        WorldDotOverlay?.Dispose();
-        StaticVfxController?.Dispose();
-        StaticVfxResourceRedirector?.Dispose();
-        ActorVfxController?.Dispose();
-        PlayerPreviewHighlighter?.Dispose();
-        DebugFileLog.Close();
     }
 
     #endregion
@@ -296,7 +227,7 @@ public sealed class Plugin : IDalamudPlugin
                 SetPlayerHidingEnabled(!Configuration.HideAllOtherPlayers);
                 break;
             case "preview":
-                TogglePlayerPreviewWindow();
+                OpenPlayerInspector();
                 break;
             default:
                 ToggleConfigUi();
@@ -319,28 +250,13 @@ public sealed class Plugin : IDalamudPlugin
 
     public void ToggleConfigUi() => ConfigWindow.Toggle();
 
-    private bool IsPlayerPreviewWindowOpen() => PlayerPreviewWindow.IsOpen;
+    internal void OpenPlayerInspector() => Inspector.IsOpen = true;
 
-    private void TogglePlayerPreviewWindow()
-    {
-        PlayerPreviewWindow.Toggle();
-    }
+    private void OpenMainUi() => ConfigWindow.IsOpen = true;
 
-    private void OpenMainUi()
-    {
-        ConfigWindow.Open(ConfigWindow.Tab.Culling);
-    }
-
-    private void OpenConfigUi()
-    {
-        ConfigWindow.Open(ConfigWindow.Tab.Behavior);
-    }
+    private void OpenConfigUi() => ConfigWindow.IsOpen = true;
 
     public void RefreshDtrBar() => DtrStatusBar.RefreshNow();
-
-    public void RefreshDtrBackground() => DtrBackground.Refresh();
-
-    public void RequestTargetingMeMarkerRefresh() => TargetingMarkerController.RequestRefresh();
 
     private void OnDraw()
     {
@@ -362,9 +278,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         Culling.TemporarilyShowAllPlayers = IsTemporaryShowAllPlayersShortcutHeld();
 
-        SceneVisibilityController.Update();
         DtrStatusBar.Update();
-        PlayerPreviewHighlighter.Update();
 
         Culling.Update();
     }
@@ -396,17 +310,6 @@ public sealed class Plugin : IDalamudPlugin
     public void RefreshObjectCulling(bool resetRuleState = false)
     {
         Culling.Refresh(resetRuleState);
-    }
-
-    private void CullingRefreshPlayerPreview() => Culling.RefreshPlayerPreview();
-
-    internal void SetPreviewSelectedPlayer(uint? entityId)
-    {
-        PlayerPreviewHighlighter.SetSelectedPlayer(entityId);
-        if (Culling.SetPreviewSelectedPlayer(entityId))
-        {
-            RefreshObjectCulling();
-        }
     }
 
     private void SetPlayerHidingEnabled(bool enabled)

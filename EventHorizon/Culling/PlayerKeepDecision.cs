@@ -1,21 +1,6 @@
-using System;
 using EventHorizon.Settings;
 
 namespace EventHorizon.Culling;
-
-[Flags]
-internal enum PlayerKeepRuleMask
-{
-    None = 0,
-    TargetFocus = 1 << (int)PlayerKeepRuleId.TargetFocus,
-    PartyAlliance = 1 << (int)PlayerKeepRuleId.PartyAlliance,
-    Friends = 1 << (int)PlayerKeepRuleId.Friends,
-    TargetingMe = 1 << (int)PlayerKeepRuleId.TargetingMe,
-    RecentChat = 1 << (int)PlayerKeepRuleId.RecentChat,
-    Recruiting = 1 << (int)PlayerKeepRuleId.Recruiting,
-    Nearby = 1 << (int)PlayerKeepRuleId.Nearby,
-    Race = 1 << (int)PlayerKeepRuleId.Race,
-}
 
 internal static class RaceSexFilter
 {
@@ -51,27 +36,19 @@ internal readonly record struct PlayerKeepDecision(
     PlayerKeepRuleId? RuleId,
     int Rank,
     PlayerKeepBudgetPolicy BudgetPolicy,
-    PlayerKeepTieBreaker TieBreaker,
-    PlayerKeepRuleMask MatchedRules
+    PlayerKeepTieBreaker TieBreaker
 )
 {
     public bool HasMatchingRule => RuleId.HasValue;
 
-    public static readonly PlayerKeepDecision None = new(
-        null,
-        int.MaxValue,
-        PlayerKeepBudgetPolicy.Exempt,
-        PlayerKeepTieBreaker.None,
-        PlayerKeepRuleMask.None
-    );
+    public static readonly PlayerKeepDecision None = new(null, int.MaxValue, PlayerKeepBudgetPolicy.Counted, PlayerKeepTieBreaker.None);
 
     public static PlayerKeepDecision Keep(
         PlayerKeepRuleId ruleId,
         int rank,
         PlayerKeepBudgetPolicy budgetPolicy,
-        PlayerKeepTieBreaker tieBreaker,
-        PlayerKeepRuleMask matchedRules
-    ) => new(ruleId, rank, budgetPolicy, tieBreaker, matchedRules);
+        PlayerKeepTieBreaker tieBreaker
+    ) => new(ruleId, rank, budgetPolicy, tieBreaker);
 
     public PlayerKeepDecision WithViewport(bool inViewport) => this with { TieBreaker = TieBreaker.WithViewport(inViewport) };
 }
