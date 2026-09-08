@@ -52,7 +52,37 @@ internal partial class ConfigWindow : Window
 
     public override void Draw()
     {
-        DrawContent();
+        if (!ImGui.BeginTabBar("EventHorizonSettings"))
+            return;
+        try
+        {
+            if (ImGui.BeginTabItem(Loc.Text("Feature.CoreTab")))
+            {
+                try
+                {
+                    DrawContent();
+                }
+                finally
+                {
+                    ImGui.EndTabItem();
+                }
+            }
+            if (ImGui.BeginTabItem(Loc.Text("Feature.Tab")))
+            {
+                try
+                {
+                    plugin.Features?.DrawSettings();
+                }
+                finally
+                {
+                    ImGui.EndTabItem();
+                }
+            }
+        }
+        finally
+        {
+            ImGui.EndTabBar();
+        }
     }
 
     #endregion

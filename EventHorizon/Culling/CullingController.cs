@@ -17,8 +17,11 @@ internal sealed unsafe class CullingController : IDisposable
     private readonly DrawAdmissionPolicy policy;
     private readonly NativeDrawCandidateHook candidatesHook;
     private CullingRuntimeMode? currentMode;
-    private PlayerObjectIdentity? revealedPlayer;
-    private long revealExpiresAt;
+    private readonly Dictionary<long, RevealRequest> reveals = [];
+    private readonly HashSet<uint> revealedEntityIds = [];
+    private readonly List<long> expiredReveals = [];
+    private long nextRevealId;
+    private bool disposed;
 
     public CullingController(
         IGameInteropProvider interop,
@@ -46,27 +49,60 @@ internal sealed unsafe class CullingController : IDisposable
 
     public void RecordChatMessage(IChatMessage message) => policy.RecordChatMessage(message);
 
-    public void StopReveal() => revealedPlayer = null;
+    private void StopReveal() => reveals.Clear();
 
-    public void Reveal(PlayerObjectIdentity identity)
+    public IPlayerReveal AcquireReveal(PlayerObjectIdentity identity)
     {
-        revealedPlayer = identity;
-        revealExpiresAt = Environment.TickCount64 + 5_000;
+        var id = ++nextRevealId;
+        if (!disposed)
+            reveals[id] = new(identity, Environment.TickCount64 + 500);
+        return new RevealLease(this, id, identity);
     }
 
-    private uint? GetRevealedEntityId(GameObjectManager* manager)
+    private HashSet<uint> GetRevealedEntityIds(GameObjectManager* manager)
     {
-        if (revealedPlayer is not { } identity || Environment.TickCount64 >= revealExpiresAt || manager == null)
-            return null;
-        var obj = manager->Objects.GetObjectByEntityId(identity.EntityId);
-        return identity.Matches(obj) ? identity.EntityId : null;
+        revealedEntityIds.Clear();
+        if (manager == null)
+            return revealedEntityIds;
+        var now = Environment.TickCount64;
+        expiredReveals.Clear();
+        foreach (var (id, request) in reveals)
+        {
+            var obj = manager->Objects.GetObjectByEntityId(request.Identity.EntityId);
+            if (now < request.ExpiresAt && request.Identity.Matches(obj))
+                revealedEntityIds.Add(request.Identity.EntityId);
+            else
+                expiredReveals.Add(id);
+        }
+        foreach (var id in expiredReveals)
+            reveals.Remove(id);
+        return revealedEntityIds;
+    }
+
+    private readonly record struct RevealRequest(PlayerObjectIdentity Identity, long ExpiresAt);
+
+    private sealed class RevealLease(CullingController owner, long id, PlayerObjectIdentity identity) : IPlayerReveal
+    {
+        private bool released;
+
+        public void Renew()
+        {
+            if (!released && !owner.disposed)
+                owner.reveals[id] = new(identity, Environment.TickCount64 + 500);
+        }
+
+        public void Dispose()
+        {
+            released = true;
+            owner.reveals.Remove(id);
+        }
     }
 
     private void ApplyPolicy(Span<NativeDrawCandidate> candidates)
     {
         var manager = GameObjectManager.Instance();
         if (UpdateMode(manager) == CullingRuntimeMode.Active)
-            policy.Apply(candidates, manager, GetRevealedEntityId(manager));
+            policy.Apply(candidates, manager, GetRevealedEntityIds(manager));
     }
 
     public void Update() => UpdateMode(GameObjectManager.Instance());
@@ -81,6 +117,9 @@ internal sealed unsafe class CullingController : IDisposable
 
     public void Dispose()
     {
+        if (disposed)
+            return;
+        disposed = true;
         candidatesHook.Dispose();
         policy.Clear();
         policy.ClearRules();
@@ -215,3 +254,8 @@ internal readonly record struct InspectedPlayer(
     float Distance,
     PlayerAdmissionDecision? Admission
 );
+
+internal interface IPlayerReveal : IDisposable
+{
+    void Renew();
+}

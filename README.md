@@ -13,6 +13,17 @@ Set how many ordinary players to admit, then choose which relationships to alway
 
 Culling can pause in duties, in small crowds, or while holding a reveal shortcut (Ctrl + Alt by default). Other players' minions, fashion accessories, battle pets, and certain nonessential event NPCs can also be hidden. These options follow the same pause conditions. Your own character is excluded from culling.
 
+## Optional features
+
+The **Features** settings tab provides independent switches and settings for:
+
+- Server Info Bar status and FPS, with click-to-toggle crowd controls
+- Server Info Bar background styling
+- Nameplate, dot, and VFX markers for players targeting you
+- Ground VFX or dots for players rejected by crowd management
+- Inline and floating player preview, with selection, temporary budget exemption, highlighting, and a direction arrow
+- Background objects, terrain, water, grass, and full-scene rendering controls
+
 ## Install
 
 Add this custom plugin repository in Dalamud, then install **Event Horizon**:
@@ -25,10 +36,11 @@ https://raw.githubusercontent.com/pyreymo/event-horizon/master/repo.json
 
 | Command | Action |
 | --- | --- |
-| `/eh` | Show command help |
+| `/eh` | Open settings |
 | `/eh on` | Enable crowd management |
 | `/eh off` | Disable crowd management |
 | `/eh toggle` | Toggle crowd management |
+| `/eh preview` | Toggle floating preview (when the Preview feature is enabled) |
 
 `/eventhorizon` is an alias for `/eh`.
 

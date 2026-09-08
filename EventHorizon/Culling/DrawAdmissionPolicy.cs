@@ -27,7 +27,7 @@ internal sealed unsafe class DrawAdmissionPolicy(
 
     public void Clear() => targets = [];
 
-    public void Apply(Span<NativeDrawCandidate> candidates, GameObjectManager* manager, uint? revealedEntityId)
+    public void Apply(Span<NativeDrawCandidate> candidates, GameObjectManager* manager, IReadOnlySet<uint> revealedEntityIds)
     {
         rules.BeforeUpdate();
         players.Clear();
@@ -62,7 +62,7 @@ internal sealed unsafe class DrawAdmissionPolicy(
                 decision = decision with { TieBreaker = new(false, distance) };
             }
             decision = decision.WithViewport(gameGui.WorldToScreen(position, out _, out var inView) && inView);
-            var reveal = revealedEntityId == obj->EntityId;
+            var reveal = revealedEntityIds.Contains(obj->EntityId);
             // Preserve native range rejection. Leave render flags (including the game's
             // special exception) to Update; the plugin budget caps candidates, not draw calls.
             players.Add(new(candidate, decision, PlayerObjectIdentity.From(obj), index, reveal));

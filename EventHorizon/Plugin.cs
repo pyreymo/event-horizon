@@ -7,7 +7,9 @@ using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
+using EventHorizon.Application;
 using EventHorizon.Culling;
+using EventHorizon.Features;
 using EventHorizon.Localization;
 using EventHorizon.Settings;
 using EventHorizon.UI.Config;
@@ -66,6 +68,21 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService]
     internal static IKeyState KeyState { get; private set; } = null!;
 
+    [PluginService]
+    internal static IDtrBar DtrBar { get; private set; } = null!;
+
+    [PluginService]
+    internal static IAddonLifecycle AddonLifecycle { get; private set; } = null!;
+
+    [PluginService]
+    internal static INamePlateGui NamePlateGui { get; private set; } = null!;
+
+    [PluginService]
+    internal static IClientState ClientState { get; private set; } = null!;
+
+    [PluginService]
+    internal static ITextureProvider TextureProvider { get; private set; } = null!;
+
     #endregion
 
     #region State
@@ -76,6 +93,7 @@ public sealed class Plugin : IDalamudPlugin
     private ConfigWindow ConfigWindow { get; init; } = null!;
     internal CullingController Culling { get; private set; } = null!;
     private bool disposed;
+    internal FeatureHost Features { get; private set; } = null!;
 
     public int HiddenPlayerCount => Culling.HiddenPlayerCount;
     internal CullingStatus CullingStatus => Culling.GetStatus();
@@ -130,6 +148,23 @@ public sealed class Plugin : IDalamudPlugin
             ChatGui.ChatMessage += OnChatMessage;
             Framework.Update += OnFrameworkUpdate;
             Culling.Enable();
+            var featureStore = new FeatureConfigStore(PluginInterface, Log);
+            var api = new CullingApi(Culling, Configuration, SetPlayerHidingEnabled);
+            Features = new FeatureHost(
+                FeatureCatalog.Create(
+                    featureStore,
+                    api,
+                    api,
+                    OpenUi,
+                    (scope, command, action) => Features.RegisterCommand(scope, command, action),
+                    configurationLoadFailed
+                ),
+                featureStore,
+                Framework,
+                PluginInterface,
+                Log,
+                configurationLoadFailed
+            );
 
             PersistLoadedConfiguration(configurationLoadFailed || configurationNormalized);
             if (configurationLoadFailed)
@@ -199,7 +234,14 @@ public sealed class Plugin : IDalamudPlugin
         CommandManager.RemoveHandler(ShortCommandName);
 
         windowSystem.RemoveAllWindows();
-        Culling?.Dispose();
+        try
+        {
+            Features?.Dispose();
+        }
+        finally
+        {
+            Culling?.Dispose();
+        }
     }
 
     #endregion
@@ -208,6 +250,8 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnCommand(string command, string args)
     {
+        if (Features?.TryCommand(args.Trim()) == true)
+            return;
         switch (args.Trim().ToLowerInvariant())
         {
             case "on":

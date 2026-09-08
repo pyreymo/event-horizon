@@ -4,12 +4,16 @@ using System.Linq;
 using System.Reflection;
 using Dalamud.Configuration;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace EventHorizon.Settings;
 
 [Serializable]
 internal class Configuration : IPluginConfiguration
 {
+    [JsonExtensionData]
+    public IDictionary<string, JToken>? LegacySettings { get; set; }
+
     public int Version { get; set; } = 0;
 
     public bool HideAllOtherPlayers { get; set; } = true;
